@@ -74,7 +74,6 @@ print_usage() {
     echo -e "  ${GREEN}help${NC}              - Show this help message"
 }
 
-
 [ ! -x "$OPKG_BIN" ] && echo -e "${RED}[ERROR]${NC} opkg missing." && exit 1
 
 CMD="$1"; shift
@@ -93,7 +92,30 @@ EOF
 
     chmod +x /opt/bin/entwrap
     ln -sf /opt/bin/entwrap /opt/bin/ent
-    success "Installed entwrap CLI."
+
+    mkdir -p /opt/etc/bash_completion.d
+    cat > /opt/etc/bash_completion.d/entwrap << 'COMPLETION'
+_entwrap_complete() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    opts="search install remove info update upgrade list repair help"
+
+    if [ $COMP_CWORD -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+    elif [ $COMP_CWORD -eq 2 ]; then
+        if [ -f /opt/tmp/entpkg-cache.txt ]; then
+            COMPREPLY=( $(compgen -W "$(cat /opt/tmp/entpkg-cache.txt)" -- "${cur}") )
+        fi
+    fi
+}
+complete -F _entwrap_complete entwrap
+complete -F _entwrap_complete ent
+COMPLETION
+
+    /opt/bin/opkg list | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
+    success "Installed entwrap CLI with tab-completion."
 }
 
 # === Setup Safe opkg Wrapper ===
@@ -119,13 +141,6 @@ setup_bash_environment() {
 
     cat > "$HOME_DIR/.bashrc" << 'EOF'
 # WebOS Entware Environment
-# === Color Codes ===
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
 export PATH="/opt/bin:/opt/sbin:$PATH"
 export TERM=xterm-256color
 export LS_OPTIONS='--color=auto'
@@ -163,52 +178,24 @@ findf() {
 }
 
 helpme() {
-# === Color Codes ===
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-    echo -e "${CYAN}== WebOS SSH Quick Commands ==${NC}"
-    echo
-    echo -e "${CYAN}Navigation:${NC}"
-    echo -e "  ${GREEN}..${NC}   = Go up one directory"
-    echo -e "  ${GREEN}...${NC}  = Go up two directories"
-    echo
-    echo -e "${CYAN}File Listing:${NC}"
-    echo -e "  ${GREEN}ls${NC}     = List files (sorted, colorful)"
-    echo -e "  ${GREEN}ll${NC}     = Detailed list"
-    echo -e "  ${GREEN}l${NC}      = All files, hidden too"
-    echo -e "  ${GREEN}la${NC}     = List all files"
-    echo -e "  ${GREEN}lt${NC}     = List sorted by time"
-    echo
-    echo -e "${CYAN}System Info:${NC}"
-    echo -e "  ${GREEN}myip${NC}   = Show IP addresses"
-    echo -e "  ${GREEN}netinfo${NC}= Show network info/routes"
-    echo -e "  ${GREEN}dfh${NC}    = Disk usage (human readable)"
-    echo -e "  ${GREEN}up${NC}     = System uptime"
-    echo
-    echo -e "${CYAN}Package Management (Entware):${NC}"
-    echo -e "  ${GREEN}entup${NC}   = Update Entware package lists"
-    echo -e "  ${GREEN}entlist${NC} = List installed packages"
-    echo -e "  ${GREEN}entfix${NC}  = Repair Entware core packages"
-    echo -e "  ${GREEN}entwrap${NC} help = Show Entware commands"
-    echo
-    echo -e "${CYAN}Utilities:${NC}"
-    echo -e "  ${GREEN}edit${NC}    = Open nano editor"
-    echo -e "  ${GREEN}findf${NC}   = Search for files by pattern"
-    echo -e "  ${GREEN}reboot_safe${NC} = Cautious reboot"
-    echo
-    echo -e "${CYAN}Fun / Other:${NC}"
-    echo -e "  ${GREEN}grep${NC}    = Colored search inside files"
-    echo
+echo -e "${CYAN}== WebOS SSH Quick Commands ==${NC}\n"
+echo -e "${CYAN}Navigation:${NC}\n  ${GREEN}..${NC}, ${GREEN}...${NC}"
+echo -e "${CYAN}File Listing:${NC}\n  ${GREEN}ls, ll, l, la, lt${NC}"
+echo -e "${CYAN}System Info:${NC}\n  ${GREEN}myip, netinfo, dfh, up${NC}"
+echo -e "${CYAN}Package Management:${NC}\n  ${GREEN}entup, entlist, entfix, entwrap help${NC}"
+echo -e "${CYAN}Utilities:${NC}\n  ${GREEN}edit, findf, reboot_safe, grep${NC}"
 }
-
 EOF
 
     cat > "$HOME_DIR/.profile" << 'EOF'
 if [ -x /opt/bin/bash ]; then
+    . ~/.bashrc
     exec /opt/bin/bash -l
 fi
 EOF
