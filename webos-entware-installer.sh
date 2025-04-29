@@ -191,6 +191,13 @@ echo -e "${CYAN}System Info:${NC}\n  ${GREEN}myip, netinfo, dfh, up${NC}"
 echo -e "${CYAN}Package Management:${NC}\n  ${GREEN}entup, entlist, entfix, entwrap help${NC}"
 echo -e "${CYAN}Utilities:${NC}\n  ${GREEN}edit, findf, reboot_safe, grep${NC}"
 }
+
+# Load entwrap tab-completion if available
+if [ -f /opt/etc/bash_completion.d/entwrap ]; then
+  . /opt/etc/bash_completion.d/entwrap
+fi
+
+
 EOF
 
     cat > "$HOME_DIR/.profile" << 'EOF'
