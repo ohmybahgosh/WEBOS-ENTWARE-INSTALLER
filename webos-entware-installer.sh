@@ -140,7 +140,7 @@ setup_bash_environment() {
 export PATH="/opt/bin:/opt/sbin:$PATH"
 export TERM=xterm-256color
 export LS_OPTIONS='--color=auto'
-eval "`dircolors`"
+command -v dircolors >/dev/null 2>&1 && eval "`dircolors`"
 
 alias ls='ls $LS_OPTIONS -tr'
 alias ll='ls $LS_OPTIONS -l'
@@ -190,10 +190,23 @@ helpme() {
 }
 EOF
 
+    # Login bash reads ~/.bash_profile before ~/.profile, so it never re-runs
+    # the exec below. Without this, bash re-execs itself forever (issue #1).
+    cat > "$HOME_DIR/.bash_profile" << 'EOF'
+# Entware bash login (webos-entware-installer)
+[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+EOF
+
+    # Only switch interactive sh logins to bash, only once, and only if bash runs.
     cat > "$HOME_DIR/.profile" << 'EOF'
-if [ -x /opt/bin/bash ]; then
-    exec /opt/bin/bash -l
-fi
+# Entware bash switch (webos-entware-installer)
+case "$-" in
+    *i*)
+        if [ -z "$BASH_VERSION" ] && [ -x /opt/bin/bash ] && /opt/bin/bash -c true >/dev/null 2>&1; then
+            exec /opt/bin/bash -l
+        fi
+        ;;
+esac
 EOF
 
     success "Bash profile and aliases configured."
@@ -238,6 +251,9 @@ clean_old_entware() {
     mountpoint -q /opt && umount /opt
     rm -rf /mnt/lg/user/opt
     rm -f /var/lib/webosbrew/init.d/S99entware
+    for f in /home/root/.profile /home/root/.bash_profile; do
+        grep -qs -e "webos-entware-installer" -e "exec /opt/bin/bash -l" "$f" && rm -f "$f"
+    done
     success "Old Entware remnants cleaned."
 }
 
