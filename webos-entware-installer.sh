@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.1"
+VERSION="2.2"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -22,6 +22,7 @@ NC='\033[0m'
 BIND_SRC="/mnt/lg/user/opt"
 HOME_DIR="/home/root"
 INIT_SCRIPT="/var/lib/webosbrew/init.d/S99entware"
+BOOT_LOG="/tmp/webos-entware-boot.log"
 ENV_FILE="/opt/etc/webos-entware/bashrc"
 INFO_FILE="/opt/etc/webos-entware/install.info"
 MANAGER="/opt/bin/webos-entware"
@@ -92,12 +93,50 @@ is_ours() {
     grep -qs -e "$MARKER" -e "exec /opt/bin/bash -l" -e "# Entware SSH Environment for WebOS" "$1"
 }
 
-# Write stdin to a shell file, backing up a file that isn't ours first
+# Write stdin to a shell file. Your own file is backed up first, and so is
+# one of ours that changed since it was written (your edits, or an older
+# version), so a repair never throws anything away.
 write_managed() {
+    cat > "$1.entware-new"
+    if [ -f "$1" ] && cmp -s "$1.entware-new" "$1"; then
+        rm -f "$1.entware-new"
+        return 0
+    fi
     if [ -f "$1" ] && ! is_ours "$1" && [ ! -f "$1$BACKUP_SUFFIX" ]; then
         cp -p "$1" "$1$BACKUP_SUFFIX" && info "Backed up $1 to $1$BACKUP_SUFFIX"
+    elif [ -f "$1" ]; then
+        cp -p "$1" "$1.bak" && info "Saved the old $1 as $1.bak before updating it"
     fi
-    cat > "$1"
+    mv -f "$1.entware-new" "$1"
+}
+
+# ~/.bashrc as the installer writes it. Anything added below it is yours.
+bashrc_template() {
+    cat << 'BASHRC'
+# Entware bash settings (webos-entware-installer)
+# Add your own settings below. Repairing Entware keeps this file.
+[ -f "$HOME/.bashrc.pre-entware" ] && . "$HOME/.bashrc.pre-entware"
+[ -f /opt/etc/webos-entware/bashrc ] && . /opt/etc/webos-entware/bashrc
+BASHRC
+}
+
+# True when ~/.bashrc has lines the installer didn't write
+bashrc_edited() {
+    bashrc_template > /tmp/.webos-entware-bashrc.$$
+    grep -v '^#' "$1" | grep -vxF -f /tmp/.webos-entware-bashrc.$$ | grep -q '[^[:space:]]'
+    set -- $?
+    rm -f /tmp/.webos-entware-bashrc.$$
+    return "$1"
+}
+
+# How to repair from a shell. The copy saved in Entware's folder still works
+# after a reboot, even when /opt isn't mounted and /tmp was wiped.
+fix_cmd() {
+    if [ -f "$BIND_SRC/bin/webos-entware" ]; then
+        echo "sh $BIND_SRC/bin/webos-entware install"
+    else
+        echo "sh $0 install"
+    fi
 }
 
 opkg_works() { /opt/bin/opkg print-architecture 2>/dev/null | grep -q '^arch '; }
@@ -494,11 +533,12 @@ BASHRC
 
     mkdir -p "$HOME_DIR"
 
-    write_managed "$HOME_DIR/.bashrc" << 'BASHRC'
-# Entware bash settings (webos-entware-installer)
-[ -f "$HOME/.bashrc.pre-entware" ] && . "$HOME/.bashrc.pre-entware"
-[ -f /opt/etc/webos-entware/bashrc ] && . /opt/etc/webos-entware/bashrc
-BASHRC
+    # Keep a ~/.bashrc we already set up, so your edits survive a repair (issue #2)
+    if is_ours "$HOME_DIR/.bashrc" && grep -qs "$ENV_FILE" "$HOME_DIR/.bashrc"; then
+        info "Kept your $HOME_DIR/.bashrc as it is."
+    else
+        bashrc_template | write_managed "$HOME_DIR/.bashrc"
+    fi
 
     # Login bash reads ~/.bash_profile before ~/.profile. The guard in
     # ~/.profile makes sourcing it from bash safe (see issue #1).
@@ -512,6 +552,15 @@ PROFILE
     write_managed "$HOME_DIR/.profile" << 'PROFILE'
 # Entware shell setup (webos-entware-installer)
 [ -f "$HOME/.profile.pre-entware" ] && . "$HOME/.profile.pre-entware"
+# If the boot script didn't mount Entware at this boot, do it now (issue #2)
+if [ "$(id -u)" = 0 ] && [ -x /mnt/lg/user/opt/bin/opkg ] && ! grep -qs " /opt " /proc/mounts; then
+    if mount --bind /mnt/lg/user/opt /opt 2>/dev/null; then
+        echo "$(date '+%H:%M:%S') mounted /opt at login, the boot script hadn't" >> /tmp/webos-entware-boot.log
+        if [ -x /opt/etc/init.d/rc.unslung ]; then
+            (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung start >/dev/null 2>&1 &)
+        fi
+    fi
+fi
 if [ -d /opt/bin ]; then
     case ":$PATH:" in *:/opt/bin:*) ;; *) PATH="/opt/bin:/opt/sbin:$PATH"; export PATH ;; esac
 fi
@@ -538,11 +587,34 @@ install_boot_script() {
     cat > "$INIT_SCRIPT" << EOF
 #!/bin/sh
 # Mounts Entware at boot (webos-entware-installer)
-[ -x $BIND_SRC/bin/opkg ] || exit 0
-[ /opt -ef $BIND_SRC ] || mount --bind $BIND_SRC /opt || exit 0
-if [ -x /opt/etc/init.d/rc.unslung ]; then
-    (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung start >/dev/null 2>&1 &)
-fi
+# Notes what happened in $BOOT_LOG, which 'ent doctor' shows.
+# Runs in the background so it never holds up the rest of the boot.
+(
+    note() { echo "\$(date '+%H:%M:%S') \$1" >> $BOOT_LOG; }
+    note "boot script started"
+    n=0
+    while [ ! -x $BIND_SRC/bin/opkg ]; do
+        if [ \$n -ge 30 ]; then
+            note "gave up: $BIND_SRC/bin/opkg wasn't there after 60 seconds"
+            exit 0
+        fi
+        sleep 2
+        n=\$((n + 1))
+    done
+    if [ /opt -ef $BIND_SRC ]; then
+        note "/opt was already mounted"
+    elif mount --bind $BIND_SRC /opt 2>> $BOOT_LOG; then
+        note "mounted /opt"
+    else
+        note "failed to mount /opt"
+        exit 0
+    fi
+    if [ -x /opt/etc/init.d/rc.unslung ]; then
+        unset LD_PRELOAD LD_LIBRARY_PATH
+        /opt/etc/init.d/rc.unslung start >/dev/null 2>&1
+        note "started Entware services"
+    fi
+) < /dev/null > /dev/null 2>&1 &
 exit 0
 EOF
     chmod 755 "$INIT_SCRIPT"
@@ -660,6 +732,9 @@ install_entware() {
 restore_shell_files() {
     for f in .profile .bash_profile .bashrc; do
         p="$HOME_DIR/$f"
+        if [ "$f" = .bashrc ] && is_ours "$p" && bashrc_edited "$p"; then
+            mv -f "$p" "$p.entware-saved" && info "Your edited $p was saved as $p.entware-saved"
+        fi
         is_ours "$p" && rm -f "$p"
         if [ -f "$p$BACKUP_SUFFIX" ] && [ ! -e "$p" ]; then
             mv "$p$BACKUP_SUFFIX" "$p" && info "Restored your original $p"
@@ -734,17 +809,30 @@ show_status() {
         echo "Disk used:          $(du -sh "$BIND_SRC" 2>/dev/null | awk '{print $1}')"
     fi
     printf "Boot script:        "; yesno [ -x "$INIT_SCRIPT" ]
+    printf "Boot script log:    "
+    if [ -s "$BOOT_LOG" ]; then tail -n 1 "$BOOT_LOG"; else echo "none this boot"; fi
     printf "bash runs:          "; yesno /opt/bin/bash -c true
     printf "Shell files set up: "; yesno is_ours "$HOME_DIR/.profile"
     printf "ent, webos-entware: "; yesno helpers_ok
 
     [ "$(id -u)" -eq 0 ] || note "Run as root for a full check."
     hbc_present || issue "Homebrew Channel isn't installed, so /opt isn't mounted again after a reboot."
+    if opt_ours && grep -qs "at login" "$BOOT_LOG" && ! grep -qs "boot script started" "$BOOT_LOG"; then
+        note "The boot script didn't run at this boot, so your SSH login mounted /opt instead. Entware works, but its services only start once you log in. If this happens after every reboot, please open an issue on GitHub with this output."
+    fi
     [ -e "$TELNET_OFF" ] && note "Telnet is off in Homebrew Channel settings. Turning it on gives you a way back in if SSH breaks."
     if ! opt_ours; then
-        issue "Entware is installed but /opt isn't mounted, so the boot script didn't run (Homebrew Channel failsafe mode, or a missing script). Fix: sh $0 install"
+        if grep -qs -e "mounted /opt" -e "/opt was already mounted" "$BOOT_LOG"; then
+            issue "The boot script mounted /opt at boot, but this shell can't see it. Please report this on GitHub with this output. Fix for now: $(fix_cmd)"
+        elif [ -s "$BOOT_LOG" ]; then
+            issue "Entware is installed but /opt isn't mounted. The boot script ran but stopped: $(tail -n 1 "$BOOT_LOG"). Fix: $(fix_cmd)"
+        elif [ -x "$INIT_SCRIPT" ]; then
+            issue "Entware is installed but /opt isn't mounted, and the boot script didn't run at this boot, so the Homebrew Channel didn't run its boot scripts (failsafe mode, or its startup didn't run). Fix: $(fix_cmd)"
+        else
+            issue "Entware is installed but /opt isn't mounted. Fix: $(fix_cmd)"
+        fi
     elif ! opkg_works; then
-        issue "opkg doesn't run. Fix: sh $0 install, or uninstall and install again."
+        issue "opkg doesn't run. Fix: $(fix_cmd), or uninstall and install again."
     fi
     if [ "$BUILD" = aarch64-k3.10 ] && [ "$KERNEL_BITS" = 32 ]; then
         issue "The 64-bit build can't run on this 32-bit kernel. Fix: uninstall, then install again."
@@ -756,9 +844,9 @@ show_status() {
         fi
     fi
     hbc_present && [ ! -x "$INIT_SCRIPT" ] &&
-        issue "The boot script is missing, so /opt won't come back after a reboot. Fix: sh $0 install"
+        issue "The boot script is missing, so /opt won't come back after a reboot. Fix: $(fix_cmd)"
     opt_ours && is_ours "$HOME_DIR/.profile" && ! /opt/bin/bash -c true >/dev/null 2>&1 &&
-        issue "Your login is set to switch to bash, but bash doesn't run, so SSH stays on the stock shell. Fix: sh $0 install"
+        issue "Your login is set to switch to bash, but bash doesn't run, so SSH stays on the stock shell. Fix: $(fix_cmd)"
 
     [ -n "$NOTES" ] && { echo; info "Notes:$NOTES"; }
     echo

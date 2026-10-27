@@ -73,12 +73,12 @@ No external dependencies. One file, pure `/bin/sh`.
 - ✅ **Test-runs the build first**. If the 64-bit build can't run, it falls back to 32-bit.
 - ✅ **Never leaves a half install**. If a fresh install fails partway, everything it did is undone. A failed repair keeps your existing install and packages.
 - ✅ **Checks the result** when it finishes and prints a summary.
-- ✅ **Survives reboots** with a Homebrew Channel boot script that remounts `/opt` and starts Entware services.
+- ✅ **Survives reboots** with a Homebrew Channel boot script that remounts `/opt` and starts Entware services, plus a backup remount at SSH login if the boot script didn't run.
 - ✅ **`doctor` check** that shows what's installed and says exactly what to fix.
 - ✅ **`ent` helper** for searching, installing and checking packages, with Tab completion for `ent`, `opkg` and package names. `opkg` itself is never replaced.
 - ✅ **Saves itself as `webos-entware`**, so status, repair and uninstall work any time, even after a reboot wipes `/tmp`.
 - ✅ **Optional bash shell** with nano, colors, a neon prompt and handy aliases, plus a safe fallback to the stock shell if bash is ever missing or broken.
-- ✅ **Backs up your own `.profile` and `.bashrc`** and puts them back on uninstall.
+- ✅ **Backs up your own `.profile` and `.bashrc`** and puts them back on uninstall. Your edits to the installer's `.bashrc` survive a repair.
 - ✅ **Fixes "I have no name!"** by linking Entware to the system user files.
 - ✅ **Clean uninstall** that removes everything it added.
 
@@ -252,17 +252,23 @@ The aliases and prompt live in `/opt/etc/webos-entware/bashrc`, so they go away 
 | `/mnt/lg/user/opt` | Entware, all packages, and the `ent` and `webos-entware` commands |
 | `/opt` | Bind mount of the folder above |
 | `/var/lib/webosbrew/init.d/S99entware` | Boot script that remounts `/opt` and starts Entware services |
-| `/home/root/.profile` | Switches interactive SSH logins to bash (skipped with `--no-shell`) |
+| `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |
 | `/home/root/.bash_profile` | Loads `.profile` and `.bashrc` in bash |
-| `/home/root/.bashrc` | Loads the aliases and prompt |
+| `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |
 
-Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. Nothing else on the system is touched.
+Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. A repair keeps the installer's `.bashrc` as it is, edits included, and if it ever has to rewrite `.profile` or `.bash_profile` after you changed them, it saves your copy as `.bak` first. Uninstalling saves an edited `.bashrc` as `.bashrc.entware-saved`. Nothing else on the system is touched.
 
 ---
 
 ## Reboots
 
-The Homebrew Channel runs the scripts in `/var/lib/webosbrew/init.d` at every boot. The installer's `S99entware` script remounts `/opt` and starts any Entware services in `/opt/etc/init.d`. It does nothing if Entware has been removed.
+The Homebrew Channel runs the scripts in `/var/lib/webosbrew/init.d` at every boot. The installer's `S99entware` script remounts `/opt` and starts any Entware services in `/opt/etc/init.d`. It runs in the background, so it never holds up the boot, and gives up quietly if Entware has been removed.
+
+Each boot it notes what it did in `/tmp/webos-entware-boot.log`, and `doctor` shows the last line. If `doctor` says there is no boot log, the boot script never ran, which means the Homebrew Channel didn't run its boot scripts at that boot.
+
+As a backup, your SSH login also mounts `/opt` if the boot script didn't, so Entware and bash are there as soon as you log in. `doctor` tells you when that happened. Services in `/opt/etc/init.d` then start at login instead of at boot.
+
+> **Upgrading from a version before 2.1?** Those versions didn't write a boot script, so `/opt` was gone after every reboot. Run install once with the current version to add it.
 
 ---
 
@@ -293,7 +299,7 @@ telnet <tv-ip>               # Homebrew Channel telnet, if it's on
 
 From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `webos-entware install` to repair, or `webos-entware uninstall`.
 
-**Entware is gone after a reboot.** Run `doctor`. If the boot script is missing, run install again. The Homebrew Channel must be installed for boot scripts to run.
+**Entware is gone after a reboot.** Run `sh /mnt/lg/user/opt/bin/webos-entware doctor` (the saved copy works even while `/opt` isn't mounted). If the boot script is missing, run install again. If it says the boot script didn't run, the Homebrew Channel skipped its boot scripts at that boot: open the Homebrew Channel app once and check again. If the problem keeps coming back, please open an issue with the `doctor` output.
 
 **The TV crashed during boot.** On the next boot the Homebrew Channel starts in failsafe mode, skips boot scripts and opens telnet. Connect with telnet, remove `/var/lib/webosbrew/init.d/S99entware`, then reboot.
 
@@ -313,7 +319,9 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 **Does it change opkg?** No. `opkg` is Entware's own, untouched. `ent` is a separate helper.
 
-**Can I keep my own shell?** Yes. Install with `--no-shell`. Entware programs are in `/opt/bin` and `/opt/sbin`.
+**Can I keep my own shell?** Yes. Install with `--no-shell`. Entware programs are in `/opt/bin` and `/opt/sbin`. Without the shell setup there's no backup remount at login, so `/opt` depends on the boot script alone.
+
+**How is it tested?** `tests/run_tests.sh` runs install, repair, reboots and uninstall on a Linux PC as root, inside a private mount namespace with fake `wget` and `opkg`, under busybox sh, dash and bash. It doesn't touch the PC or download anything. It can't stand in for a real TV.
 
 ---
 
