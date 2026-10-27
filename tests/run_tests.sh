@@ -1,8 +1,8 @@
 #!/bin/bash
 # End-to-end tests for webos-entware-installer.sh on a Linux PC (not a TV).
 # Needs root and unshare. Runs in a private mount namespace, with tmpfs over
-# the TV paths and fake wget/opkg/uname, so nothing on the PC is changed and
-# nothing is downloaded.
+# the TV paths and fake wget/opkg/uname, so nothing is downloaded and the PC
+# is left as it was, apart from empty mount points it may create.
 # Usage: sudo tests/run_tests.sh [shell]   (default: busybox sh, like webOS)
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -56,6 +56,7 @@ cat > "$W/bin/wget" << F
 while [ \$# -gt 1 ]; do [ "\$1" = -O ] && OUT=\$2; shift; done
 case "\$1" in
     */installer/opkg) cp $W/fake-opkg "\$OUT" ;;
+    */webos-entware-installer.sh) cp $W/installer.sh "\$OUT" ;;
     */installer/opkg.conf) printf 'src/gz entware http://bin.entware.net/aarch64-k3.10\ndest root /\nlists_dir ext /opt/var/opkg-lists\n' > "\$OUT" ;;
     *) [ "\$OUT" = /dev/null ] || : > "\$OUT" ;;
 esac
@@ -155,6 +156,35 @@ rm -f /home/root/.bashrc* /home/root/.profile*
 run install -y; run uninstall -y
 ok "no .entware-saved file" '[ ! -e /home/root/.bashrc.entware-saved ]'
 ok "no .bashrc left" '[ ! -e /home/root/.bashrc ]'
+
+echo "== [$SH] 11. after a reboot, repair with the hint doctor gives"
+rm -f /home/root/.bashrc* /home/root/.profile*
+run install -y; reboot_tv skip-hbc
+(cd / && $SH /mnt/lg/user/opt/bin/webos-entware install -y) > "$W/out" 2>&1
+ok "repair from the saved copy works" 'grep -q "Entware installed successfully" "$W/out" && mounted'
+
+echo "== [$SH] 12. uninstall clears a second mount stacked on /opt"
+mount --bind /mnt/lg/user/opt /opt
+ok "two mounts on /opt" '[ "$(grep -c " /opt " /proc/mounts)" = 2 ]'
+run uninstall -y
+ok "both unmounted" '! mounted'
+ok "Entware folder removed" '[ ! -e /mnt/lg/user/opt ]'
+
+echo "== [$SH] 13. piped install still saves a copy of the installer"
+(cd /tmp && $SH -s -- install -y < "$W/installer.sh") > "$W/out" 2>&1
+ok "piped install succeeds" 'grep -q "Entware installed successfully" "$W/out"'
+ok "copy saved" 'grep -q webos-entware-installer /mnt/lg/user/opt/bin/webos-entware'
+run uninstall -y
+
+echo "== [$SH] 14. no Homebrew Channel: SSH login mounts /opt"
+umount /var/lib/webosbrew; mount -t tmpfs tmpfs /var/lib
+run install -y
+ok "install succeeds without a boot script" 'grep -q "Entware installed successfully" "$W/out" && [ ! -e /var/lib/webosbrew ]'
+ok "says logins will mount it" 'grep -q "mounted when you log in over SSH" "$W/out"'
+reboot_tv skip-hbc; login
+ok "login mounted /opt" 'mounted'
+run status; ok "doctor notes it, nothing to fix" 'grep -q "mounted when you log in over SSH, not at boot" "$W/out" && grep -q "Everything looks right" "$W/out"'
+run uninstall -y; umount /var/lib
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

@@ -99,7 +99,7 @@ No external dependencies. One file, pure `/bin/sh`.
 - An **internet connection** on the TV.
 - About **50 MB** free space.
 
-Without the Homebrew Channel, Entware still installs, but `/opt` won't come back after a reboot. The installer warns you and asks first.
+Without the Homebrew Channel, Entware still installs, but there's no boot script. With the shell setup, `/opt` comes back when you log in over SSH. With `--no-shell`, run install again after each reboot. The installer warns you and asks first.
 
 ---
 
@@ -195,7 +195,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 
 The installer also writes `/opt/etc/webos-entware/install.info` with the installer version, date, model, webOS version, firmware, kernel and build. It's handy to paste into a bug report.
 
-If you piped the installer into sh, there was no file to save. Download it once more to `/opt/bin/webos-entware` if you want the command.
+If you piped the installer into sh, there's no file to copy, so it saves the published version from GitHub instead. If that download fails, it tells you, and you can download it to `/opt/bin/webos-entware` yourself.
 
 ---
 

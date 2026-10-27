@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.2"
+VERSION="2.2.1"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -27,6 +27,7 @@ ENV_FILE="/opt/etc/webos-entware/bashrc"
 INFO_FILE="/opt/etc/webos-entware/install.info"
 MANAGER="/opt/bin/webos-entware"
 ENTWARE_BASE="http://bin.entware.net"
+SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
 MARKER="webos-entware-installer"
 BACKUP_SUFFIX=".pre-entware"
 OS_INFO="/var/run/nyx/os_info.json"
@@ -74,7 +75,7 @@ confirm() {
 
 usage() {
     echo "WebOS Entware Installer v$VERSION"
-    echo "Usage: sh $0 [install|uninstall|status|doctor] [options]"
+    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]"
     echo "  install        Install Entware, or repair an existing install (packages are kept)"
     echo "  uninstall      Remove Entware, its packages and the shell setup it added"
     echo "  status         Check the TV and the install, and say what to fix (alias: doctor)"
@@ -129,14 +130,28 @@ bashrc_edited() {
     return "$1"
 }
 
-# How to repair from a shell. The copy saved in Entware's folder still works
-# after a reboot, even when /opt isn't mounted and /tmp was wiped.
-fix_cmd() {
+# How to run this installer again from a shell. The copy saved in Entware's
+# folder works even after a reboot, when /opt isn't mounted and /tmp was
+# wiped. When the script was piped in there's no file to point to.
+run_cmd() {
     if [ -f "$BIND_SRC/bin/webos-entware" ]; then
-        echo "sh $BIND_SRC/bin/webos-entware install"
+        echo "sh $BIND_SRC/bin/webos-entware"
+    elif [ -f "$SELF" ] && grep -qs "$MARKER" "$SELF"; then
+        echo "sh $SELF"
     else
-        echo "sh $0 install"
+        echo "wget -O - $SCRIPT_URL | sh -s --"
     fi
+}
+fix_cmd() { echo "$(run_cmd) install"; }
+
+# Unmount /opt, including a second mount stacked on top of ours
+unmount_opt() {
+    n=0
+    while opt_ours && [ $n -lt 5 ]; do
+        umount /opt 2>/dev/null || umount -l /opt 2>/dev/null || break
+        n=$((n + 1))
+    done
+    ! opt_ours
 }
 
 opkg_works() { /opt/bin/opkg print-architecture 2>/dev/null | grep -q '^arch '; }
@@ -206,8 +221,9 @@ preflight() {
     [ -n "$KERNEL_BITS" ] || error_exit "Unsupported CPU type: $KERNEL_ARCH. Entware for webOS needs an ARM TV."
 
     if ! hbc_present; then
-        warn "Homebrew Channel isn't installed, so Entware won't be mounted again after a reboot."
-        confirm "Continue without boot persistence?" || exit 0
+        warn "Homebrew Channel isn't installed, so there's no boot script to mount Entware after a reboot."
+        [ "$SETUP_SHELL" = 1 ] && info "Your SSH logins will mount it instead."
+        confirm "Continue without a boot script?" || exit 0
     fi
 
     if ! wget -q -O /dev/null "$ENTWARE_BASE/armv7sf-k3.2/installer/opkg.conf"; then
@@ -344,7 +360,7 @@ bootstrap_opkg() {
     if grep -qs " /mnt/lg/user .*noexec" /proc/mounts; then
         error_exit "/mnt/lg/user is mounted noexec on this firmware, so programs stored there can't run."
     fi
-    error_exit "The Entware build didn't run on this TV. Try 'sh $0 install' again and pick the other build."
+    error_exit "The Entware build didn't run on this TV. Try '$(fix_cmd)' again and pick the other build."
 }
 
 # === Fix "I have no name!" Bug ===
@@ -422,8 +438,13 @@ ENTWRAP
     if [ -f "$SELF" ] && grep -qs "$MARKER" "$SELF"; then
         [ "$SELF" -ef "$MANAGER" ] || cp "$SELF" "$MANAGER"
         chmod 755 "$MANAGER"
-    elif [ ! -f "$MANAGER" ]; then
-        info "Couldn't save a copy of this installer (it was piped in). 'ent doctor' needs it: download it again to $MANAGER."
+    elif wget -q -O "$MANAGER.new" "$SCRIPT_URL" && grep -qs "$MARKER" "$MANAGER.new"; then
+        # Piped in, so there's no file to copy: save the published version
+        mv -f "$MANAGER.new" "$MANAGER"
+        chmod 755 "$MANAGER"
+    else
+        rm -f "$MANAGER.new"
+        [ -f "$MANAGER" ] || info "Couldn't save a copy of this installer. 'ent doctor' needs it: download it again to $MANAGER."
     fi
 
     mkdir -p /opt/etc/bash_completion.d
@@ -579,8 +600,12 @@ PROFILE
 # === Mount Entware on every boot ===
 install_boot_script() {
     if [ ! -d /var/lib/webosbrew ]; then
-        warn "Homebrew Channel boot hooks not found, so /opt won't come back after a reboot."
-        warn "Run 'sh $0 install' again after each reboot to remount it."
+        warn "Homebrew Channel boot hooks not found, so there's no boot script."
+        if is_ours "$HOME_DIR/.profile"; then
+            info "/opt will be mounted when you log in over SSH instead."
+        else
+            warn "Run '$(fix_cmd)' again after each reboot to remount /opt."
+        fi
         return 0
     fi
     mkdir -p "$(dirname "$INIT_SCRIPT")"
@@ -631,13 +656,13 @@ on_install_exit() {
         cd / || true
         rm -f "$INIT_SCRIPT"
         restore_shell_files
-        if opt_ours; then umount /opt 2>/dev/null || umount -l /opt 2>/dev/null; fi
+        unmount_opt
         [ "$CREATED_SRC" = 1 ] && rm -rf "$BIND_SRC"
         info "Undone. The TV is back to how it was before the install."
     elif [ "$INSTALLING" = 1 ]; then
         INSTALLING=0
         warn "The repair didn't finish. Your existing install and packages were kept."
-        info "Run 'sh $0 doctor' to see what needs fixing."
+        info "Run '$(run_cmd) doctor' to see what needs fixing."
     fi
 }
 
@@ -760,10 +785,7 @@ uninstall_entware() {
     restore_shell_files
 
     cd /
-    if opt_ours; then
-        umount /opt 2>/dev/null || umount -l /opt 2>/dev/null ||
-            warn "Couldn't unmount /opt. It will be gone after a reboot."
-    fi
+    unmount_opt || warn "Couldn't unmount /opt. It will be gone after a reboot."
     rm -rf "$BIND_SRC"
 
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
@@ -794,7 +816,7 @@ show_status() {
         echo "Installed:          no"
         echo "Recommended build:  $(build_label "$RECOMMENDED")"
         echo
-        info "Entware isn't installed. Run 'sh $0 install'."
+        info "Entware isn't installed. Run '$(fix_cmd)'."
         return 0
     fi
     BUILD=$(feed_build "$BIND_SRC/etc/opkg.conf")
@@ -816,7 +838,12 @@ show_status() {
     printf "ent, webos-entware: "; yesno helpers_ok
 
     [ "$(id -u)" -eq 0 ] || note "Run as root for a full check."
-    hbc_present || issue "Homebrew Channel isn't installed, so /opt isn't mounted again after a reboot."
+    if hbc_present; then :
+    elif is_ours "$HOME_DIR/.profile"; then
+        note "Homebrew Channel isn't installed, so /opt is mounted when you log in over SSH, not at boot."
+    else
+        issue "Homebrew Channel isn't installed, so /opt isn't mounted again after a reboot. Fix: install the Homebrew Channel, or install with the shell setup so SSH logins mount it."
+    fi
     if opt_ours && grep -qs "at login" "$BOOT_LOG" && ! grep -qs "boot script started" "$BOOT_LOG"; then
         note "The boot script didn't run at this boot, so your SSH login mounted /opt instead. Entware works, but its services only start once you log in. If this happens after every reboot, please open an issue on GitHub with this output."
     fi
