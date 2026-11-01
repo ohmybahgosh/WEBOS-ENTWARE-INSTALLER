@@ -16,7 +16,7 @@ fi
 
 W=$(mktemp -d /run/entware-test.XXXXXX)
 cp "$SCRIPT" "$W/installer.sh"
-for d in /mnt /tmp /var/lib/webosbrew /home/root; do
+for d in /mnt /tmp /var/lib/webosbrew /var/lib/opkg /var/cache/opkg /home/root; do
     mkdir -p "$d" && mount -t tmpfs tmpfs "$d"
 done
 mkdir -p /mnt/lg/user /var/lib/webosbrew/init.d
@@ -34,7 +34,8 @@ DB=/opt/lib/opkg/fake-installed
 mkdir -p /opt/lib/opkg; touch $DB
 case "$1" in
     print-architecture) echo "arch all 1"; echo "arch aarch64-3.10 10" ;;
-    update) echo "Updated list of available packages" ;;
+    update) [ -e /run/entware-fail-update ] && { echo "fake: update failed"; exit 1; }
+        echo "Updated list of available packages" ;;
     install) shift
         for p in "$@"; do
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
@@ -185,6 +186,94 @@ reboot_tv skip-hbc; login
 ok "login mounted /opt" 'mounted'
 run status; ok "doctor notes it, nothing to fix" 'grep -q "mounted when you log in over SSH, not at boot" "$W/out" && grep -q "Everything looks right" "$W/out"'
 run uninstall -y; umount /var/lib
+
+echo "== [$SH] 15. repair an install left by a 2025 version of the installer"
+rm -rf /home/root/.[!.]* /home/root/* /mnt/lg/user/opt /var/lib/webosbrew/init.d/*
+# Entware itself, with the old opkg wrapper and the real opkg renamed
+mkdir -p /mnt/lg/user/opt/bin /mnt/lg/user/opt/etc /mnt/lg/user/opt/lib/opkg /mnt/lg/user/opt/tmp
+cp "$W/fake-opkg" /mnt/lg/user/opt/bin/opkg.real
+printf '#!/bin/sh\necho "Use entwrap instead of direct opkg."\nexec /opt/bin/entwrap "$@"\n' > /mnt/lg/user/opt/bin/opkg
+chmod 755 /mnt/lg/user/opt/bin/opkg
+printf 'src/gz entware http://bin.entware.net/aarch64-k3.10\ndest root /\n' > /mnt/lg/user/opt/etc/opkg.conf
+printf 'set linenumbers\n' > /mnt/lg/user/opt/etc/nanorc
+# Old shell files, an older .profile.bak, and ~/.nanorc linked into /opt
+printf 'if [ -x /opt/bin/bash ]; then\n    exec /opt/bin/bash -l\nfi\n' > /home/root/.profile
+echo "my old profile backup" > /home/root/.profile.bak
+printf '# Source bashrc if it exists\nif [ -f ~/.bashrc ]; then\n    . ~/.bashrc\nfi\n' > /home/root/.bash_profile
+cp "$HERE/legacy-bashrc-2025.txt" /home/root/.bashrc
+printf "alias mine2025='echo kept'\nexport MYVAR=1\nalias ls='ls -la'\nexport PATH=\"\$PATH:/home/root/bin\"\n    echo indented-custom\n" >> /home/root/.bashrc
+ln -s /opt/etc/nanorc /home/root/.nanorc
+echo "old installer" > /home/root/webos-entware-installer.sh
+# Leftovers from an early attempt, plus a list and an old boot hook that aren't Entware's
+mkdir -p /var/lib/opkg/lists
+printf 'Package: entware-opt\nVersion: 1\n' > /var/lib/opkg/lists/entware
+printf 'Package: something-else\n' > /var/lib/opkg/lists/jacklul
+printf 'Package: entware-opt\n' | gzip > /var/cache/opkg/aaa_Packages.gz
+printf 'Package: other\n' | gzip > /var/cache/opkg/bbb_Packages.gz
+echo "old log" > /mnt/lg/user/entware_boot.log
+mkdir -p /mnt/lg/user/lib/opkg
+printf '#!/bin/sh\n# old entware hook\nSRC=/mnt/lg/user/opt\nDST=/opt\nmount --bind $SRC $DST\n' > /var/lib/webosbrew/init.d/S98entware-old
+printf '#!/bin/sh\n# mentions entware and /opt but mounts nothing\necho /opt\n' > /var/lib/webosbrew/init.d/S50notes
+printf '#!/bin/sh\necho unrelated\n' > /var/lib/webosbrew/init.d/S01fix-eth
+chmod 755 /var/lib/webosbrew/init.d/*
+run status
+ok "doctor lists the leftovers" 'grep -q "Leftovers from an earlier Entware setup" "$W/out" && grep -q "S98entware-old" "$W/out"'
+ok "doctor mentions old installer copies" 'grep -q "Old installer copies" "$W/out"'
+run install -y; ok "repair succeeds" 'grep -q "Entware installed successfully" "$W/out"'
+ok "real opkg put back" '! grep -q entwrap /mnt/lg/user/opt/bin/opkg && [ ! -e /mnt/lg/user/opt/bin/opkg.real ]'
+ok "older .profile.bak kept" 'grep -q "my old profile backup" /home/root/.profile.bak'
+ok "old .profile saved under a new name" 'grep -q "exec /opt/bin/bash -l" /home/root/.profile.bak.1'
+ok "old .bashrc saved" 'grep -q mine2025 /home/root/.bashrc.bak'
+ok "your alias and export carried over" 'grep -q "alias mine2025" /home/root/.bashrc && grep -q "export MYVAR=1" /home/root/.bashrc'
+ok "old template lines not carried over" '! grep -q -e "LS_OPTIONS=" -e "alias grep" -e "alias ll" -e "PATH=\"/opt/bin" /home/root/.bashrc'
+ok "your own overrides carried over" 'grep -q "alias ls=.ls -la." /home/root/.bashrc && grep -q "/home/root/bin" /home/root/.bashrc'
+ok "indented line listed, not moved" '! grep -q indented-custom /home/root/.bashrc && grep -q indented-custom "$W/out"'
+ok "new .bashrc parses" 'bash -n /home/root/.bashrc'
+ok "old .bash_profile backed up" 'grep -q "Source bashrc" /home/root/.bash_profile.pre-entware'
+ok "Entware list removed from webOS opkg" '[ ! -e /var/lib/opkg/lists/entware ] && [ ! -e /var/cache/opkg/aaa_Packages.gz ]'
+ok "other lists kept" '[ -e /var/lib/opkg/lists/jacklul ] && [ -e /var/cache/opkg/bbb_Packages.gz ]'
+ok "old boot log and empty lib folder removed" '[ ! -e /mnt/lg/user/entware_boot.log ] && [ ! -e /mnt/lg/user/lib/opkg ]'
+ok "old boot hook turned off, unrelated ones kept" '[ -e /var/lib/webosbrew/init.d/S98entware-old.entware-old ] && [ ! -e /var/lib/webosbrew/init.d/S98entware-old ] && [ -x /var/lib/webosbrew/init.d/S01fix-eth ] && [ -x /var/lib/webosbrew/init.d/S50notes ]'
+ok "nanorc kept and link works" 'grep -q linenumbers /home/root/.nanorc'
+ok "old installer copy left alone" '[ -e /home/root/webos-entware-installer.sh ]'
+out=$(echo 'alias ll; alias mine2025; echo "V=$MYVAR"; exit' | timeout 10 $SH -l -i 2>&1)
+ok "login shell has old and carried aliases" 'echo "$out" | grep -q "alias ll=" && echo "$out" | grep -q "alias mine2025=" && echo "$out" | grep -q "V=1"'
+run status; ok "doctor is happy after repair" 'grep -q "Everything looks right" "$W/out" && ! grep -q "Leftovers" "$W/out"'
+run install -y; ok "second repair changes nothing" '! grep -q -e "Saved the old" -e "Backed up" -e "Removed" "$W/out" && [ ! -e /home/root/.profile.bak.2 ]'
+run uninstall -y
+ok "uninstall removes the ~/.nanorc link" '[ ! -L /home/root/.nanorc ]'
+ok "uninstall keeps carried settings" 'grep -q mine2025 /home/root/.bashrc.entware-saved'
+ok "uninstall restores the old .bash_profile" 'grep -q "Source bashrc" /home/root/.bash_profile'
+
+echo "== [$SH] 16. a fresh install that fails puts old shell files back exactly"
+rm -rf /home/root/.[!.]* /home/root/* /mnt/lg/user/opt
+printf 'if [ -x /opt/bin/bash ]; then\n    exec /opt/bin/bash -l\nfi\nexport MYVAR=1\n' > /home/root/.profile
+printf '# Entware SSH Environment for WebOS\nalias x=y\n' > /home/root/.bashrc
+cp /home/root/.profile "$W/p16"; cp /home/root/.bashrc "$W/b16"
+touch /run/entware-fail-update
+run install -y; rm -f /run/entware-fail-update
+ok "install failed and rolled back" 'grep -q "being undone" "$W/out" && [ ! -e /mnt/lg/user/opt ] && ! mounted'
+ok "old .profile and .bashrc put back as they were" 'cmp -s /home/root/.profile "$W/p16" && cmp -s /home/root/.bashrc "$W/b16"'
+ok "no .bash_profile, backups or snapshots left behind" '[ -z "$(ls -A /home/root | grep -v -x -e .profile -e .bashrc)" ]'
+
+echo "== [$SH] 17. your own .profile that starts bash doesn't loop"
+rm -rf /home/root/.[!.]* /home/root/*
+printf 'exec /opt/bin/bash --login\n' > /home/root/.profile
+run install -y; ok "install succeeds" 'grep -q "Entware installed successfully" "$W/out"'
+ok "it was kept as .profile.pre-entware" 'grep -q -- "--login" /home/root/.profile.pre-entware'
+out=$(echo 'echo "BASH=[$BASH_VERSION]"; exit' | timeout 10 $SH -l -i 2>&1)
+ok "login ends in bash without looping" 'echo "$out" | grep -q "BASH=\[[0-9]"'
+run uninstall -y
+ok "your .profile restored" 'grep -q -- "--login" /home/root/.profile'
+
+echo "== [$SH] 18. uninstall won't delete a drive mounted inside Entware's folder"
+rm -rf /home/root/.[!.]* /home/root/*
+run install -y
+mkdir -p /mnt/lg/user/opt/share/usb && mount -t tmpfs tmpfs /mnt/lg/user/opt/share/usb && echo precious > /mnt/lg/user/opt/share/usb/file
+run uninstall -y
+ok "folder kept and the mounted drive untouched" 'grep -q "Something is still mounted" "$W/out" && grep -q precious /mnt/lg/user/opt/share/usb/file'
+umount /mnt/lg/user/opt/share/usb; run uninstall -y
+ok "uninstall finishes once it's unmounted" '[ ! -e /mnt/lg/user/opt ]'
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

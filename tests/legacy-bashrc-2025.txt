@@ -1,0 +1,52 @@
+# Entware SSH Environment for WebOS
+export PATH="/opt/bin:/opt/sbin:$PATH"
+export TERM=xterm-256color
+export LS_OPTIONS='--color=auto'
+#eval "`dircolors`"
+
+alias ls='ls $LS_OPTIONS -tr'
+alias ll='ls $LS_OPTIONS -l'
+alias l='ls $LS_OPTIONS -lAatrh'
+alias la='ls $LS_OPTIONS -lA'
+alias lt='ls $LS_OPTIONS -ltr'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias myip='ip a'
+alias netinfo='ip -4 address show; ip route show'
+alias dfh='df -h'
+alias up='uptime'
+alias grep='grep --color=auto'
+alias edit='nano'
+alias entup='entwrap update'
+alias entlist='entwrap list'
+alias entfix='entwrap repair'
+alias reboot_safe='echo "Rebooting..."; sleep 2; reboot'
+alias tr0='truncate -s0'
+
+# Neon PS1
+RED="\[\033[0;31m\]"
+GRN="\[\033[0;32m\]"
+YEL="\[\033[0;33m\]"
+MAG="\[\033[0;35m\]"
+RST="\[\033[0m\]"
+PS1="${MAG}\u${RST}@${GRN}\h${RST}:${YEL}\w${RST}\$ "
+
+# Tab completion
+if [ -f /opt/etc/bash_completion.d/entwrap ]; then
+    . /opt/etc/bash_completion.d/entwrap
+fi
+
+findf() {
+    [ -z "$1" ] && echo "Usage: findf <pattern>" && return 1
+    find . -iname "*$1*" 2>/dev/null | grep --color=auto "$1"
+}
+
+helpme() {
+    RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
+    echo -e "${CYAN}== WebOS SSH Quick Commands ==${NC}"
+    echo -e "${CYAN}Navigation:${NC}  ${GREEN}.. ...${NC}"
+    echo -e "${CYAN}File Ops:${NC}     ${GREEN}ls ll la lt tr0${NC}"
+    echo -e "${CYAN}Sys Info:${NC}     ${GREEN}myip netinfo dfh up${NC}"
+    echo -e "${CYAN}Entware:${NC}      ${GREEN}entup entlist entfix entwrap help${NC}"
+    echo -e "${CYAN}Utils:${NC}        ${GREEN}edit findf reboot_safe${NC}"
+}

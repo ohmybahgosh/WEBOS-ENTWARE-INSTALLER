@@ -58,6 +58,7 @@ No external dependencies. One file, pure `/bin/sh`.
 - [The ent helper](#the-ent-helper)
 - [Shell setup and shortcuts](#shell-setup-and-shortcuts)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
+  - [Upgrading from an older setup](#upgrading-from-an-older-setup)
 - [Reboots](#reboots)
 - [Uninstall](#uninstall)
 - [Troubleshooting and recovery](#troubleshooting-and-recovery)
@@ -250,13 +251,31 @@ The aliases and prompt live in `/opt/etc/webos-entware/bashrc`, so they go away 
 | Path | What |
 |:-----|:-----|
 | `/mnt/lg/user/opt` | Entware, all packages, and the `ent` and `webos-entware` commands |
-| `/opt` | Bind mount of the folder above |
+| `/opt` | Bind mount of the folder above. On webOS 25 the stock `/opt` only holds LG's factory test programs (`/opt/webos/tests`), which are hidden while Entware is mounted. Nothing on the TV needs them |
 | `/var/lib/webosbrew/init.d/S99entware` | Boot script that remounts `/opt` and starts Entware services |
 | `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |
 | `/home/root/.bash_profile` | Loads `.profile` and `.bashrc` in bash |
 | `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |
 
-Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. A repair keeps the installer's `.bashrc` as it is, edits included, and if it ever has to rewrite `.profile` or `.bash_profile` after you changed them, it saves your copy as `.bak` first. Uninstalling saves an edited `.bashrc` as `.bashrc.entware-saved`. Nothing else on the system is touched.
+Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. A repair keeps the installer's `.bashrc` as it is, edits included, and if it ever has to rewrite `.profile` or `.bash_profile` after you changed them, it saves your copy as `.bak` first (then `.bak.1`, `.bak.2` and so on, so an older backup is never overwritten). Uninstalling saves an edited `.bashrc` as `.bashrc.entware-saved`.
+
+If a fresh install fails partway, your shell files are put back exactly as they were, and the backups it made are removed.
+
+Apart from the leftovers described in [Upgrading from an older setup](#upgrading-from-an-older-setup), nothing else on the system is touched.
+
+### Upgrading from an older setup
+
+Run install. It finds an Entware folder left by an older version of this script (or by an early manual setup), keeps your packages, and repairs everything around it:
+
+- Puts the real `opkg` back where older versions had replaced it with a wrapper
+- Replaces the old shell files. Your old `.bashrc` is saved as `.bashrc.bak`. One-line settings you added to it yourself (`alias`, `export`, `NAME=value`) are moved to the end of the new `.bashrc`, so they still work and still win over the defaults. Anything else, like lines inside a function, is listed on screen for you to copy over yourself.
+- Writes the boot script, and turns off any older boot script that also mounts Entware on `/opt`. It is renamed with an `.entware-old` suffix, so it stops running but you can still read it.
+- Removes Entware package lists from webOS's own opkg folders (`/var/lib/opkg/lists/entware` and Entware's lists in `/var/cache/opkg`). These are left when Entware's opkg runs before `/opt` is set up. webOS doesn't use them, and lists from other feeds are left alone.
+- Removes an old boot log (`/mnt/lg/user/entware_boot.log`) and an empty `/mnt/lg/user/lib/opkg` folder from early setups
+
+The cleanup only runs once the install has passed its checks. `doctor` lists any of these leftovers, plus old copies of installer scripts in your home folder that you may want to delete.
+
+Your `nanorc` and other settings in `/opt/etc` are kept. Links in your home folder that point into Entware, like `~/.nanorc -> /opt/etc/nanorc`, keep working, and uninstall removes them.
 
 ---
 
@@ -280,7 +299,9 @@ webos-entware uninstall
 
 (or `sh /tmp/webos-entware-installer.sh uninstall` if you still have the downloaded copy)
 
-This asks first, then removes Entware, every package installed with it, the boot script and the shell files the installer wrote, and unmounts `/opt`. Your original shell files are put back. Disconnect and SSH in again afterwards.
+This asks first, then removes Entware, every package installed with it, the boot script and the shell files the installer wrote, links in your home folder that point into Entware, and unmounts `/opt`. Your original shell files are put back. Disconnect and SSH in again afterwards.
+
+If `/opt` can't be unmounted, or something (like a USB drive) is still mounted inside `/mnt/lg/user/opt`, the folder is kept rather than deleted. Fix that and run uninstall again.
 
 To reinstall later, just run the install again.
 
@@ -307,7 +328,7 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 **"No terminal to answer on."** The installer couldn't ask its questions. Run it from an SSH session, or add `-y` or `--arch=...`.
 
-**Installed with an older version of this script?** Run install again. It removes the old `opkg` wrapper and replaces the old shell files, keeping your packages.
+**Installed with an older version of this script?** Run install again. It keeps your packages and cleans up after the old version. See [Upgrading from an older setup](#upgrading-from-an-older-setup).
 
 ---
 

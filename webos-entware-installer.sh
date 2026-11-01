@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.2.1"
+VERSION="2.3.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -33,10 +33,15 @@ BACKUP_SUFFIX=".pre-entware"
 OS_INFO="/var/run/nyx/os_info.json"
 HBC_DIR="/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service"
 TELNET_OFF="/var/luna/preferences/webosbrew_telnet_disabled"
+# Left by early versions of this installer and early manual setups
+LEGACY_BOOT_LOG="/mnt/lg/user/entware_boot.log"
+LEGACY_LIB="/mnt/lg/user/lib/opkg"
 ASSUME_YES=0
 SETUP_SHELL=1
 FORCE_ARCH=""
 ROLLBACK=0
+SNAPSHOT=0
+NEW_BACKUPS=""
 
 # Full path to this script, for saving a copy after we cd elsewhere
 case "$0" in /*) SELF="$0" ;; *) SELF="$(pwd)/$0" ;; esac
@@ -91,22 +96,46 @@ opt_mounted() { grep -qs " /opt " /proc/mounts; }
 
 # True when a file was written by this installer (any version)
 is_ours() {
-    grep -qs -e "$MARKER" -e "exec /opt/bin/bash -l" -e "# Entware SSH Environment for WebOS" "$1"
+    grep -qs -e "^#.*$MARKER" -e "exec /opt/bin/bash -l" -e "^# Entware SSH Environment for WebOS" "$1"
 }
+
+# First free name based on $1: $1, then $1.1, $1.2... so an older backup
+# is never overwritten
+free_name() {
+    b="$1" n=1
+    while [ -e "$b" ] || [ -L "$b" ]; do
+        b="$1.$n"
+        n=$((n + 1))
+    done
+    echo "$b"
+}
+backup_name() { free_name "$1.bak"; }
 
 # Write stdin to a shell file. Your own file is backed up first, and so is
 # one of ours that changed since it was written (your edits, or an older
-# version), so a repair never throws anything away.
+# version), so a repair never throws anything away. LAST_BACKUP is set to
+# the backup it made, if any, and NEW_BACKUPS collects every backup this
+# run made, so a rollback can remove them. Call it with a redirect, not in a
+# pipeline, or those variables are lost in a subshell.
 write_managed() {
-    cat > "$1.entware-new"
+    LAST_BACKUP=""
+    if ! cat > "$1.entware-new"; then
+        rm -f "$1.entware-new"
+        warn "Couldn't write $1 (is the disk full?). It was left as it was."
+        return 1
+    fi
     if [ -f "$1" ] && cmp -s "$1.entware-new" "$1"; then
         rm -f "$1.entware-new"
         return 0
     fi
-    if [ -f "$1" ] && ! is_ours "$1" && [ ! -f "$1$BACKUP_SUFFIX" ]; then
-        cp -p "$1" "$1$BACKUP_SUFFIX" && info "Backed up $1 to $1$BACKUP_SUFFIX"
+    if [ -f "$1" ] && ! is_ours "$1" && [ ! -e "$1$BACKUP_SUFFIX" ]; then
+        LAST_BACKUP="$1$BACKUP_SUFFIX"
+        cp -p "$1" "$LAST_BACKUP" && info "Backed up $1 to $LAST_BACKUP"
+        NEW_BACKUPS="$NEW_BACKUPS $LAST_BACKUP"
     elif [ -f "$1" ]; then
-        cp -p "$1" "$1.bak" && info "Saved the old $1 as $1.bak before updating it"
+        LAST_BACKUP=$(backup_name "$1")
+        cp -p "$1" "$LAST_BACKUP" && info "Saved the old $1 as $LAST_BACKUP before updating it"
+        NEW_BACKUPS="$NEW_BACKUPS $LAST_BACKUP"
     fi
     mv -f "$1.entware-new" "$1"
 }
@@ -128,6 +157,133 @@ bashrc_edited() {
     set -- $?
     rm -f /tmp/.webos-entware-bashrc.$$
     return "$1"
+}
+
+# === Leftovers from older installers and early setups ===
+# Lines that older versions of this installer wrote to ~/.bashrc and that
+# the current environment file doesn't have word for word
+legacy_bashrc_lines() {
+    cat << 'LEGACY'
+# Entware SSH Environment for WebOS
+#eval "`dircolors`"
+export PATH="/opt/bin:/opt/sbin:$PATH"
+export LS_OPTIONS='--color=auto'
+alias grep='grep --color=auto'
+echo -e "${CYAN}Entware:${NC}      ${GREEN}entup entlist entfix entwrap help${NC}"
+find . -iname "*$1*" 2>/dev/null | grep --color=auto "$1"
+LEGACY
+}
+
+# Sorts the lines you added to a .bashrc from an older installer. One-line
+# settings at the top level (alias, export, NAME=) go to $2: they can move
+# to the new .bashrc as they are, below the line that loads the aliases, so
+# yours still win. Anything else goes to $3, since it may only make sense
+# next to the lines around it. Only lines an installer wrote word for word
+# are left out.
+legacy_custom_lines() {  # old_bashrc simple_out other_out
+    known=/tmp/.webos-entware-known.$$
+    { cat "$ENV_FILE" 2>/dev/null; legacy_bashrc_lines; } |
+        sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$known"
+    : > "$2"
+    : > "$3"
+    while IFS= read -r raw || [ -n "$raw" ]; do
+        line=$(printf '%s\n' "$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        case "$line" in ''|'#'*) continue ;; esac
+        grep -qxF -- "$line" "$known" && continue
+        name=""
+        case "$raw" in
+            [[:space:]]*) ;;
+            *) name=$(printf '%s\n' "$line" | sed -n \
+                -e 's/^alias[[:space:]][[:space:]]*\([^=[:space:]]*\)=.*/alias \1=/p' \
+                -e 's/^export[[:space:]][[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)=.*/export \1=/p' \
+                -e 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1=/p') ;;
+        esac
+        if [ -n "$name" ]; then
+            printf '%s\n' "$line" >> "$2"
+        else
+            printf '%s\n' "$line" >> "$3"
+        fi
+    done < "$1"
+    rm -f "$known"
+}
+
+# Boot scripts from older installers or manual setups that also mount
+# Entware. Two scripts racing to mount /opt can stack mounts at boot.
+old_boot_hooks() {
+    for f in /var/lib/webosbrew/init.d/*; do
+        [ -f "$f" ] && [ ! -L "$f" ] || continue
+        [ "$f" = "$INIT_SCRIPT" ] && continue
+        # run-parts only runs names made of letters, digits, _ and -
+        case "${f##*/}" in *[!A-Za-z0-9_-]*) continue ;; esac
+        grep -qsi entware "$f" && grep -qsE '^[^#]*mount[[:space:]]' "$f" &&
+            grep -qsE '^[^#]*/opt([/[:space:]"]|$)' "$f" && echo "$f"
+    done
+}
+
+# True when a package list (plain or gzipped) is Entware's
+entware_list() {
+    if command -v zcat >/dev/null 2>&1 && zcat "$1" > /dev/null 2>&1; then
+        zcat "$1" 2>/dev/null | grep -q '^Package: entware-opt$'
+    else
+        grep -qs '^Package: entware-opt$' "$1"
+    fi
+}
+
+# Entware package lists in webOS's own opkg folders. They come from running
+# Entware's opkg before /opt was set up, and webOS never reads them. Only
+# lists that hold Entware's packages are picked, and only when webOS's own
+# opkg setup has no feed named entware.
+stray_opkg_files() {
+    f=/var/lib/opkg/lists/entware
+    if [ -f "$f" ] && entware_list "$f" &&
+        ! grep -qs '^src.*[[:space:]]entware[[:space:]]' /etc/opkg.conf /etc/opkg/*.conf; then
+        echo "$f"
+    fi
+    for f in /var/cache/opkg/*_Packages.gz; do
+        [ -f "$f" ] && entware_list "$f" && echo "$f"
+    done
+}
+
+# Everything legacy_cleanup tidies, one path per line
+legacy_items() {
+    old_boot_hooks
+    stray_opkg_files
+    [ -f "$LEGACY_BOOT_LOG" ] && echo "$LEGACY_BOOT_LOG"
+    [ -d "$LEGACY_LIB" ] && [ -z "$(ls -A "$LEGACY_LIB" 2>/dev/null)" ] && echo "$LEGACY_LIB"
+    return 0
+}
+
+# Old boot scripts are renamed, not deleted: run-parts skips names with a
+# dot, so they stop running but you can still look at them
+legacy_cleanup() {
+    legacy_items | while IFS= read -r f; do
+        case "$f" in
+            /var/lib/webosbrew/init.d/*)
+                old=$(free_name "$f.entware-old")
+                mv "$f" "$old" &&
+                    info "Turned off an old Entware boot script that also mounted /opt: $f (kept as $old)" ;;
+            "$LEGACY_LIB")
+                rmdir "$f" 2>/dev/null && info "Removed the empty folder $f left by an earlier setup" ;;
+            *)
+                rm -f "$f" && info "Removed $f, left by an earlier Entware setup" ;;
+        esac
+    done
+}
+
+# Links in your home folder that point into Entware, like ~/.nanorc
+opt_links() {
+    for f in "$HOME_DIR"/.[!.]* "$HOME_DIR"/*; do
+        [ -L "$f" ] || continue
+        case "$(readlink "$f")" in /opt/*|"$BIND_SRC"/*) echo "$f" ;; esac
+    done
+}
+
+# Old copies of Entware installers in your home folder, for doctor to mention
+old_installer_copies() {
+    for f in "$HOME_DIR"/*.sh "$HOME_DIR"/*/*.sh; do
+        [ -f "$f" ] || continue
+        case "${f##*/}" in *[Ee]ntware*) echo "$f" ;; esac
+    done
 }
 
 # How to run this installer again from a shell. The copy saved in Entware's
@@ -164,7 +320,13 @@ json_get() {
 
 # Run a command with a time limit when busybox timeout is there
 limited() {
-    if command -v timeout >/dev/null 2>&1; then timeout 5 "$@"; else "$@"; fi
+    if timeout 1 true >/dev/null 2>&1; then
+        timeout 5 "$@"
+    elif timeout -t 1 true >/dev/null 2>&1; then
+        timeout -t 5 "$@"   # BusyBox before 1.30
+    else
+        "$@"
+    fi
 }
 
 # Fills TV_MODEL, WEBOS_RELEASE, WEBOS_NAME, FIRMWARE, KERNEL_ARCH, KERNEL_BITS
@@ -558,7 +720,7 @@ BASHRC
     if is_ours "$HOME_DIR/.bashrc" && grep -qs "$ENV_FILE" "$HOME_DIR/.bashrc"; then
         info "Kept your $HOME_DIR/.bashrc as it is."
     else
-        bashrc_template | write_managed "$HOME_DIR/.bashrc"
+        setup_bashrc
     fi
 
     # Login bash reads ~/.bash_profile before ~/.profile. The guard in
@@ -572,13 +734,20 @@ PROFILE
     # Only switch interactive sh logins to bash, only once, and only if bash runs.
     write_managed "$HOME_DIR/.profile" << 'PROFILE'
 # Entware shell setup (webos-entware-installer)
-[ -f "$HOME/.profile.pre-entware" ] && . "$HOME/.profile.pre-entware"
+# Your own login settings, once per login: the guard stops a loop if they
+# start bash themselves
+if [ -z "$WEBOS_ENTWARE_PRE" ] && [ -f "$HOME/.profile.pre-entware" ]; then
+    WEBOS_ENTWARE_PRE=1
+    export WEBOS_ENTWARE_PRE
+    . "$HOME/.profile.pre-entware"
+fi
 # If the boot script didn't mount Entware at this boot, do it now (issue #2)
-if [ "$(id -u)" = 0 ] && [ -x /mnt/lg/user/opt/bin/opkg ] && ! grep -qs " /opt " /proc/mounts; then
+if [ "$(id -u)" = 0 ] && [ -x /mnt/lg/user/opt/bin/opkg ] && ! grep -qs " /opt " /proc/mounts &&
+    ! [ /opt -ef /mnt/lg/user/opt ]; then
     if mount --bind /mnt/lg/user/opt /opt 2>/dev/null; then
         echo "$(date '+%H:%M:%S') mounted /opt at login, the boot script hadn't" >> /tmp/webos-entware-boot.log
         if [ -x /opt/etc/init.d/rc.unslung ]; then
-            (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung start >/dev/null 2>&1 &)
+            (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung start </dev/null >/dev/null 2>&1 &)
         fi
     fi
 fi
@@ -595,6 +764,40 @@ esac
 PROFILE
 
     success "Bash profile and aliases configured."
+}
+
+# Writes ~/.bashrc. One from an older installer has the aliases in it; they
+# now live in $ENV_FILE, and settings you added yourself are moved below the
+# new lines so they keep working.
+setup_bashrc() {
+    rc="$HOME_DIR/.bashrc"
+    simple=/tmp/.webos-entware-simple.$$
+    other=/tmp/.webos-entware-other.$$
+    : > "$simple"
+    : > "$other"
+    [ -f "$rc" ] && is_ours "$rc" && legacy_custom_lines "$rc" "$simple" "$other"
+    {
+        bashrc_template
+        if [ -s "$simple" ]; then
+            echo "# Carried over from your old .bashrc"
+            cat "$simple"
+        fi
+    } > "$simple.rc"
+    # Never write a .bashrc that bash can't read
+    if [ -s "$simple" ] && ! /opt/bin/bash -n "$simple.rc" >/dev/null 2>&1; then
+        bashrc_template > "$simple.rc"
+        warn "The settings carried over from your old .bashrc didn't parse, so they were left out."
+        cat "$simple" >> "$other"
+        : > "$simple"
+    fi
+    write_managed "$rc" < "$simple.rc" || : > "$simple"
+    [ -s "$simple" ] && info "Moved $(wc -l < "$simple" | tr -d ' ') of your own settings from the old .bashrc to the new one."
+    if [ -s "$other" ]; then
+        warn "Your old .bashrc had lines that weren't moved, because they may depend on the lines around them:"
+        sed 's/^/    /' "$other"
+        info "They're still in ${LAST_BACKUP:-the old file}. Copy any you want to the end of $rc."
+    fi
+    rm -f "$simple" "$other" "$simple.rc"
 }
 
 # === Mount Entware on every boot ===
@@ -646,6 +849,33 @@ EOF
     success "Installed boot script $INIT_SCRIPT."
 }
 
+# Copies of the shell files as they were before a fresh install, so a
+# rollback puts back exactly what was there (even files from an old setup)
+snapshot_shell_files() {
+    for f in .profile .bash_profile .bashrc; do
+        p="${HOME_DIR:?}/$f"
+        rm -f "${p:?}.entware-rollback"
+        [ -f "$p" ] && cp -p "$p" "$p.entware-rollback"
+    done
+    SNAPSHOT=1
+}
+rollback_shell_files() {
+    for f in .profile .bash_profile .bashrc; do
+        p="${HOME_DIR:?}/$f"
+        if [ -f "$p.entware-rollback" ]; then
+            mv -f "$p.entware-rollback" "$p"
+        else
+            rm -f "${p:?}"
+        fi
+    done
+    for b in $NEW_BACKUPS; do rm -f "${b:?}"; done
+}
+drop_snapshot() {
+    for f in .profile .bash_profile .bashrc; do
+        rm -f "${HOME_DIR:?}/${f:?}.entware-rollback"
+    done
+}
+
 # === Install Entware ===
 # Runs on any exit while installing: a fresh install that didn't finish is
 # undone, so the TV is never left half set up
@@ -655,7 +885,7 @@ on_install_exit() {
         warn "The install didn't finish, so its changes are being undone."
         cd / || true
         rm -f "$INIT_SCRIPT"
-        restore_shell_files
+        [ "$SNAPSHOT" = 1 ] && rollback_shell_files
         unmount_opt
         [ "$CREATED_SRC" = 1 ] && rm -rf "$BIND_SRC"
         info "Undone. The TV is back to how it was before the install."
@@ -717,6 +947,7 @@ install_entware() {
         choose_build
         CREATED_SRC=0
         [ -e "$BIND_SRC" ] || CREATED_SRC=1
+        snapshot_shell_files
         ROLLBACK=1
     fi
     trap on_install_exit EXIT
@@ -743,6 +974,8 @@ install_entware() {
     install_boot_script
     verify_install
     ROLLBACK=0 INSTALLING=0
+    drop_snapshot
+    legacy_cleanup
     write_install_info
 
     success "Entware installed successfully!"
@@ -758,7 +991,8 @@ restore_shell_files() {
     for f in .profile .bash_profile .bashrc; do
         p="$HOME_DIR/$f"
         if [ "$f" = .bashrc ] && is_ours "$p" && bashrc_edited "$p"; then
-            mv -f "$p" "$p.entware-saved" && info "Your edited $p was saved as $p.entware-saved"
+            saved=$(free_name "$p.entware-saved")
+            mv "$p" "$saved" && info "Your edited $p was saved as $saved"
         fi
         is_ours "$p" && rm -f "$p"
         if [ -f "$p$BACKUP_SUFFIX" ] && [ ! -e "$p" ]; then
@@ -783,10 +1017,19 @@ uninstall_entware() {
     fi
     rm -f "$INIT_SCRIPT"
     restore_shell_files
+    opt_links | while IFS= read -r f; do
+        rm -f "$f" && info "Removed $f, a link into Entware"
+    done
+    legacy_cleanup
 
     cd /
-    unmount_opt || warn "Couldn't unmount /opt. It will be gone after a reboot."
-    rm -rf "$BIND_SRC"
+    if ! unmount_opt; then
+        warn "Couldn't unmount /opt, so $BIND_SRC was kept. Reboot the TV and run uninstall again to remove it."
+    elif grep -qs " $BIND_SRC/" /proc/mounts; then
+        warn "Something is still mounted inside $BIND_SRC, so it was kept to avoid deleting that. Unmount it, then run uninstall again."
+    else
+        rm -rf "${BIND_SRC:?}"
+    fi
 
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
     success "Entware removed."
@@ -847,6 +1090,10 @@ show_status() {
     if opt_ours && grep -qs "at login" "$BOOT_LOG" && ! grep -qs "boot script started" "$BOOT_LOG"; then
         note "The boot script didn't run at this boot, so your SSH login mounted /opt instead. Entware works, but its services only start once you log in. If this happens after every reboot, please open an issue on GitHub with this output."
     fi
+    LEFT=$(legacy_items | tr '\n' ' ')
+    [ -n "$LEFT" ] && note "Leftovers from an earlier Entware setup were found: $LEFT. Install tidies them up: $(fix_cmd)"
+    COPIES=$(old_installer_copies | tr '\n' ' ')
+    [ -n "$COPIES" ] && note "Old installer copies you can delete if you don't need them: $COPIES"
     [ -e "$TELNET_OFF" ] && note "Telnet is off in Homebrew Channel settings. Turning it on gives you a way back in if SSH breaks."
     if ! opt_ours; then
         if grep -qs -e "mounted /opt" -e "/opt was already mounted" "$BOOT_LOG"; then
