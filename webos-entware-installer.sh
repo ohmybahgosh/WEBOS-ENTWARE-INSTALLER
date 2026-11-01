@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.4.0"
+VERSION="2.5.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -30,6 +30,8 @@ UPDATEDB_CONF="/opt/etc/updatedb.conf"
 UPDATEDB_WRAPPER="/opt/bin/updatedb-webos"
 LOCATE_DB="/opt/var/mlocate/mlocate.db"
 LOCATE_CRON="/opt/etc/cron.hourly/updatedb"
+NANORC="/opt/etc/nanorc"
+CA_FILE="/opt/etc/ssl/certs/ca-certificates.crt"
 ENTWARE_BASE="http://bin.entware.net"
 SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
 MARKER="webos-entware-installer"
@@ -565,7 +567,7 @@ unset LD_PRELOAD LD_LIBRARY_PATH
 print_usage() {
     printf '%b\n' "${CYAN}ent${NC} - Entware package helper for webOS (plain opkg works too)"
     printf '%b\n' "  ${GREEN}search${NC} <text>    Search available packages"
-    printf '%b\n' "  ${GREEN}install${NC} <pkg>    Install packages (ent install mlocate also sets up locate)"
+    printf '%b\n' "  ${GREEN}install${NC} <pkg>    Install packages, plus the webOS setup some need (nano, mlocate, HTTPS)"
     printf '%b\n' "  ${GREEN}remove${NC} <pkg>     Remove packages"
     printf '%b\n' "  ${GREEN}info${NC} <pkg>       Show package details"
     printf '%b\n' "  ${GREEN}files${NC} <pkg>      List the files a package installed"
@@ -585,10 +587,9 @@ need_pkg() { [ -n "$1" ] || { printf '%b\n' "${RED}Name a package, e.g. ent $2 h
 case "$1" in
   search) shift; $OPKG_BIN list | grep -i -- "${1:-.}" | awk '{printf "\033[0;32m%s\033[0m - %s\n", $1, substr($0, index($0,$2))}' ;;
   install) shift; need_pkg "$1" install; $OPKG_BIN install "$@" || exit $?
-    # mlocate needs extra setup on webOS, see webos-entware locate
-    for p in "$@"; do
-        if [ "$p" = mlocate ] && [ -f "$MANAGER" ]; then sh "$MANAGER" locate; break; fi
-    done ;;
+    # Setup some packages need on webOS: nano's syntax colors, HTTPS
+    # certificates for OpenSSL and Python, and locate (mlocate)
+    [ -f "$MANAGER" ] && sh "$MANAGER" post-install "$@" ;;
   remove) shift; need_pkg "$1" remove; $OPKG_BIN remove "$@" ;;
   info) shift; need_pkg "$1" info; $OPKG_BIN info "$@" ;;
   files) shift; need_pkg "$1" files; $OPKG_BIN files "$@" ;;
@@ -812,6 +813,87 @@ setup_bashrc() {
         info "They're still in ${LAST_BACKUP:-the old file}. Copy any you want to the end of $rc."
     fi
     rm -f "$simple" "$other" "$simple.rc"
+}
+
+# === nano ===
+# nano-full ships syntax highlighting for over 130 languages, but its stock
+# nanorc has every line commented out, so nano starts with no colors.
+nanorc_stock() { ! grep -qsvE '^[[:space:]]*(#|$)' "$NANORC"; }
+nanorc_colors() { grep -qs '^[[:space:]]*include.*/opt/share/nano' "$NANORC"; }
+
+setup_nanorc() {
+    [ -x /opt/bin/nano ] || return 0
+    if [ -f "$NANORC" ] && ! grep -qs "^#.*$MARKER" "$NANORC" && ! nanorc_stock; then
+        info "Kept your own $NANORC."
+        return 0
+    fi
+    cat > "$NANORC.entware-new" << 'NANORC'
+# nano settings for webOS (webos-entware-installer)
+# Repairing Entware rewrites this file. To keep your own settings, delete
+# the line above and the installer will leave the file alone. Your own
+# ~/.nanorc is read after this file, so settings there win.
+
+# Line numbers, and the cursor position on the status bar
+set linenumbers
+set constantshow
+# Reopen files where you left off, and remember searches
+set positionlog
+set historylog
+
+# Other common settings, off by default:
+# set mouse          (click to move the cursor; hold Shift to select text)
+# set autoindent
+# set tabsize 4
+# set softwrap
+
+# Syntax colors for every language nano-full ships
+include "/opt/share/nano/*.nanorc"
+include "/opt/share/nano/extra/*.nanorc"
+NANORC
+    mv -f "$NANORC.entware-new" "$NANORC"
+    mkdir -p "$HOME_DIR/.local/share/nano"
+    success "nano set up with syntax colors and line numbers ($NANORC)."
+}
+
+# === HTTPS certificates ===
+# Programs built on Entware's OpenSSL (wget-ssl, git, openssl-util) and
+# Python look for certificates in /opt/etc/ssl, which stays empty unless
+# ca-bundle is installed. curl and others built on libcurl get it as a
+# dependency; most others don't, so HTTPS fails with certificate errors.
+pkg_installed() { [ -f "/opt/lib/opkg/info/$1.control" ]; }
+needs_ca() {
+    for p in libopenssl python3-light python3 libgnutls libmbedtls libwolfssl; do
+        pkg_installed "$p" && return 0
+    done
+    return 1
+}
+ca_ok() { [ -s "$CA_FILE" ]; }
+
+ensure_ca() {
+    needs_ca || return 0
+    ca_ok && return 0
+    info "Installing ca-bundle, so HTTPS works in programs like wget-ssl, git and Python..."
+    if /opt/bin/opkg install ca-bundle >/dev/null 2>&1 && ca_ok; then
+        success "HTTPS certificates installed ($CA_FILE)."
+    else
+        warn "ca-bundle didn't install, so HTTPS may fail with certificate errors. Try: ent install ca-bundle"
+    fi
+}
+
+# Run by ent install with the packages it just installed
+post_install_action() {
+    opt_ours || exit 0
+    do_nano=0 do_locate=0
+    for p in "$@"; do
+        case "$p" in
+            nano|nano-full|nano-plus) do_nano=1 ;;
+            mlocate) do_locate=1 ;;
+        esac
+    done
+    [ "$do_nano" = 1 ] && setup_nanorc
+    ensure_ca
+    [ "$do_locate" = 1 ] && locate_action
+    return 0
 }
 
 # === locate (mlocate) ===
@@ -1122,6 +1204,8 @@ install_entware() {
         info "Skipped the shell setup. Entware programs are in /opt/bin and /opt/sbin."
     fi
     install_boot_script
+    setup_nanorc
+    ensure_ca
     if [ "$WITH_LOCATE" = 1 ] || locate_installed; then
         setup_locate || true
     fi
@@ -1232,6 +1316,22 @@ show_status() {
     printf "bash runs:          "; yesno /opt/bin/bash -c true
     printf "Shell files set up: "; yesno is_ours "$HOME_DIR/.profile"
     printf "ent, webos-entware: "; yesno helpers_ok
+    printf "nano colors:        "
+    if [ ! -x /opt/bin/nano ]; then
+        echo "nano not installed"
+    elif nanorc_colors; then
+        log "$GREEN" "on"
+    else
+        log "$YELLOW" "off (your own $NANORC has no syntax includes)"
+    fi
+    printf "HTTPS certificates: "
+    if ca_ok; then
+        log "$GREEN" "yes"
+    elif needs_ca; then
+        log "$RED" "missing"
+    else
+        echo "not needed yet"
+    fi
     printf "locate (mlocate):   "
     if ! locate_installed; then
         echo "not installed (optional: webos-entware locate)"
@@ -1280,6 +1380,10 @@ show_status() {
             note "The 32-bit build works here, but the 64-bit build is faster. To switch: uninstall, then install with --arch=aarch64-k3.10."
         fi
     fi
+    needs_ca && ! ca_ok &&
+        issue "HTTPS certificates are missing, so wget-ssl, git and Python can't check HTTPS sites. Fix: ent install ca-bundle"
+    [ -x /opt/bin/nano ] && nanorc_stock &&
+        issue "nano has no settings, so it starts without syntax colors. Fix: $(fix_cmd)"
     locate_installed && ! locate_ready &&
         issue "mlocate is installed but not set up for webOS, so updatedb fails. Fix: $(run_cmd) locate"
     hbc_present && [ ! -x "$INIT_SCRIPT" ] &&
@@ -1299,6 +1403,11 @@ show_status() {
 
 # === Arguments ===
 ACTION=""
+if [ "$1" = post-install ]; then
+    shift
+    post_install_action "$@"
+    exit 0
+fi
 for arg in "$@"; do
     case "$arg" in
         install|uninstall|status|locate) ACTION="$arg" ;;

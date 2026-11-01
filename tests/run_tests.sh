@@ -40,11 +40,16 @@ case "$1" in
         for p in "$@"; do
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
             echo "$p" >> $DB
+            mkdir -p /opt/lib/opkg/info; touch /opt/lib/opkg/info/$p.control
             case "$p" in
                 entware-opt) mkdir -p /opt/etc/init.d
                     printf '#!/bin/sh\necho "$1" >> /tmp/rc.unslung.log\n' > /opt/etc/init.d/rc.unslung
                     chmod 755 /opt/etc/init.d/rc.unslung ;;
                 bash) printf '#!/bin/sh\nexec /bin/bash "$@"\n' > /opt/bin/bash; chmod 755 /opt/bin/bash ;;
+                nano-full) printf '#!/bin/sh\n' > /opt/bin/nano; chmod 755 /opt/bin/nano
+                    [ -f /opt/etc/nanorc ] || printf '## stock nanorc\n# set linenumbers\n# include "/opt/share/nano/*.nanorc"\n' > /opt/etc/nanorc ;;
+                wget-ssl) touch /opt/lib/opkg/info/libopenssl.control ;;
+                ca-bundle) mkdir -p /opt/etc/ssl/certs; echo CERTS > /opt/etc/ssl/certs/ca-certificates.crt ;;
                 mlocate)
                     printf '#!/bin/sh\ngrep -q "^mlocate:" /etc/group || { echo "updatedb: can not find group mlocate"; exit 1; }\nmkdir -p /opt/var/mlocate; echo built > /opt/var/mlocate/mlocate.db\n' > /opt/bin/updatedb
                     printf '#!/bin/sh\necho locate\n' > /opt/bin/locate
@@ -59,7 +64,9 @@ case "$1" in
     remove) shift
         for p in "$@"; do
             grep -vx "$p" $DB > $DB.new; mv $DB.new $DB
+            rm -f /opt/lib/opkg/info/$p.control
             [ "$p" = mlocate ] && rm -f /opt/bin/updatedb /opt/bin/locate
+            [ "$p" = ca-bundle ] && rm -f /opt/etc/ssl/certs/ca-certificates.crt
         done ;;
     list-installed) sed 's/$/ - 1/' $DB ;;
     list) echo "bash - 5.3"; echo "nano-full - 8.7" ;;
@@ -336,6 +343,40 @@ run install -y --with-locate
 ok "install sets up locate too" 'grep -q "Entware installed successfully" "$W/out" && grep -q "locate is ready" "$W/out" && [ -x /opt/bin/updatedb-webos ]'
 run uninstall -y
 ok "uninstall removes it with Entware" '[ ! -e /mnt/lg/user/opt ]'
+
+echo "== [$SH] 23. nano gets syntax colors on install"
+rm -rf /home/root/.[!.]* /home/root/*
+run install -y
+ok "nanorc written with the syntax includes" 'grep -q "^include \"/opt/share/nano/\*.nanorc\"" /opt/etc/nanorc && grep -q "^set linenumbers" /opt/etc/nanorc && grep -q webos-entware-installer /opt/etc/nanorc'
+ok "nano history folder made" '[ -d /home/root/.local/share/nano ]'
+run status
+ok "doctor shows nano colors on, certificates not needed" 'grep -q "nano colors:.*on" "$W/out" && grep -q "HTTPS certificates: not needed yet" "$W/out" && grep -q "Everything looks right" "$W/out"'
+
+echo "== [$SH] 24. your own nanorc is kept, a stock one is replaced"
+printf 'set mouse\n' > /opt/etc/nanorc
+run install -y
+ok "your nanorc kept" '[ "$(cat /opt/etc/nanorc)" = "set mouse" ] && grep -q "Kept your own /opt/etc/nanorc" "$W/out"'
+run status
+ok "doctor says colors are off in your own file, not an issue" 'grep -q "nano colors:.*off (your own" "$W/out" && grep -q "Everything looks right" "$W/out"'
+printf '# only comments\n\n#set linenumbers\n' > /opt/etc/nanorc
+run status
+ok "doctor flags a stock nanorc" 'grep -q "nano has no settings" "$W/out"'
+(cd /tmp && $SH /opt/bin/entwrap install nano-full) > "$W/out" 2>&1
+ok "ent install nano-full sets it up" 'grep -q "nano set up with syntax colors" "$W/out" && grep -q webos-entware-installer /opt/etc/nanorc'
+
+echo "== [$SH] 25. HTTPS certificates come with OpenSSL programs"
+(cd /tmp && $SH /opt/bin/entwrap install htop) > "$W/out" 2>&1
+ok "a package without OpenSSL doesn't pull in ca-bundle" '! grep -qx ca-bundle /opt/lib/opkg/fake-installed'
+(cd /tmp && $SH /opt/bin/entwrap install wget-ssl) > "$W/out" 2>&1
+ok "ent install wget-ssl adds ca-bundle" 'grep -qx ca-bundle /opt/lib/opkg/fake-installed && [ -s /opt/etc/ssl/certs/ca-certificates.crt ] && grep -q "HTTPS certificates installed" "$W/out"'
+run status
+ok "doctor shows certificates" 'grep -q "HTTPS certificates: .*yes" "$W/out" && grep -q "Everything looks right" "$W/out"'
+(cd /tmp && $SH /opt/bin/entwrap remove ca-bundle) > /dev/null 2>&1
+run status
+ok "doctor flags missing certificates" 'grep -q "HTTPS certificates are missing" "$W/out"'
+run install -y
+ok "repair puts them back" '[ -s /opt/etc/ssl/certs/ca-certificates.crt ] && grep -q "HTTPS certificates installed" "$W/out"'
+run uninstall -y
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

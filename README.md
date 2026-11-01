@@ -57,6 +57,8 @@ No external dependencies. One file, pure `/bin/sh`.
 - [Managing the install](#managing-the-install)
 - [The ent helper](#the-ent-helper)
 - [Shell setup and shortcuts](#shell-setup-and-shortcuts)
+- [nano](#nano)
+- [HTTPS certificates](#https-certificates)
 - [locate (mlocate)](#locate-mlocate)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
   - [Upgrading from an older setup](#upgrading-from-an-older-setup)
@@ -208,7 +210,7 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 | Command | What it does |
 |:--------|:-------------|
 | `ent search <text>` | Search available packages |
-| `ent install <pkg>` | Install packages |
+| `ent install <pkg>` | Install packages, plus the webOS setup some need (nano colors, HTTPS certificates, locate) |
 | `ent remove <pkg>` | Remove packages |
 | `ent info <pkg>` | Show package details |
 | `ent files <pkg>` | List the files a package installed |
@@ -244,6 +246,22 @@ Unless you use `--no-shell`, the installer adds bash, nano-full and dircolors, a
 | `reboot_safe` | Reboot after a short delay |
 
 The aliases and prompt live in `/opt/etc/webos-entware/bashrc`, so they go away with Entware.
+
+---
+
+## nano
+
+nano-full ships syntax colors for over 130 languages, but its stock `/opt/etc/nanorc` has every line commented out, so nano starts plain. The installer writes a nanorc that turns on all of them, with line numbers, the cursor position on the status bar, and reopening files where you left off. Common extras (mouse, autoindent, tab size, soft wrap) are listed in the file, commented out.
+
+It only replaces a stock nanorc or one it wrote itself (marked on its first line), so a nanorc you've edited is kept. Settings in your own `~/.nanorc` are read afterwards and win. Installing nano with `ent install nano-full` sets it up too.
+
+---
+
+## HTTPS certificates
+
+Programs built on Entware's OpenSSL (`wget-ssl`, `git`, `openssl-util`) and Python check HTTPS sites against `/opt/etc/ssl/certs/ca-certificates.crt`, which only exists once `ca-bundle` is installed. `curl` and anything else built on libcurl pull it in themselves, but most others don't, so their HTTPS downloads fail with certificate errors.
+
+Whenever OpenSSL or Python is installed, through `ent install` or found during a repair, the installer adds `ca-bundle`. `doctor` shows whether the certificates are there, and flags it when a program needs them and they're missing.
 
 ---
 
