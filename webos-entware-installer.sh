@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.3.0"
+VERSION="2.4.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -26,6 +26,10 @@ BOOT_LOG="/tmp/webos-entware-boot.log"
 ENV_FILE="/opt/etc/webos-entware/bashrc"
 INFO_FILE="/opt/etc/webos-entware/install.info"
 MANAGER="/opt/bin/webos-entware"
+UPDATEDB_CONF="/opt/etc/updatedb.conf"
+UPDATEDB_WRAPPER="/opt/bin/updatedb-webos"
+LOCATE_DB="/opt/var/mlocate/mlocate.db"
+LOCATE_CRON="/opt/etc/cron.hourly/updatedb"
 ENTWARE_BASE="http://bin.entware.net"
 SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
 MARKER="webos-entware-installer"
@@ -38,6 +42,7 @@ LEGACY_BOOT_LOG="/mnt/lg/user/entware_boot.log"
 LEGACY_LIB="/mnt/lg/user/lib/opkg"
 ASSUME_YES=0
 SETUP_SHELL=1
+WITH_LOCATE=0
 FORCE_ARCH=""
 ROLLBACK=0
 SNAPSHOT=0
@@ -80,13 +85,15 @@ confirm() {
 
 usage() {
     echo "WebOS Entware Installer v$VERSION"
-    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]"
+    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor|locate] [options]"
     echo "  install        Install Entware, or repair an existing install (packages are kept)"
     echo "  uninstall      Remove Entware, its packages and the shell setup it added"
     echo "  status         Check the TV and the install, and say what to fix (alias: doctor)"
+    echo "  locate         Set up locate/updatedb (mlocate) for webOS, with an hourly refresh"
     echo "Options:"
     echo "  -y, --yes      Don't ask; use the recommended build and answer yes"
     echo "  --no-shell     Install Entware only, leave .profile/.bashrc and the shell alone"
+    echo "  --with-locate  Also set up locate (same as running locate after install)"
     echo "  --arch=ARCH    Use aarch64-k3.10 (64-bit) or armv7sf-k3.2 (32-bit) without asking"
 }
 
@@ -558,7 +565,7 @@ unset LD_PRELOAD LD_LIBRARY_PATH
 print_usage() {
     printf '%b\n' "${CYAN}ent${NC} - Entware package helper for webOS (plain opkg works too)"
     printf '%b\n' "  ${GREEN}search${NC} <text>    Search available packages"
-    printf '%b\n' "  ${GREEN}install${NC} <pkg>    Install packages"
+    printf '%b\n' "  ${GREEN}install${NC} <pkg>    Install packages (ent install mlocate also sets up locate)"
     printf '%b\n' "  ${GREEN}remove${NC} <pkg>     Remove packages"
     printf '%b\n' "  ${GREEN}info${NC} <pkg>       Show package details"
     printf '%b\n' "  ${GREEN}files${NC} <pkg>      List the files a package installed"
@@ -577,7 +584,11 @@ need_pkg() { [ -n "$1" ] || { printf '%b\n' "${RED}Name a package, e.g. ent $2 h
 
 case "$1" in
   search) shift; $OPKG_BIN list | grep -i -- "${1:-.}" | awk '{printf "\033[0;32m%s\033[0m - %s\n", $1, substr($0, index($0,$2))}' ;;
-  install) shift; need_pkg "$1" install; $OPKG_BIN install "$@" ;;
+  install) shift; need_pkg "$1" install; $OPKG_BIN install "$@" || exit $?
+    # mlocate needs extra setup on webOS, see webos-entware locate
+    for p in "$@"; do
+        if [ "$p" = mlocate ] && [ -f "$MANAGER" ]; then sh "$MANAGER" locate; break; fi
+    done ;;
   remove) shift; need_pkg "$1" remove; $OPKG_BIN remove "$@" ;;
   info) shift; need_pkg "$1" info; $OPKG_BIN info "$@" ;;
   files) shift; need_pkg "$1" files; $OPKG_BIN files "$@" ;;
@@ -634,7 +645,7 @@ _entwrap_complete() {
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
 _webos_entware_complete() {
-    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor --help" -- "${COMP_WORDS[1]}") )
+    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate --help" -- "${COMP_WORDS[1]}") )
 }
 complete -F _entwrap_complete entwrap ent opkg
 complete -F _webos_entware_complete webos-entware
@@ -697,6 +708,9 @@ if [ -f /opt/etc/bash_completion.d/entwrap ]; then
     . /opt/etc/bash_completion.d/entwrap
 fi
 
+# locate: on webOS updatedb runs through a wrapper (see webos-entware locate)
+[ -x /opt/bin/updatedb ] && [ -x /opt/bin/updatedb-webos ] && alias updatedb='updatedb-webos'
+
 findf() {
     [ -z "$1" ] && echo "Usage: findf <pattern>" && return 1
     find . -iname "*$1*" 2>/dev/null | grep -i -- "$1"
@@ -709,7 +723,7 @@ helpme() {
     echo -e "${CYAN}File Ops:${NC}     ${GREEN}ls ll la lt tr0${NC}"
     echo -e "${CYAN}Sys Info:${NC}     ${GREEN}myip netinfo dfh up${NC}"
     echo -e "${CYAN}Entware:${NC}      ${GREEN}ent help, ent search, ent install, ent doctor${NC}"
-    echo -e "${CYAN}Manager:${NC}      ${GREEN}webos-entware status | install | uninstall${NC}"
+    echo -e "${CYAN}Manager:${NC}      ${GREEN}webos-entware status | install | uninstall | locate${NC}"
     echo -e "${CYAN}Utils:${NC}        ${GREEN}edit findf reboot_safe${NC}"
 }
 BASHRC
@@ -798,6 +812,142 @@ setup_bashrc() {
         info "They're still in ${LAST_BACKUP:-the old file}. Copy any you want to the end of $rc."
     fi
     rm -f "$simple" "$other" "$simple.rc"
+}
+
+# === locate (mlocate) ===
+# Entware's mlocate doesn't work on webOS out of the box: it ships no
+# settings, so updatedb would index every file two to four times (webOS
+# mounts the same storage at several paths), and updatedb refuses to run
+# without an "mlocate" group, which webOS doesn't have. This writes the
+# settings, a wrapper that provides the group without touching system
+# files, and an hourly cron job.
+locate_installed() { [ -x /opt/bin/updatedb ] && [ -x /opt/bin/locate ]; }
+locate_ready() { locate_installed && [ -x "$UPDATEDB_WRAPPER" ] && [ -f "$UPDATEDB_CONF" ]; }
+
+write_updatedb_conf() {
+    if [ -f "$UPDATEDB_CONF" ] && ! grep -qs "^#.*$MARKER" "$UPDATEDB_CONF"; then
+        info "Kept your own $UPDATEDB_CONF."
+        return 0
+    fi
+    cat > "$UPDATEDB_CONF" << 'UPDATEDB'
+# updatedb settings for webOS (webos-entware-installer)
+# Repairing Entware rewrites this file. To keep your own settings, delete
+# the line above and the installer will leave the file alone.
+#
+# webOS mounts the same storage at several paths, so without these excludes
+# locate would list most files two to four times. Each file is indexed under
+# one path only:
+#   data partition: /home, /var, /opt and /mnt/lg/user
+#     (/mnt/lg/cmn_data and /mnt/lg/flash are the same partition again)
+#   app store: /media (/mnt/lg/appstore is the same partition)
+#   app database: /var/db (/mnt/lg/db8 is the same partition)
+#   app jails (/var/palm/jail): each one re-mounts system folders for one app
+#
+# Bind mounts are kept on purpose, since /opt and /home are bind mounts.
+PRUNE_BIND_MOUNTS = "no"
+
+# Virtual and in-memory filesystems. tmpfs covers /tmp, /run and /dev/shm,
+# and also USB drives, which webOS mounts under /tmp/usb
+PRUNEFS = "proc sysfs devtmpfs devpts tmpfs ramfs cgroup cgroup2 debugfs tracefs configfs securityfs pstore bpf fusectl mqueue binfmt_misc autofs usbfs vfat exfat ntfs fuseblk nfs nfs4 cifs smbfs"
+
+PRUNEPATHS = "/proc /sys /dev /run /tmp /var/tmp /var/volatile /var/run /var/lock /var/palm/jail /mnt/lg/cmn_data /mnt/lg/flash /mnt/lg/appstore /mnt/lg/db8 /mnt/lg/user/opt /mnt/lg/user/home /mnt/lg/user/var /opt/tmp /opt/var/mlocate"
+
+PRUNENAMES = ".git .bzr .hg .svn"
+UPDATEDB
+}
+
+write_updatedb_wrapper() {
+    cat > "$UPDATEDB_WRAPPER" << 'WRAPPER'
+#!/bin/sh
+# updatedb for webOS (webos-entware-installer)
+# mlocate's updatedb won't run without an "mlocate" group, and webOS's
+# /etc/group has none. Rather than edit system files, the group is added
+# only inside a private mount namespace while updatedb runs, so nothing on
+# the system changes. Settings are in /opt/etc/updatedb.conf. Arguments are
+# passed to updatedb.
+unset LD_PRELOAD LD_LIBRARY_PATH
+REAL=/opt/bin/updatedb
+if [ ! -x "$REAL" ]; then
+    [ -t 2 ] && echo "mlocate isn't installed. Install it with: ent install mlocate" >&2
+    exit 0
+fi
+if grep -q '^mlocate:' /etc/group 2>/dev/null; then
+    exec nice -n 19 "$REAL" "$@"
+fi
+if ! command -v unshare >/dev/null 2>&1; then
+    echo "updatedb-webos: this firmware has no unshare, so updatedb can't be given its group." >&2
+    exit 1
+fi
+# A group number /etc/group doesn't use
+gid=475
+while grep -q "^[^:]*:[^:]*:$gid:" /etc/group 2>/dev/null; do gid=$((gid + 1)); done
+G=/opt/etc/updatedb.group
+{ cat /etc/group; echo "mlocate:x:$gid:"; } > "$G.new" && mv -f "$G.new" "$G" || exit 1
+PROP="--propagation private"
+unshare -m $PROP true 2>/dev/null || PROP=""
+exec unshare -m $PROP sh -c '
+    mount --bind /opt/etc/updatedb.group /etc/group || exit 1
+    exec nice -n 19 /opt/bin/updatedb "$@"' updatedb "$@"
+WRAPPER
+    chmod 755 "$UPDATEDB_WRAPPER"
+}
+
+# Hourly refresh with Entware's cron, which the boot script starts
+setup_locate_cron() {
+    if [ ! -x /opt/sbin/cron ]; then
+        info "Installing cron for the hourly refresh..."
+        if ! /opt/bin/opkg install cron; then
+            warn "cron didn't install, so the database won't refresh on its own. Run updatedb when you need it."
+            return 0
+        fi
+    fi
+    # Entware's stock crontab runs /opt/bin/run-parts on these folders, but
+    # the cron package only ships it as run-parts-vixie
+    if [ ! -e /opt/bin/run-parts ] && [ -x /opt/bin/run-parts-vixie ]; then
+        ln -s run-parts-vixie /opt/bin/run-parts
+    fi
+    mkdir -p /opt/etc/cron.1min /opt/etc/cron.5mins /opt/etc/cron.hourly \
+        /opt/etc/cron.daily /opt/etc/cron.weekly /opt/etc/cron.monthly
+    cat > "$LOCATE_CRON" << CRONJOB
+#!/bin/sh
+# Refreshes the locate database every hour (webos-entware-installer)
+exec $UPDATEDB_WRAPPER
+CRONJOB
+    chmod 755 "$LOCATE_CRON"
+    if [ -x /opt/etc/init.d/S10cron ]; then
+        (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/S10cron start </dev/null >/dev/null 2>&1)
+    fi
+}
+
+# Never stops an install: a problem here is only a warning
+setup_locate() {
+    if ! opt_ours; then
+        warn "/opt isn't mounted, so locate can't be set up. Run '$(fix_cmd)' first."
+        return 1
+    fi
+    if ! locate_installed; then
+        info "Installing mlocate..."
+        if ! /opt/bin/opkg install mlocate || ! locate_installed; then
+            warn "mlocate didn't install, so locate wasn't set up."
+            return 1
+        fi
+    fi
+    write_updatedb_conf
+    write_updatedb_wrapper
+    setup_locate_cron
+    if "$UPDATEDB_WRAPPER"; then
+        success "locate is ready. The database refreshes every hour, or run updatedb (alias for updatedb-webos)."
+    else
+        warn "Building the locate database failed. Run $UPDATEDB_WRAPPER to see why."
+        return 1
+    fi
+}
+
+locate_action() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    setup_locate || exit 1
+    [ "$SETUP_SHELL" = 1 ] && info "Log in again (or run: alias updatedb=updatedb-webos) to use plain updatedb."
+    return 0
 }
 
 # === Mount Entware on every boot ===
@@ -972,6 +1122,9 @@ install_entware() {
         info "Skipped the shell setup. Entware programs are in /opt/bin and /opt/sbin."
     fi
     install_boot_script
+    if [ "$WITH_LOCATE" = 1 ] || locate_installed; then
+        setup_locate || true
+    fi
     verify_install
     ROLLBACK=0 INSTALLING=0
     drop_snapshot
@@ -1079,6 +1232,16 @@ show_status() {
     printf "bash runs:          "; yesno /opt/bin/bash -c true
     printf "Shell files set up: "; yesno is_ours "$HOME_DIR/.profile"
     printf "ent, webos-entware: "; yesno helpers_ok
+    printf "locate (mlocate):   "
+    if ! locate_installed; then
+        echo "not installed (optional: webos-entware locate)"
+    elif ! locate_ready; then
+        log "$RED" "installed, not set up"
+    elif [ -f "$LOCATE_DB" ]; then
+        log "$GREEN" "ready, database from $(date -r "$LOCATE_DB" '+%Y-%m-%d %H:%M' 2>/dev/null)"
+    else
+        log "$YELLOW" "set up, database not built yet"
+    fi
 
     [ "$(id -u)" -eq 0 ] || note "Run as root for a full check."
     if hbc_present; then :
@@ -1117,6 +1280,8 @@ show_status() {
             note "The 32-bit build works here, but the 64-bit build is faster. To switch: uninstall, then install with --arch=aarch64-k3.10."
         fi
     fi
+    locate_installed && ! locate_ready &&
+        issue "mlocate is installed but not set up for webOS, so updatedb fails. Fix: $(run_cmd) locate"
     hbc_present && [ ! -x "$INIT_SCRIPT" ] &&
         issue "The boot script is missing, so /opt won't come back after a reboot. Fix: $(fix_cmd)"
     opt_ours && is_ours "$HOME_DIR/.profile" && ! /opt/bin/bash -c true >/dev/null 2>&1 &&
@@ -1136,11 +1301,12 @@ show_status() {
 ACTION=""
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status) ACTION="$arg" ;;
+        install|uninstall|status|locate) ACTION="$arg" ;;
         doctor) ACTION="status" ;;
         clean) ACTION="uninstall" ;;
         -y|--yes) ASSUME_YES=1 ;;
         --no-shell) SETUP_SHELL=0 ;;
+        --with-locate) WITH_LOCATE=1 ;;
         --arch=aarch64-k3.10|--arch=armv7sf-k3.2) FORCE_ARCH="${arg#--arch=}" ;;
         -h|--help) usage; exit 0 ;;
         *) usage; exit 1 ;;
@@ -1159,13 +1325,15 @@ if [ -z "$ACTION" ]; then
     echo "1) Install or repair Entware"
     echo "2) Uninstall Entware"
     echo "3) Check status (doctor)"
-    echo "4) Exit"
+    echo "4) Set up locate (mlocate)"
+    echo "5) Exit"
     echo
-    read_answer "Choose an option [1-4]: " || exit 1
+    read_answer "Choose an option [1-5]: " || exit 1
     case "$ANSWER" in
         1) ACTION="install" ;;
         2) ACTION="uninstall" ;;
         3) ACTION="status" ;;
+        4) ACTION="locate" ;;
         *) log "$CYAN" "Goodbye!"; exit 0 ;;
     esac
 fi
@@ -1174,4 +1342,5 @@ case "$ACTION" in
     install) install_entware ;;
     uninstall) uninstall_entware ;;
     status) show_status ;;
+    locate) locate_action ;;
 esac

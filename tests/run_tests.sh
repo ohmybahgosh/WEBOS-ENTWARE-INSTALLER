@@ -45,7 +45,21 @@ case "$1" in
                     printf '#!/bin/sh\necho "$1" >> /tmp/rc.unslung.log\n' > /opt/etc/init.d/rc.unslung
                     chmod 755 /opt/etc/init.d/rc.unslung ;;
                 bash) printf '#!/bin/sh\nexec /bin/bash "$@"\n' > /opt/bin/bash; chmod 755 /opt/bin/bash ;;
+                mlocate)
+                    printf '#!/bin/sh\ngrep -q "^mlocate:" /etc/group || { echo "updatedb: can not find group mlocate"; exit 1; }\nmkdir -p /opt/var/mlocate; echo built > /opt/var/mlocate/mlocate.db\n' > /opt/bin/updatedb
+                    printf '#!/bin/sh\necho locate\n' > /opt/bin/locate
+                    chmod 755 /opt/bin/updatedb /opt/bin/locate ;;
+                cron) mkdir -p /opt/sbin /opt/etc/init.d
+                    printf '#!/bin/sh\n' > /opt/sbin/cron
+                    printf '#!/bin/sh\nfor f in "$1"/*; do [ -x "$f" ] && "$f"; done\n' > /opt/bin/run-parts-vixie
+                    printf '#!/bin/sh\necho "cron $1" >> /tmp/cron.log\n' > /opt/etc/init.d/S10cron
+                    chmod 755 /opt/sbin/cron /opt/bin/run-parts-vixie /opt/etc/init.d/S10cron ;;
             esac
+        done ;;
+    remove) shift
+        for p in "$@"; do
+            grep -vx "$p" $DB > $DB.new; mv $DB.new $DB
+            [ "$p" = mlocate ] && rm -f /opt/bin/updatedb /opt/bin/locate
         done ;;
     list-installed) sed 's/$/ - 1/' $DB ;;
     list) echo "bash - 5.3"; echo "nano-full - 8.7" ;;
@@ -274,6 +288,54 @@ run uninstall -y
 ok "folder kept and the mounted drive untouched" 'grep -q "Something is still mounted" "$W/out" && grep -q precious /mnt/lg/user/opt/share/usb/file'
 umount /mnt/lg/user/opt/share/usb; run uninstall -y
 ok "uninstall finishes once it's unmounted" '[ ! -e /mnt/lg/user/opt ]'
+
+echo "== [$SH] 19. ent install mlocate sets up locate for webOS"
+rm -rf /home/root/.[!.]* /home/root/*
+run install -y
+md5sum /etc/group > "$W/group.md5"
+(cd /tmp && $SH /opt/bin/entwrap install mlocate) > "$W/out" 2>&1
+ok "setup ran and said it's ready" 'grep -q "locate is ready" "$W/out"'
+ok "cron installed for the refresh" 'grep -qx cron /opt/lib/opkg/fake-installed'
+ok "settings written with the excludes" 'grep -q "^PRUNEPATHS.*/var/palm/jail.*/mnt/lg/cmn_data" /opt/etc/updatedb.conf'
+ok "database built through the wrapper" 'grep -q built /opt/var/mlocate/mlocate.db'
+ok "plain updatedb fails, as on a real TV" '! /opt/bin/updatedb >/dev/null 2>&1'
+ok "system group file untouched, nothing left mounted" 'md5sum -c --status "$W/group.md5" && ! grep -q " /etc/group " /proc/mounts'
+ok "hourly job written, run-parts linked, cron started" '[ -x /opt/etc/cron.hourly/updatedb ] && [ -L /opt/bin/run-parts ] && grep -q "cron start" /tmp/cron.log'
+rm -f /opt/var/mlocate/mlocate.db; /opt/bin/run-parts /opt/etc/cron.hourly
+ok "the hourly job rebuilds the database" 'grep -q built /opt/var/mlocate/mlocate.db'
+out=$(echo 'alias updatedb; exit' | timeout 10 $SH -l -i 2>&1)
+ok "updatedb is an alias for the wrapper at login" 'echo "$out" | grep -q "updatedb-webos"'
+run status
+ok "doctor shows locate ready" 'grep -q "locate (mlocate):.*ready, database from" "$W/out" && grep -q "Everything looks right" "$W/out"'
+
+echo "== [$SH] 20. repair keeps locate working, and your own updatedb.conf"
+rm -f /opt/bin/updatedb-webos
+printf 'PRUNEPATHS = "/mine"\n' > /opt/etc/updatedb.conf
+run status
+ok "doctor flags the missing wrapper" 'grep -q "mlocate is installed but not set up" "$W/out"'
+run install -y
+ok "repair puts the wrapper back" '[ -x /opt/bin/updatedb-webos ] && grep -q "locate is ready" "$W/out"'
+ok "your own updatedb.conf kept" 'grep -q mine /opt/etc/updatedb.conf && grep -q "Kept your own /opt/etc/updatedb.conf" "$W/out"'
+rm -f /opt/etc/updatedb.conf; run locate
+ok "webos-entware locate writes the settings again" 'grep -q webos-entware-installer /opt/etc/updatedb.conf'
+run install -y
+ok "repair rewrites its own updatedb.conf without a message" '! grep -q "Kept your own" "$W/out"'
+
+echo "== [$SH] 21. removing mlocate leaves nothing that errors"
+(cd /tmp && $SH /opt/bin/entwrap remove mlocate) > /dev/null 2>&1
+ok "wrapper exits quietly" '/opt/bin/updatedb-webos < /dev/null > "$W/w" 2>&1 && [ ! -s "$W/w" ]'
+run status
+ok "doctor says not installed, nothing to fix" 'grep -q "locate (mlocate):   not installed" "$W/out" && grep -q "Everything looks right" "$W/out"'
+out=$(echo 'alias updatedb || echo NOALIAS; exit' | timeout 10 $SH -l -i 2>&1)
+ok "no updatedb alias without mlocate" 'echo "$out" | grep -q NOALIAS'
+run uninstall -y
+
+echo "== [$SH] 22. install --with-locate"
+rm -rf /home/root/.[!.]* /home/root/*
+run install -y --with-locate
+ok "install sets up locate too" 'grep -q "Entware installed successfully" "$W/out" && grep -q "locate is ready" "$W/out" && [ -x /opt/bin/updatedb-webos ]'
+run uninstall -y
+ok "uninstall removes it with Entware" '[ ! -e /mnt/lg/user/opt ]'
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

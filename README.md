@@ -57,6 +57,7 @@ No external dependencies. One file, pure `/bin/sh`.
 - [Managing the install](#managing-the-install)
 - [The ent helper](#the-ent-helper)
 - [Shell setup and shortcuts](#shell-setup-and-shortcuts)
+- [locate (mlocate)](#locate-mlocate)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
   - [Upgrading from an older setup](#upgrading-from-an-older-setup)
 - [Reboots](#reboots)
@@ -243,6 +244,28 @@ Unless you use `--no-shell`, the installer adds bash, nano-full and dircolors, a
 | `reboot_safe` | Reboot after a short delay |
 
 The aliases and prompt live in `/opt/etc/webos-entware/bashrc`, so they go away with Entware.
+
+---
+
+## locate (mlocate)
+
+`locate` finds files by name instantly from a database. Entware's mlocate doesn't work on webOS out of the box: `updatedb` refuses to run because webOS has no `mlocate` group, and with no settings it would list most files several times, since webOS mounts the same storage at several paths. Set it up with any of these:
+
+```sh
+ent install mlocate          # installs it and sets it up
+webos-entware locate         # sets it up (installs mlocate if needed)
+sh webos-entware-installer.sh install --with-locate
+```
+
+This adds:
+
+| Path | What |
+|:-----|:-----|
+| `/opt/etc/updatedb.conf` | Excludes duplicate mount points (`/mnt/lg/cmn_data`, `/mnt/lg/flash`, `/mnt/lg/appstore`, `/mnt/lg/db8`, app jails in `/var/palm/jail`), virtual filesystems, `/tmp` (and so USB drives) and `.git` folders. Each file is indexed under one path |
+| `/opt/bin/updatedb-webos` | Runs `updatedb` with an `mlocate` group that exists only inside a private mount namespace, so no system file is changed. In the bash shell, `updatedb` is an alias for it |
+| `/opt/etc/cron.hourly/updatedb` | Refreshes the database every hour, using Entware's `cron` (installed if needed and started by the boot script) |
+
+A full refresh takes a couple of seconds. Repairing Entware sets locate up again if mlocate is installed. It rewrites `updatedb.conf` only while the file still has the installer's first line, so delete that line to keep your own settings. Scripts should call `updatedb-webos`, since the `updatedb` alias only exists in the interactive shell. `doctor` shows whether locate is ready and how old the database is.
 
 ---
 
