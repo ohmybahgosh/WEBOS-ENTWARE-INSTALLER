@@ -79,7 +79,7 @@ case "$1" in
     search) for l in /opt/lib/opkg/info/*.list; do
             [ -f "$l" ] && grep -qx "$2" "$l" && { n=${l##*/}; echo "${n%.list} - 1"; }
         done ;;
-    list) echo "bash - 5.3"; echo "nano-full - 8.7" ;;
+    list) echo "bash - 5.3 - The GNU Bourne Again SHell"; echo "nano-full - 8.7 - An enhanced clone of Pico" ;;
     *) echo "fake opkg: $*" ;;
 esac
 F
@@ -508,6 +508,9 @@ run uninstall -y
 ok "uninstall restarting itself from /tmp keeps and then releases the lock" 'grep -q "Entware removed" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
 
 echo "== [$SH] 30. add-ons"
+out=$(cd /tmp && $SH /tmp/webos-entware-installer.sh install -y >/dev/null 2>&1; PATH="/opt/bin:$PATH" $SH /opt/bin/entwrap search bash 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+ok "ent search shows name, version and description once each" '[ "$out" = "bash - 5.3 - The GNU Bourne Again SHell" ]'
+
 rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
 run install -y
 run addons --json

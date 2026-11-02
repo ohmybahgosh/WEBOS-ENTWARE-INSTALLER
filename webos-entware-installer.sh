@@ -765,7 +765,7 @@ refresh_cache() { $OPKG_BIN list 2>/dev/null | awk '{print $1}' > "$CACHE"; }
 need_pkg() { [ -n "$1" ] || { printf '%b\n' "${RED}Name a package, e.g. ent $2 htop${NC}"; exit 1; }; }
 
 case "$1" in
-  search) shift; $OPKG_BIN list | grep -i -- "${1:-.}" | awk '{printf "\033[0;32m%s\033[0m - %s\n", $1, substr($0, index($0,$2))}' ;;
+  search) shift; $OPKG_BIN list | grep -i -- "${1:-.}" | awk '{n = $1; sub(/^[^ ]+ - /, ""); printf "\033[0;32m%s\033[0m - %s\n", n, $0}' ;;
   install) shift; need_pkg "$1" install; $OPKG_BIN install "$@" || exit $?
     # Setup some packages need on webOS: nano's syntax colors, HTTPS
     # certificates for OpenSSL and Python, and locate (mlocate)
@@ -1537,7 +1537,11 @@ addon_add() {
             fi ;;
     esac
     ensure_ca
-    [ "$AD_ID" = locate ] && [ "$SETUP_SHELL" = 1 ] && info "Log in again to use plain updatedb."
+    if [ "$AD_ID" = locate ]; then
+        # setup_locate already said it's ready
+        [ "$SETUP_SHELL" = 1 ] && info "Log in again to use plain updatedb."
+        return 0
+    fi
     success "$AD_TITLE is ready."
 }
 

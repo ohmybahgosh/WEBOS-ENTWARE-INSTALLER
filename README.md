@@ -165,6 +165,8 @@ Pick **1) Install or repair Entware**. The installer shows your TV details and t
 
 When it finishes, **disconnect and SSH in again** to get the bash shell.
 
+<p align="center"><img src="images/cli-install.png" width="760" alt="An install over SSH: the TV check, the recommended 64-bit build, each step, and Everything looks right"></p>
+
 ### Skip the menu
 
 ```sh
@@ -251,6 +253,8 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 
 `doctor` shows your model, webOS version, kernel, Homebrew Channel and telnet status, the installed and recommended builds, whether `/opt` is mounted, whether `opkg` and bash run, and whether the boot script and shell files are in place. It ends with "Everything looks right" or a list of problems, each with its fix.
 
+<p align="center"><img src="images/cli-doctor.png" width="760" alt="webos-entware doctor on an LG C2 with webOS 25: everything checks out"></p>
+
 The installer also writes `/opt/etc/webos-entware/install.info` with the installer version, date, model, webOS version, firmware, kernel and build. It's handy to paste into a bug report.
 
 Install, repair, uninstall, locate and upgrade take a lock, so two of them can never run at once, from SSH or the TV app.  If one is running, the other says so and stops.  A lock left by a task that was stopped is cleared on its own.
@@ -281,6 +285,8 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 | `ent help` | Show all `ent` commands |
 
 Anything else is passed straight to `opkg`, so `ent list-installed` works too.
+
+<p align="center"><img src="images/cli-ent.png" width="760" alt="ent search and ent owns in the bash shell"></p>
 
 **Tab completion** (in the bash shell): press Tab after `ent`, `opkg` or `webos-entware` to complete commands. After `install`, `info` or `search` it completes available package names. After `remove`, `files` or `upgrade` it completes installed ones.
 
@@ -322,6 +328,8 @@ Small commands for working with the TV from SSH. They use webOS's own services t
 
 Tab after `launch`, `close` or `applog` completes app IDs. `webos-tv help` lists the commands, and each one also works as `webos-tv <command>`. If a package already installed a command with one of these names, the installer leaves it alone and you can use `webos-tv <command>` instead.
 
+<p align="center"><img src="images/cli-helpers.png" width="760" alt="webos-tv help, apps listing the TV's apps, and toast"></p>
+
 `doctor` also shows the free space on the data partition, which webOS shares with Entware, and flags it below 50 MB.
 
 ---
@@ -331,6 +339,8 @@ Tab after `launch`, `close` or `applog` completes app IDs. `webos-tv help` lists
 nano-full ships syntax colors for over 130 languages, but its stock `/opt/etc/nanorc` has every line commented out, so nano starts plain. The installer writes a nanorc that turns on all of them, with line numbers, the cursor position on the status bar, and reopening files where you left off. Common extras (mouse, autoindent, tab size, soft wrap) are listed in the file, commented out.
 
 It only replaces a stock nanorc or one it wrote itself (marked on its first line), so a nanorc you've edited is kept. Settings in your own `~/.nanorc` are read afterwards and win. Installing nano with `ent install nano-full` sets it up too.
+
+<p align="center"><img src="images/cli-nano.png" width="760" alt="nano editing a shell script with syntax colors and line numbers"></p>
 
 ---
 
@@ -348,7 +358,8 @@ Whenever OpenSSL or Python is installed, through `ent install` or found during a
 
 ```sh
 ent install mlocate          # installs it and sets it up
-webos-entware locate         # sets it up (installs mlocate if needed)
+webos-entware add locate     # sets it up (installs mlocate if needed)
+webos-entware locate         # the same
 sh webos-entware-installer.sh install --with-locate
 ```
 
@@ -361,6 +372,8 @@ This adds:
 | `/opt/etc/cron.hourly/updatedb` | Refreshes the database every hour, using Entware's `cron` (installed if needed and started by the boot script) |
 
 A full refresh takes a couple of seconds. Repairing Entware sets locate up again if mlocate is installed. It rewrites `updatedb.conf` only while the file still has the installer's first line, so delete that line to keep your own settings. Scripts should call `updatedb-webos`, since the `updatedb` alias only exists in the interactive shell. `doctor` shows whether locate is ready and how old the database is.
+
+<p align="center"><img src="images/cli-locate.png" width="760" alt="webos-entware add locate setting locate up, then locate nanorc finding files"></p>
 
 ---
 
@@ -389,6 +402,8 @@ webos-entware remove git     # and take it off again
 | `jq` | jq | Read and filter JSON, like `luna-send` replies |
 
 Any other Entware package installs with `ent install <package>` as usual.  The list is fixed in the installer, so the app can only ever ask for one of these by name.
+
+<p align="center"><img src="images/cli-addons.png" width="760" alt="webos-entware addons listing every add-on and whether it is installed, then adding tmux"></p>
 
 ---
 

@@ -2,6 +2,13 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- `ent search` printed a stray dash between the package name and its version.
+- Adding locate said it was ready twice.
+
 ## [2.8.0] - 2026-11-02
 
 ### Added
