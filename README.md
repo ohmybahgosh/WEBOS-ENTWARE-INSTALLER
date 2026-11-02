@@ -57,6 +57,7 @@ No external dependencies. One file, pure `/bin/sh`.
 - [Managing the install](#managing-the-install)
 - [The ent helper](#the-ent-helper)
 - [Shell setup and shortcuts](#shell-setup-and-shortcuts)
+- [webOS helpers](#webos-helpers)
 - [nano](#nano)
 - [HTTPS certificates](#https-certificates)
 - [locate (mlocate)](#locate-mlocate)
@@ -214,6 +215,8 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 | `ent remove <pkg>` | Remove packages |
 | `ent info <pkg>` | Show package details |
 | `ent files <pkg>` | List the files a package installed |
+| `ent owns <file or command>` | Show which package a file or command came from, or that it's part of webOS |
+| `ent du [count]` | Largest installed packages, Entware's total size and free space on the data partition |
 | `ent list` | List installed packages |
 | `ent update` | Refresh the package list |
 | `ent upgradable` | Show packages with updates |
@@ -246,6 +249,25 @@ Unless you use `--no-shell`, the installer adds bash, nano-full, dircolors and G
 | `reboot_safe` | Reboot after a short delay |
 
 The aliases and prompt live in `/opt/etc/webos-entware/bashrc`, so they go away with Entware.
+
+---
+
+## webOS helpers
+
+Small commands for working with the TV from SSH. They use webOS's own services through `luna-send`, so they need nothing extra installed.
+
+| Command | What it does |
+|:--------|:-------------|
+| `toast <message>` | Show a notification on the TV screen, e.g. at the end of a script or cron job |
+| `launch <app-id> [json]` | Start an app, with optional launch parameters: `launch netflix` |
+| `close <app-id>` | Close an app |
+| `apps [-a] [text]` | List apps with their IDs and types; `*` marks running ones. `-a` includes hidden apps, and text filters the list |
+| `applog [app-id or text]` | Follow the system log (`/var/log/messages`), optionally only lines that mention an app |
+| `tvshot [file]` | Save a screenshot of the screen (PNG, or JPG if the name ends in `.jpg`; default in `/tmp`) and print the `scp` command to copy it. Streaming apps show black, since protected video can't be captured |
+
+Tab after `launch`, `close` or `applog` completes app IDs. `webos-tv help` lists the commands, and each one also works as `webos-tv <command>`. If a package already installed a command with one of these names, the installer leaves it alone and you can use `webos-tv <command>` instead.
+
+`doctor` also shows the free space on the data partition, which webOS shares with Entware, and flags it below 50 MB.
 
 ---
 

@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.5.1"
+VERSION="2.6.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -31,6 +31,8 @@ UPDATEDB_WRAPPER="/opt/bin/updatedb-webos"
 LOCATE_DB="/opt/var/mlocate/mlocate.db"
 LOCATE_CRON="/opt/etc/cron.hourly/updatedb"
 NANORC="/opt/etc/nanorc"
+TV_HELPER="/opt/bin/webos-tv"
+TV_COMMANDS="toast launch close apps applog tvshot"
 CA_FILE="/opt/etc/ssl/certs/ca-certificates.crt"
 ENTWARE_BASE="http://bin.entware.net"
 SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
@@ -571,6 +573,8 @@ print_usage() {
     printf '%b\n' "  ${GREEN}remove${NC} <pkg>     Remove packages"
     printf '%b\n' "  ${GREEN}info${NC} <pkg>       Show package details"
     printf '%b\n' "  ${GREEN}files${NC} <pkg>      List the files a package installed"
+    printf '%b\n' "  ${GREEN}owns${NC} <file|cmd>  Show which package a file or command came from"
+    printf '%b\n' "  ${GREEN}du${NC} [count]       Largest installed packages, and free space"
     printf '%b\n' "  ${GREEN}update${NC}           Refresh the package list"
     printf '%b\n' "  ${GREEN}upgradable${NC}       Show packages with updates"
     printf '%b\n' "  ${GREEN}upgrade${NC}          Refresh the list and upgrade everything"
@@ -593,6 +597,45 @@ case "$1" in
   remove) shift; need_pkg "$1" remove; $OPKG_BIN remove "$@" ;;
   info) shift; need_pkg "$1" info; $OPKG_BIN info "$@" ;;
   files) shift; need_pkg "$1" files; $OPKG_BIN files "$@" ;;
+  owns) shift
+    [ -n "$1" ] || { printf '%b\n' "${RED}Name a file or command, e.g. ent owns nano${NC}"; exit 1; }
+    for f in "$@"; do
+        case "$f" in
+            /*) p="$f" ;;
+            */*) p="$(pwd)/$f" ;;
+            *) p=$(command -v -- "$f" 2>/dev/null) || p="" ;;
+        esac
+        if [ -z "$p" ] || { [ ! -e "$p" ] && [ ! -L "$p" ]; }; then
+            echo "$f: not found"
+            continue
+        fi
+        # opkg records /opt paths, not the folder behind the bind mount
+        p=$(printf '%s\n' "$p" | sed 's#^/mnt/lg/user/opt/#/opt/#')
+        r=$(readlink -f "$p" 2>/dev/null | sed 's#^/mnt/lg/user/opt/#/opt/#')
+        out=$({ $OPKG_BIN search "$p"; [ -n "$r" ] && [ "$r" != "$p" ] && $OPKG_BIN search "$r"; } 2>/dev/null | sort -u)
+        if [ -n "$out" ]; then
+            printf '%s: %s\n' "$f" "$(echo "$out" | awk '{print $1}' | tr '\n' ' ')"
+        else
+            case "${r:-$p}" in
+                /opt/*) echo "$f: in Entware's folder but not from a package (${r:-$p})" ;;
+                *) echo "$f: part of webOS, not Entware (${r:-$p})" ;;
+            esac
+        fi
+    done ;;
+  du) n=${2:-15}
+    case "$n" in *[!0-9]*|'') n=15 ;; esac
+    printf '%b\n' "${CYAN}Largest installed packages${NC}"
+    for l in /opt/lib/opkg/info/*.list; do
+        [ -f "$l" ] || continue
+        kb=$(while IFS= read -r f; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done < "$l" |
+            tr '\n' '\0' | xargs -0 du -k 2>/dev/null | awk '{s+=$1} END {print s+0}')
+        pkg=${l##*/}
+        echo "$kb ${pkg%.list}"
+    done | sort -rn | head -n "$n" | awk '{printf "  %7.1f MB  %s\n", $1/1024, $2}'
+    echo
+    printf 'Entware in total:  %s\n' "$(du -sh /mnt/lg/user/opt 2>/dev/null | awk '{print $1}')"
+    printf 'Free on the data partition (shared with webOS): %s\n' \
+        "$(df -h /mnt/lg/user 2>/dev/null | awk 'NR==2 {print $(NF-2)}')" ;;
   update) $OPKG_BIN update && refresh_cache ;;
   upgradable) $OPKG_BIN list-upgradable ;;
   upgrade) $OPKG_BIN update && refresh_cache && $OPKG_BIN upgrade ;;
@@ -634,7 +677,7 @@ _entwrap_complete() {
         if [ "${COMP_WORDS[0]##*/}" = opkg ]; then
             words="update upgrade install remove info files list list-installed list-upgradable search find print-architecture"
         else
-            words="search install remove info files update upgradable upgrade list repair doctor help"
+            words="search install remove info files owns du update upgradable upgrade list repair doctor help"
         fi
     else
         case "$sub" in
@@ -650,6 +693,13 @@ _webos_entware_complete() {
 }
 complete -F _entwrap_complete entwrap ent opkg
 complete -F _webos_entware_complete webos-entware
+# App IDs for launch, close and applog, from a list webos-tv apps keeps
+_webos_tv_apps() {
+    local cache=/tmp/.webos-tv-apps
+    [ -s "$cache" ] || webos-tv apps --ids > "$cache" 2>/dev/null
+    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "$(cat "$cache" 2>/dev/null)" -- "${COMP_WORDS[1]}") )
+}
+complete -F _webos_tv_apps launch close applog
 COMPLETION
 
     /opt/bin/opkg list 2>/dev/null | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
@@ -728,6 +778,7 @@ helpme() {
     echo -e "${CYAN}Sys Info:${NC}     ${GREEN}myip netinfo dfh up${NC}"
     echo -e "${CYAN}Entware:${NC}      ${GREEN}ent help, ent search, ent install, ent doctor${NC}"
     echo -e "${CYAN}Manager:${NC}      ${GREEN}webos-entware status | install | uninstall | locate${NC}"
+    echo -e "${CYAN}TV:${NC}           ${GREEN}toast launch close apps applog tvshot${NC} (webos-tv help)"
     echo -e "${CYAN}Utils:${NC}        ${GREEN}edit findf reboot_safe${NC}"
 }
 BASHRC
@@ -816,6 +867,181 @@ setup_bashrc() {
         info "They're still in ${LAST_BACKUP:-the old file}. Copy any you want to the end of $rc."
     fi
     rm -f "$simple" "$other" "$simple.rc"
+}
+
+# === webOS helpers ===
+# One script, webos-tv, with a link for each command: toast, launch, close,
+# apps, applog and tvshot. They talk to webOS's own services with
+# luna-send, so they only need root, not extra packages.
+write_tv_helpers() {
+    cat > "$TV_HELPER" << 'WEBOSTV'
+#!/bin/sh
+# webOS helpers (webos-entware-installer)
+# Run as toast, launch, close, apps, applog or tvshot, or as
+# webos-tv <command>. webos-tv help lists them.
+PATH="/opt/bin:/opt/sbin:$PATH"
+LOG="${WEBOS_TV_LOG:-/var/log/messages}"
+SAM="luna://com.webos.applicationManager"
+
+die() { echo "$*" >&2; exit 1; }
+# luna-send reads stdin and returns nothing when that's a script, so it
+# always gets /dev/null
+luna() { luna-send -n 1 "$@" < /dev/null 2>&1; }
+ok() { echo "$1" | grep -q '"returnValue": *true'; }
+err() { echo "$1" | sed -n 's/.*"errorText": *"\([^"]*\)".*/\1/p' | head -n 1; }
+# Text as a JSON string body
+json_text() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\t' '  '; }
+check_id() {
+    [ -n "$1" ] || die "Name an app, e.g. $2 netflix. List them with: apps"
+    case "$1" in *[!A-Za-z0-9._-]*) die "\"$1\" isn't a valid app ID. List them with: apps" ;; esac
+}
+command -v luna-send >/dev/null 2>&1 || die "luna-send wasn't found. These helpers only work on a webOS TV."
+
+usage() {
+    cat << 'USAGE'
+webOS helpers
+  toast <message>           Show a notification on the TV screen
+  launch <app-id> [json]    Start an app (optional launch parameters as JSON)
+  close <app-id>            Close an app
+  apps [-a] [text]          List apps and their IDs (-a includes hidden ones)
+  applog [app-id|text]      Follow the system log, optionally filtered
+  tvshot [file.png|.jpg]    Screenshot what's on screen (default: /tmp)
+Tab after launch, close or applog completes app IDs.
+USAGE
+}
+
+cmd=${0##*/}
+if [ "$cmd" = webos-tv ]; then
+    cmd=$1
+    [ $# -gt 0 ] && shift
+fi
+
+case "$cmd" in
+toast)
+    [ -n "$*" ] || die "Usage: toast <message>"
+    r=$(luna -a webosbrew luna://com.webos.notification/createToast \
+        "{\"sourceId\":\"webosbrew\",\"message\":\"$(json_text "$*")\"}")
+    ok "$r" || die "The toast didn't show: $(err "$r")"
+    ;;
+launch)
+    check_id "$1" launch
+    params=""
+    [ -n "$2" ] && params=",\"params\":$2"
+    r=$(luna "$SAM/launch" "{\"id\":\"$1\"$params}")
+    if ! ok "$r"; then
+        case "$(err "$r")" in
+            *"not exist"*) die "No app has the ID $1. List them with: apps" ;;
+            *) die "$1 didn't start: $(err "$r")" ;;
+        esac
+    fi
+    rm -f /tmp/.webos-tv-apps
+    echo "Started $1"
+    ;;
+close)
+    check_id "$1" close
+    r=$(luna "$SAM/close" "{\"id\":\"$1\"}")
+    if ! ok "$r"; then
+        case "$(err "$r")" in
+            *"no app matched"*) die "$1 isn't running." ;;
+            *) die "$1 didn't close: $(err "$r")" ;;
+        esac
+    fi
+    echo "Closed $1"
+    ;;
+apps)
+    all=0 ids=0 filter=""
+    for a in "$@"; do
+        case "$a" in
+            -a|--all) all=1 ;;
+            --ids) ids=1; all=1 ;;
+            *) filter="$a" ;;
+        esac
+    done
+    list=$(luna "$SAM/listApps" '{}')
+    ok "$list" || die "Couldn't list apps: $(err "$list")"
+    running=$(luna "$SAM/running" '{}' | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | tr '\n' ' ')
+    if command -v node >/dev/null 2>&1; then
+        # node comes with webOS and parses the app list properly
+        rows=$(printf '%s' "$list" | ALL=$all node -e '
+            let s = "";
+            process.stdin.on("data", d => s += d).on("end", () => {
+                for (const a of JSON.parse(s).apps || []) {
+                    if (process.env.ALL !== "1" && a.visible === false) continue;
+                    console.log([a.id, a.title || "", a.type || ""].join("\t"));
+                }
+            });' 2>/dev/null)
+    else
+        # No node: one app per line, then pick out the fields
+        rows=$(printf '%s' "$list" | sed 's/},{"/}\n{"/g' | while IFS= read -r a || [ -n "$a" ]; do
+            id=$(printf '%s' "$a" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+            [ -n "$id" ] || continue
+            if [ "$all" != 1 ]; then
+                case "$a" in *'"visible":false'*) continue ;; esac
+            fi
+            title=$(printf '%s' "$a" | sed -n 's/.*"title":"\([^"]*\)".*/\1/p')
+            type=$(printf '%s' "$a" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+            printf '%s\t%s\t%s\n' "$id" "$title" "$type"
+        done)
+    fi
+    [ -n "$rows" ] || die "Couldn't read the app list."
+    if [ "$ids" = 1 ]; then
+        printf '%s\n' "$rows" | cut -f1 | sort -u
+        exit 0
+    fi
+    printf '%s\n' "$rows" | sort -f | grep -i -- "${filter:-.}" |
+        while IFS="$(printf '\t')" read -r id title type; do
+            case " $running " in *" $id "*) mark="*" ;; *) mark=" " ;; esac
+            printf '%s %-40s %-28s %s\n' "$mark" "$id" "$title" "$type"
+        done
+    echo "(* running)"
+    ;;
+applog)
+    [ -r "$LOG" ] || die "The system log $LOG isn't there on this TV."
+    if [ -n "$1" ]; then
+        echo "Following $LOG for lines with \"$1\" (Ctrl+C to stop)..."
+        tail -n 200 -F "$LOG" 2>/dev/null | grep --line-buffered -i -F -- "$1"
+    else
+        echo "Following $LOG (Ctrl+C to stop)..."
+        tail -n 20 -F "$LOG"
+    fi
+    ;;
+tvshot)
+    out=${1:-/tmp/tvshot-$(date +%Y%m%d-%H%M%S).png}
+    case "$out" in /*) ;; *) out="$(pwd)/$out" ;; esac
+    case "$out" in *.jpg|*.jpeg|*.JPG) fmt=JPG ;; *) fmt=PNG ;; esac
+    r=$(luna luna://com.webos.service.capture/executeOneShot \
+        "{\"path\":\"$(json_text "$out")\",\"method\":\"DISPLAY\",\"width\":1920,\"height\":1080,\"format\":\"$fmt\"}")
+    ok "$r" && [ -s "$out" ] || die "The screenshot failed: $(err "$r")"
+    echo "Saved $out ($(du -k "$out" | awk '{print $1}') KB)"
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+    echo "Copy it with: scp root@${ip:-<tv-ip>}:$out ."
+    echo "Protected video (Netflix and other streaming apps) shows as black."
+    ;;
+help|-h|--help|"")
+    usage
+    ;;
+*)
+    usage
+    exit 1
+    ;;
+esac
+WEBOSTV
+    chmod 755 "$TV_HELPER"
+    for c in $TV_COMMANDS; do
+        if [ -e "/opt/bin/$c" ] && [ "$(readlink "/opt/bin/$c")" != webos-tv ]; then
+            info "Skipped the $c command: /opt/bin/$c already exists (use webos-tv $c)."
+            continue
+        fi
+        ln -sf webos-tv "/opt/bin/$c"
+    done
+    success "Installed the webOS helpers: $TV_COMMANDS (webos-tv help)."
+}
+
+tv_helpers_ok() { [ -x "$TV_HELPER" ]; }
+
+# Free space on the data partition, in KB (webOS shares it)
+data_free_kb() {
+    df -k /mnt/lg/user 2>/dev/null | tail -n 1 | awk '{print $(NF-2)}'
 }
 
 # === nano ===
@@ -1201,6 +1427,7 @@ install_entware() {
 
     setup_identity_files
     install_entwrap
+    write_tv_helpers
     if [ "$SETUP_SHELL" = 1 ]; then
         setup_shell_environment
     else
@@ -1319,6 +1546,13 @@ show_status() {
     printf "bash runs:          "; yesno /opt/bin/bash -c true
     printf "Shell files set up: "; yesno is_ours "$HOME_DIR/.profile"
     printf "ent, webos-entware: "; yesno helpers_ok
+    printf "webOS helpers:      "; yesno tv_helpers_ok
+    FREE_KB=$(data_free_kb)
+    case "$FREE_KB" in
+        ''|*[!0-9]*) ;;
+        *) printf "Free space:         "
+           if [ "$FREE_KB" -lt 51200 ]; then log "$RED" "$((FREE_KB / 1024)) MB"; else echo "$((FREE_KB / 1024)) MB"; fi ;;
+    esac
     printf "nano colors:        "
     if [ ! -x /opt/bin/nano ]; then
         echo "nano not installed"
@@ -1383,6 +1617,12 @@ show_status() {
             note "The 32-bit build works here, but the 64-bit build is faster. To switch: uninstall, then install with --arch=aarch64-k3.10."
         fi
     fi
+    tv_helpers_ok || issue "The webOS helpers (toast, launch, apps...) are missing. Fix: $(fix_cmd)"
+    case "$FREE_KB" in
+        ''|*[!0-9]*) ;;
+        *) [ "$FREE_KB" -lt 51200 ] &&
+            issue "Only $((FREE_KB / 1024)) MB is free on the data partition, which webOS shares. Running out can cause problems with the TV itself. 'ent du' shows the largest packages to remove." ;;
+    esac
     needs_ca && ! ca_ok &&
         issue "HTTPS certificates are missing, so wget-ssl, git and Python can't check HTTPS sites. Fix: ent install ca-bundle"
     [ -x /opt/bin/nano ] && nanorc_stock &&

@@ -45,8 +45,10 @@ case "$1" in
                 entware-opt) mkdir -p /opt/etc/init.d
                     printf '#!/bin/sh\necho "$1" >> /tmp/rc.unslung.log\n' > /opt/etc/init.d/rc.unslung
                     chmod 755 /opt/etc/init.d/rc.unslung ;;
-                bash) printf '#!/bin/sh\nexec /bin/bash "$@"\n' > /opt/bin/bash; chmod 755 /opt/bin/bash ;;
+                bash) printf '#!/bin/sh\nexec /bin/bash "$@"\n' > /opt/bin/bash; chmod 755 /opt/bin/bash
+                    echo /opt/bin/bash > /opt/lib/opkg/info/bash.list ;;
                 nano-full) printf '#!/bin/sh\n' > /opt/bin/nano; chmod 755 /opt/bin/nano
+                    echo /opt/bin/nano > /opt/lib/opkg/info/nano-full.list
                     [ -f /opt/etc/nanorc ] || printf '## stock nanorc\n# set linenumbers\n# include "/opt/share/nano/*.nanorc"\n' > /opt/etc/nanorc ;;
                 wget-ssl) touch /opt/lib/opkg/info/libopenssl.control ;;
                 ca-bundle) mkdir -p /opt/etc/ssl/certs; echo CERTS > /opt/etc/ssl/certs/ca-certificates.crt ;;
@@ -69,6 +71,9 @@ case "$1" in
             [ "$p" = ca-bundle ] && rm -f /opt/etc/ssl/certs/ca-certificates.crt
         done ;;
     list-installed) sed 's/$/ - 1/' $DB ;;
+    search) for l in /opt/lib/opkg/info/*.list; do
+            [ -f "$l" ] && grep -qx "$2" "$l" && { n=${l##*/}; echo "${n%.list} - 1"; }
+        done ;;
     list) echo "bash - 5.3"; echo "nano-full - 8.7" ;;
     *) echo "fake opkg: $*" ;;
 esac
@@ -81,6 +86,22 @@ case "\$1" in
     */webos-entware-installer.sh) cp $W/installer.sh "\$OUT" ;;
     */installer/opkg.conf) printf 'src/gz entware http://bin.entware.net/aarch64-k3.10\ndest root /\nlists_dir ext /opt/var/opkg-lists\n' > "\$OUT" ;;
     *) [ "\$OUT" = /dev/null ] || : > "\$OUT" ;;
+esac
+F
+cat > "$W/bin/luna-send" << 'F'
+#!/bin/sh
+echo "$*" >> /tmp/luna.log
+case "$*" in
+    *createToast*) echo '{"returnValue": true}' ;;
+    *applicationManager/launch*)
+        case "$*" in
+            *x.not.real*) printf '{\n    "errorCode": -101,\n    "returnValue": false,\n    "errorText": "not exist"\n}\n' ;;
+            *) echo '{"returnValue": true}' ;;
+        esac ;;
+    *applicationManager/close*) printf '{\n    "errorCode": 1,\n    "returnValue": false,\n    "errorText": "no app matched by pid"\n}\n' ;;
+    *listApps*) echo '{"returnValue":true,"apps":[{"id":"netflix","title":"Netflix","type":"native"},{"id":"app.tivibro.tv","title":"TiviBro","type":"web"},{"id":"com.hidden.svc","title":"Hidden","type":"web","visible":false}]}' ;;
+    *applicationManager/running*) printf '{\n    "returnValue": true,\n    "running": [\n        {\n            "id": "netflix"\n        }\n    ]\n}\n' ;;
+    *executeOneShot*) p=$(echo "$*" | sed -n 's/.*"path":"\([^"]*\)".*/\1/p'); echo PNG > "$p"; echo '{"returnValue": true}' ;;
 esac
 F
 chmod 755 "$W/bin/"* "$W/fake-opkg"
@@ -377,6 +398,48 @@ run status
 ok "doctor flags missing certificates" 'grep -q "HTTPS certificates are missing" "$W/out"'
 run install -y
 ok "repair puts them back" '[ -s /opt/etc/ssl/certs/ca-certificates.crt ] && grep -q "HTTPS certificates installed" "$W/out"'
+run uninstall -y
+
+echo "== [$SH] 26. webOS helpers"
+rm -rf /home/root/.[!.]* /home/root/*
+run install -y
+ok "helper and its commands installed" '[ -x /opt/bin/webos-tv ] && for c in toast launch close apps applog tvshot; do [ "$(readlink /opt/bin/$c)" = webos-tv ] || exit 1; done'
+/opt/bin/toast 'Build "1.2" done' > "$W/out" 2>&1
+ok "toast sends an escaped message as webosbrew" 'grep -q -- "-a webosbrew luna://com.webos.notification/createToast" /tmp/luna.log && grep -qF "\"message\":\"Build \\\"1.2\\\" done\"" /tmp/luna.log'
+/opt/bin/launch netflix > "$W/out" 2>&1
+ok "launch starts an app" 'grep -q "Started netflix" "$W/out" && grep -q "applicationManager/launch {\"id\":\"netflix\"}" /tmp/luna.log'
+/opt/bin/launch app.tivibro.tv '{"channel":5}' > /dev/null 2>&1
+ok "launch passes parameters" 'grep -qF "{\"id\":\"app.tivibro.tv\",\"params\":{\"channel\":5}}" /tmp/luna.log'
+! /opt/bin/launch x.not.real > "$W/out" 2>&1
+ok "launch explains an unknown app" 'grep -q "No app has the ID x.not.real" "$W/out"'
+! /opt/bin/launch 'bad;id' > "$W/out" 2>&1
+ok "launch refuses an invalid ID" 'grep -q "isn.t a valid app ID" "$W/out"'
+! /opt/bin/close app.tivibro.tv > "$W/out" 2>&1
+ok "close explains an app that isn't running" 'grep -q "app.tivibro.tv isn.t running" "$W/out"'
+/opt/bin/apps > "$W/out" 2>&1
+ok "apps lists visible apps and marks running ones (no node here, so the fallback parser)" 'grep -q "^\* netflix" "$W/out" && grep -q "app.tivibro.tv.*TiviBro" "$W/out" && ! grep -q com.hidden.svc "$W/out"'
+ok "apps -a includes hidden apps, and filters" '/opt/bin/apps -a | grep -q com.hidden.svc && [ "$(/opt/bin/apps tivi | grep -c tivibro)" = 1 ]'
+ok "apps --ids lists IDs for tab completion" '[ "$(/opt/bin/webos-tv apps --ids | wc -l)" = 3 ]'
+printf 'line one netflix\nline two app.tivibro.tv started\n' > "$W/messages"
+WEBOS_TV_LOG="$W/messages" timeout 2 /opt/bin/applog tivibro > "$W/out" 2>&1
+ok "applog follows the log, filtered" 'grep -q "app.tivibro.tv started" "$W/out" && ! grep -q "line one" "$W/out"'
+/opt/bin/tvshot /tmp/shot.png > "$W/out" 2>&1
+ok "tvshot saves a screenshot and says how to copy it" '[ -s /tmp/shot.png ] && grep -q "Saved /tmp/shot.png" "$W/out" && grep -q "scp root@" "$W/out"'
+ok "webos-tv help lists the commands" '/opt/bin/webos-tv help | grep -q "tvshot"'
+run status
+ok "doctor shows the helpers and free space" 'grep -q "webOS helpers:.*yes" "$W/out" && grep -q "Free space:" "$W/out" && grep -q "Everything looks right" "$W/out"'
+
+echo "== [$SH] 27. a package's command isn't replaced by a helper"
+rm -f /opt/bin/toast; printf '#!/bin/sh\necho package toast\n' > /opt/bin/toast; chmod 755 /opt/bin/toast
+run install -y
+ok "the package's toast is kept" 'grep -q "package toast" /opt/bin/toast && grep -q "Skipped the toast command" "$W/out"'
+
+echo "== [$SH] 28. ent owns and ent du"
+out=$(cd /tmp && PATH="/opt/bin:$PATH" $SH /opt/bin/entwrap owns nano /opt/bin/nano /bin/sh no-such-cmd 2>&1)
+ok "ent owns finds the package for a command and a path" 'echo "$out" | grep -q "^nano: nano-full" && echo "$out" | grep -q "^/opt/bin/nano: nano-full"'
+ok "ent owns says when a file is part of webOS or missing" 'echo "$out" | grep -q "^/bin/sh: part of webOS" && echo "$out" | grep -q "no-such-cmd: not found"'
+out=$(cd /tmp && $SH /opt/bin/entwrap du 5 2>&1)
+ok "ent du lists packages and free space" 'echo "$out" | grep -q "MB  nano-full" && echo "$out" | grep -q "Free on the data partition"'
 run uninstall -y
 
 echo "== [$SH] $PASS passed, $FAIL failed"
