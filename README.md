@@ -269,7 +269,7 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 
 | Command | What it does |
 |:--------|:-------------|
-| `ent search <text>` | Search available packages |
+| `ent search <text>` | Search available packages by name or description.  Each result shows its version, whether it's installed, and its description cut to fit the screen.  Name matches come first |
 | `ent install <pkg>` | Install packages, plus the webOS setup some need (nano colors, HTTPS certificates, locate) |
 | `ent remove <pkg>` | Remove packages |
 | `ent info <pkg>` | Show package details |

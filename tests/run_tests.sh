@@ -510,6 +510,13 @@ ok "uninstall restarting itself from /tmp keeps and then releases the lock" 'gre
 echo "== [$SH] 30. add-ons"
 out=$(cd /tmp && $SH /tmp/webos-entware-installer.sh install -y >/dev/null 2>&1; PATH="/opt/bin:$PATH" $SH /opt/bin/entwrap search bash 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
 ok "ent search shows name, version and description once each" '[ "$out" = "bash - 5.3 - The GNU Bourne Again SHell" ]'
+out=$(cd /tmp && PATH="/opt/bin:$PATH" COLUMNS=44 ENT_FORMAT=pretty $SH /opt/bin/entwrap search a 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+ok "ent search in a terminal: a count, then name and version, marked installed" 'echo "$out" | head -n 1 | grep -q "^2 packages match \"a\"" && echo "$out" | grep -q "^bash  5.3  \[installed\]$" && echo "$out" | grep -q "^    The GNU Bourne Again SHell$"'
+ok "ent search in a terminal fits the screen" '[ -z "$(echo "$out" | grep -v "^More about" | awk "length > 44")" ]'
+out=$(cd /tmp && PATH="/opt/bin:$PATH" ENT_FORMAT=pretty $SH /opt/bin/entwrap search n 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+ok "ent search lists description-only matches after name matches" 'echo "$out" | grep -q "^2 packages match" && [ "$(echo "$out" | grep -n "^nano-full\|^Also\|^bash" | cut -d: -f2 | cut -c1-4 | tr "\n" " ")" = "nano Also bash " ] && echo "$out" | grep -q "^Also mentioned in the description" && echo "$out" | grep -q "^nano-full  8.7"'
+! (cd /tmp && $SH /opt/bin/entwrap search) > "$W/out" 2>&1
+ok "ent search with nothing to search for says so" 'grep -q "Name something to search for" "$W/out"'
 
 rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
 run install -y

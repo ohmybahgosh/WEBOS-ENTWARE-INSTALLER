@@ -4,6 +4,10 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 
 ## Unreleased
 
+### Changed
+
+- `ent search` is much easier to read, especially on a phone: a count at the top, then each package as its own block, with the name, version and whether it's installed on one line and the description below it, wrapped to the screen and cut to two lines.  Packages whose name matches come first.  Piped into another command, it still prints one plain line per package.
+
 ### Fixed
 
 - `ent search` printed a stray dash between the package name and its version.

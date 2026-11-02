@@ -762,10 +762,79 @@ print_usage() {
 }
 
 refresh_cache() { $OPKG_BIN list 2>/dev/null | awk '{print $1}' > "$CACHE"; }
+
+# ent search: in a terminal, one block per package (name, version, whether
+# it's installed, then the description wrapped to the screen and cut to two
+# lines), with name matches first. Piped, plain "name - version - description"
+# lines for scripts. ENT_FORMAT=pretty or plain overrides.
+search_pkgs() {
+    if [ -z "$1" ]; then
+        printf '%b\n' "${RED}Name something to search for, e.g. ent search htop${NC}"
+        exit 1
+    fi
+    matches=$($OPKG_BIN list 2>/dev/null | grep -iF -- "$1")
+    fmt=${ENT_FORMAT:-}
+    [ -n "$fmt" ] || { if [ -t 1 ]; then fmt=pretty; else fmt=plain; fi; }
+    if [ "$fmt" = plain ]; then
+        [ -n "$matches" ] && printf '%s\n' "$matches"
+        return 0
+    fi
+    if [ -z "$matches" ]; then
+        echo "No packages match \"$1\".  Try a shorter word, or run: ent update"
+        return 0
+    fi
+    cols=$(stty size 2>/dev/null | awk '{print $2}')
+    case "$cols" in ''|*[!0-9]*) cols=${COLUMNS:-80} ;; esac
+    case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
+    [ "$cols" -lt 40 ] && cols=40
+    [ "$cols" -gt 100 ] && cols=100
+    ENT_INSTALLED=$($OPKG_BIN list-installed 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+    export ENT_INSTALLED
+    printf '%s\n' "$matches" | awk -v term="$1" -v width="$cols" '
+        function wrap(s, w,    n, words, i, line, cand, out, e) {
+            n = split(s, words, " "); line = ""; out = ""; e = 0
+            for (i = 1; i <= n; i++) {
+                cand = (line == "") ? words[i] : line " " words[i]
+                if (length(cand) > w && line != "") {
+                    if (e == 1) {
+                        if (length(line) + 3 > w) line = substr(line, 1, w - 3)
+                        return out "    " line "...\n"
+                    }
+                    out = out "    " line "\n"; e++; line = words[i]
+                } else line = cand
+            }
+            return (line == "") ? out : out "    " line "\n"
+        }
+        BEGIN {
+            n = split(ENVIRON["ENT_INSTALLED"], tmp, " ")
+            for (i = 1; i <= n; i++) inst[tmp[i]] = 1
+            lt = tolower(term)
+        }
+        {
+            name = $1; rest = $0; sub(/^[^ ]+ - /, "", rest)
+            ver = rest; desc = ""
+            if (index(rest, " - ")) { sub(/ - .*/, "", ver); desc = rest; sub(/^[^ ]+ - /, "", desc) }
+            gsub(/[ \t]+/, " ", desc)
+            e = "\033[1;32m" name "\033[0m  \033[0;90m" ver "\033[0m"
+            if (name in inst) { e = e "  \033[0;36m[installed]\033[0m"; ni++ }
+            e = e "\n" (desc == "" ? "" : wrap(desc, width - 4))
+            if (index(tolower(name), lt)) a[++na] = e; else b[++nb] = e
+        }
+        END {
+            total = na + nb
+            printf "\033[0;36m%d package%s match \"%s\"\033[0m", total, (total == 1 ? "" : "s"), term
+            if (ni) printf "  (%d installed)", ni
+            printf "\n\n"
+            for (i = 1; i <= na; i++) printf "%s\n", a[i]
+            if (na && nb) printf "\033[0;90mAlso mentioned in the description:\033[0m\n\n"
+            for (i = 1; i <= nb; i++) printf "%s\n", b[i]
+            printf "\033[0;90mMore about one: ent info <name>\033[0m\n"
+        }'
+}
 need_pkg() { [ -n "$1" ] || { printf '%b\n' "${RED}Name a package, e.g. ent $2 htop${NC}"; exit 1; }; }
 
 case "$1" in
-  search) shift; $OPKG_BIN list | grep -i -- "${1:-.}" | awk '{n = $1; sub(/^[^ ]+ - /, ""); printf "\033[0;32m%s\033[0m - %s\n", n, $0}' ;;
+  search) shift; search_pkgs "$1" ;;
   install) shift; need_pkg "$1" install; $OPKG_BIN install "$@" || exit $?
     # Setup some packages need on webOS: nano's syntax colors, HTTPS
     # certificates for OpenSSL and Python, and locate (mlocate)
