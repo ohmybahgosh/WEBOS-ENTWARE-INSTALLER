@@ -309,6 +309,11 @@ old_installer_copies() {
 
 # === One task at a time ===
 lock_pid() { cat "$LOCK_DIR/pid" 2>/dev/null; }
+# Seconds since a file or folder last changed (large if unknown)
+age_of() {
+    t=$(date -r "$1" +%s 2>/dev/null)
+    case "$t" in ''|*[!0-9]*) echo 999999 ;; *) echo $(( $(date +%s) - t )) ;; esac
+}
 
 # Install, repair, uninstall, locate and upgrade take this lock, so the TV
 # app and an SSH session can never change things at the same time
@@ -322,6 +327,10 @@ take_lock() {
         fi
         if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then
             error_exit "Another install, repair or uninstall is running (process $lp). Wait for it to finish, then try again."
+        fi
+        if [ -z "$lp" ] && [ "$(age_of "$LOCK_DIR")" -lt 30 ]; then
+            # Taken a moment ago; its owner hasn't written its pid yet
+            error_exit "Another install, repair or uninstall is just starting. Try again in a moment."
         fi
         # Left by a task that was killed or a TV that rebooted
         rm -rf "$LOCK_DIR"
@@ -339,21 +348,21 @@ release_lock() {
 ESC=$(printf '\033')
 # A JSON string: colors removed, quotes and backslashes escaped, line breaks as \n
 json_str() {
-    printf '"%s"' "$(printf '%s' "$1" | sed -e "s/$ESC\[[0-9;]*m//g" -e 's/\\/\\\\/g' -e 's/"/\\"/g' |
+    printf '"%s"' "$(printf '%s' "$1" | sed -e "s/$ESC\[[0-9;?]*[A-Za-z]//g" -e 's/\\/\\\\/g' -e 's/"/\\"/g' |
         tr '\t' ' ' | tr -d '\000-\010\013-\037' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')"
 }
 json_bool() { if "$@" >/dev/null 2>&1; then printf true; else printf false; fi; }
-# Lines on stdin as a JSON array of strings
+# Lines on stdin as a JSON array of strings, in one pass (the app polls
+# this every second, so it has to be cheap on a TV)
 json_lines() {
-    first=1
-    printf '['
-    while IFS= read -r l || [ -n "$l" ]; do
-        [ -n "$l" ] || continue
-        [ "$first" = 1 ] || printf ','
-        json_str "$l"
-        first=0
-    done
-    printf ']'
+    sed -e "s/$ESC\[[0-9;?]*[A-Za-z]//g" | tr '\t' ' ' | tr -d '\000-\010\013-\037' | awk '
+        BEGIN { printf "[" }
+        length($0) > 0 {
+            gsub(/\\/, "\\\\")
+            gsub(/"/, "\\\"")
+            printf "%s\"%s\"", (n++ ? "," : ""), $0
+        }
+        END { printf "]" }'
 }
 json_num() { case "$1" in ''|*[!0-9]*) printf null ;; *) printf '%s' "$1" ;; esac; }
 
@@ -367,9 +376,12 @@ job_state() {
         echo "done"
     else
         jp=$(cat "$JOB_DIR/pid" 2>/dev/null)
+        lp=$(lock_pid)
         if [ -n "$jp" ] && kill -0 "$jp" 2>/dev/null; then
             echo running
-        elif [ -z "$jp" ] && [ $(( $(date +%s) - $(cat "$JOB_DIR/started" 2>/dev/null || echo 0) )) -lt 10 ]; then
+        elif [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then
+            echo running    # the task itself still holds the lock
+        elif [ -z "$jp" ] && [ "$(age_of "$JOB_DIR/started")" -lt 10 ]; then
             echo running    # just started
         else
             echo lost       # stopped without finishing: killed, or the TV restarted
@@ -383,6 +395,15 @@ start_job() {
         *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate or upgrade." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    # Only one start at a time: two at once would share one log and exit code
+    if ! mkdir "$JOB_DIR.start" 2>/dev/null; then
+        [ "$(age_of "$JOB_DIR.start")" -lt 30 ] || { rm -rf "$JOB_DIR.start"; mkdir "$JOB_DIR.start" 2>/dev/null; } ||
+            error_exit "Another task is starting. Try again in a moment."
+        [ -d "$JOB_DIR.start" ] && [ "$(age_of "$JOB_DIR.start")" -lt 30 ] && [ ! -f "$JOB_DIR.start/mine" ] &&
+            error_exit "Another task is starting. Try again in a moment."
+    fi
+    : > "$JOB_DIR.start/mine"
+    trap 'rm -rf "$JOB_DIR.start"' EXIT
     [ "$(job_state)" = running ] && error_exit "Another task is running: $(cat "$JOB_DIR/name")."
     lp=$(lock_pid)
     if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then
@@ -394,10 +415,15 @@ start_job() {
     echo "$1" > "$JOB_DIR/name"
     date +%s > "$JOB_DIR/started"
     DETACH=""
-    command -v setsid >/dev/null 2>&1 && DETACH=setsid
+    if command -v setsid >/dev/null 2>&1; then DETACH="setsid"
+    elif command -v nohup >/dev/null 2>&1; then DETACH="nohup"
+    fi
     # shellcheck disable=SC2016
-    $DETACH sh -c 'echo $$ > "$2/pid"; sh "$0" "$1" -y; echo $? > "$2/exit"' "$SELF" "$1" "$JOB_DIR" \
+    $DETACH sh -c 'trap "" HUP; echo $$ > "$2/pid"; sh "$0" "$1" -y; echo $? > "$2/exit"' "$SELF" "$1" "$JOB_DIR" \
         < /dev/null > "$JOB_DIR/log" 2>&1 &
+    # Hold the start until the task has written its pid
+    n=0
+    while [ ! -s "$JOB_DIR/pid" ] && [ $n -lt 50 ]; do sleep 0.1 2>/dev/null || sleep 1; n=$((n + 1)); done
     echo "Started: $1. Follow it with: sh $SELF job-status"
 }
 
@@ -1829,7 +1855,7 @@ status_json() {
     printf '"installed":%s,"build":%s,"buildLabel":%s,"recommended":%s,' "$installed" "$(json_str "$build")" \
         "$(json_str "$(build_label "$build")")" "$(json_str "$RECOMMENDED")"
     printf '"mounted":%s,"opkg":%s,"packages":%s,"diskUsed":%s,"freeMB":%s,' "$(json_bool opt_ours)" "$(json_bool opkg_works)" \
-        "$(json_num "$pkgs")" "$(json_str "$used")" "$(json_num "$( [ -n "$free_kb" ] && echo $((free_kb / 1024)) )")"
+        "$(json_num "$pkgs")" "$(json_str "$used")" "$(json_num "$(case "$free_kb" in ''|*[!0-9]*) ;; *) echo $((free_kb / 1024)) ;; esac)")"
     printf '"bootScript":%s,"bootLog":%s,"bash":%s,"shellFiles":%s,"helpers":%s,"tvHelpers":%s,' \
         "$(json_bool [ -x "$INIT_SCRIPT" ])" "$(json_str "$(tail -n 1 "$BOOT_LOG" 2>/dev/null)")" \
         "$(json_bool /opt/bin/bash -c true)" "$(json_bool is_ours "$HOME_DIR/.profile")" "$(json_bool helpers_ok)" \

@@ -69,9 +69,11 @@
     }
 
     // Run the bundled script as root, with fixed arguments. cb(ok, stdout, error)
+    // JSON answers leave stderr out, so a stray message can't break them.
     function runScript(args, cb) {
         if (window.ENTWARE_DEMO) { window.ENTWARE_DEMO(args, cb); return; }
-        luna(HBC_EXEC, { command: 'sh ' + shq(SCRIPT) + ' ' + args + ' 2>&1' }, function (r) {
+        var errs = / --json$/.test(args) ? ' 2>/dev/null' : ' 2>&1';
+        luna(HBC_EXEC, { command: 'sh ' + shq(SCRIPT) + ' ' + args + errs }, function (r) {
             cb(r.returnValue !== false, r.stdoutString || '', r.errorText || r.stderrString || '');
         });
     }
@@ -257,10 +259,16 @@
                 var log = j.log && j.log.length ? j.log : ['Working…'];
                 var title = jobTitle(j.name || name);
                 if (j.state === 'running') {
-                    var keep = $('log');
-                    var atEnd = !keep || keep.scrollTop + keep.clientHeight >= keep.scrollHeight - 30;
-                    overlay('busy', '<span class="spinner"></span>' + esc(title), logHtml(log), 'This keeps going even if you close the app.');
-                    if (atEnd) { $('log').scrollTop = $('log').scrollHeight; }
+                    var pre = overlayMode === 'busy' && $('log');
+                    if (pre) {
+                        // Update the text in place, so scrolling up to read stays put
+                        var atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+                        pre.textContent = log.map(plain).join('\n');
+                        if (atEnd) { pre.scrollTop = pre.scrollHeight; }
+                    } else {
+                        overlay('busy', '<span class="spinner"></span>' + esc(title), logHtml(log), 'This keeps going even if you close the app.');
+                        $('log').scrollTop = $('log').scrollHeight;
+                    }
                     jobTimer = setTimeout(poll, 1200);
                     return;
                 }

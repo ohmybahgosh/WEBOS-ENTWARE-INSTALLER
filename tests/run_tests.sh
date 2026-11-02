@@ -479,6 +479,18 @@ ok "the app can't start a task while SSH holds the lock" 'grep -q "running from 
 kill $HOLDER; wait $HOLDER 2>/dev/null
 run install -y
 ok "a lock left by a stopped task is cleared" 'grep -q "Entware installed successfully" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
+rm -rf /tmp/webos-entware-job
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade) > "$W/j1" 2>&1 &
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade) > "$W/j2" 2>&1 &
+wait
+ok "two tasks started at the same moment: only one runs" '[ "$(cat "$W/j1" "$W/j2" | grep -c "Started:")" = 1 ]'
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+mkdir -p /tmp/webos-entware.lock
+! run install -y
+ok "a lock taken a moment ago, with no pid yet, is respected" 'grep -q "just starting" "$W/out"'
+touch -d "2 minutes ago" /tmp/webos-entware.lock
+run install -y
+ok "a lock with no pid from minutes ago is cleared" 'grep -q "Entware installed successfully" "$W/out"'
 run uninstall -y
 ok "uninstall restarting itself from /tmp keeps and then releases the lock" 'grep -q "Entware removed" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
 

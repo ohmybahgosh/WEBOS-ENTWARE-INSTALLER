@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: ShellCheck the installer (POSIX sh, like the TV)
         run: shellcheck -s sh -S warning webos-entware-installer.sh
       - name: ShellCheck the test suite
@@ -31,6 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Check the issue forms, and the fields the TV app fills in
         run: python3 tests/check-issue-forms.py
 
@@ -43,6 +47,8 @@ jobs:
         shell: ["busybox sh", dash]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install shells
         run: |
           sudo apt-get update -qq
@@ -55,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -62,7 +70,7 @@ jobs:
         run: node --check webos-app/src/app.js && node --check webos-app/gen-manifest.js
       - name: Build the IPK and manifest
         run: |
-          npm install -g @webos-tools/cli
+          npm install -g @webos-tools/cli@3.2.6
           webos-app/build.sh
       - uses: actions/upload-artifact@v4
         with:
