@@ -783,8 +783,12 @@ search_pkgs() {
         echo "No packages match \"$1\".  Try a shorter word, or run: ent update"
         return 0
     fi
-    cols=$(stty size 2>/dev/null | awk '{print $2}')
-    case "$cols" in ''|*[!0-9]*) cols=${COLUMNS:-80} ;; esac
+    # An exported COLUMNS wins. Otherwise ask the terminal: webOS's busybox
+    # stty can't report the size, but its tput can
+    cols=${COLUMNS:-}
+    case "$cols" in ''|*[!0-9]*) cols=$(tput cols 2>/dev/null) ;; esac
+    case "$cols" in ''|*[!0-9]*) cols=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}') ;; esac
+    case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
     case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
     [ "$cols" -lt 40 ] && cols=40
     [ "$cols" -gt 100 ] && cols=100
@@ -822,7 +826,7 @@ search_pkgs() {
         }
         END {
             total = na + nb
-            printf "\033[0;36m%d package%s match \"%s\"\033[0m", total, (total == 1 ? "" : "s"), term
+            printf "\033[0;36m%d %s \"%s\"\033[0m", total, (total == 1 ? "package matches" : "packages match"), term
             if (ni) printf "  (%d installed)", ni
             printf "\n\n"
             for (i = 1; i <= na; i++) printf "%s\n", a[i]
