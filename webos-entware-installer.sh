@@ -1107,10 +1107,15 @@ launch)
     ;;
 close)
     check_id "$1" close
-    r=$(luna "$SAM/close" "{\"id\":\"$1\"}")
+    # closeByAppId works from a root shell; on webOS 25, close only accepts
+    # requests from the app's own process. Older firmware may only have close.
+    r=$(luna "$SAM/closeByAppId" "{\"id\":\"$1\"}")
+    case "$(err "$r")" in
+        *"nknown method"*|*"no such method"*|*"Unknown method"*) r=$(luna "$SAM/close" "{\"id\":\"$1\"}") ;;
+    esac
     if ! ok "$r"; then
         case "$(err "$r")" in
-            *"no app matched"*) die "$1 isn't running." ;;
+            *"not running"*|*"no valid life handler"*|*"no app matched"*) die "$1 isn't running." ;;
             *) die "$1 didn't close: $(err "$r")" ;;
         esac
     fi

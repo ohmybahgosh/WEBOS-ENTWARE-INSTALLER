@@ -99,6 +99,11 @@ case "$*" in
             *x.not.real*) printf '{\n    "errorCode": -101,\n    "returnValue": false,\n    "errorText": "not exist"\n}\n' ;;
             *) echo '{"returnValue": true}' ;;
         esac ;;
+    *applicationManager/closeByAppId*)
+        case "$*" in
+            *netflix*) echo '{"returnValue": true}' ;;
+            *) printf '{\n    "errorCode": 1,\n    "returnValue": false,\n    "errorText": "no valid life handler"\n}\n' ;;
+        esac ;;
     *applicationManager/close*) printf '{\n    "errorCode": 1,\n    "returnValue": false,\n    "errorText": "no app matched by pid"\n}\n' ;;
     *listApps*) echo '{"returnValue":true,"apps":[{"id":"netflix","title":"Netflix","type":"native"},{"id":"app.tivibro.tv","title":"TiviBro","type":"web"},{"id":"com.hidden.svc","title":"Hidden","type":"web","visible":false}]}' ;;
     *applicationManager/running*) printf '{\n    "returnValue": true,\n    "running": [\n        {\n            "id": "netflix"\n        }\n    ]\n}\n' ;;
@@ -416,6 +421,8 @@ ok "launch explains an unknown app" 'grep -q "No app has the ID x.not.real" "$W/
 ! /opt/bin/launch 'bad;id' > "$W/out" 2>&1
 ok "launch refuses an invalid ID" 'grep -q "isn.t a valid app ID" "$W/out"'
 ! /opt/bin/close app.tivibro.tv > "$W/out" 2>&1
+/opt/bin/close netflix > "$W/c" 2>&1
+ok "close uses closeByAppId, which works from a root shell" 'grep -q "Closed netflix" "$W/c" && grep -q "closeByAppId {\"id\":\"netflix\"}" /tmp/luna.log'
 ok "close explains an app that isn't running" 'grep -q "app.tivibro.tv isn.t running" "$W/out"'
 /opt/bin/apps > "$W/out" 2>&1
 ok "apps lists visible apps and marks running ones (no node here, so the fallback parser)" 'grep -q "^\* netflix" "$W/out" && grep -q "app.tivibro.tv.*TiviBro" "$W/out" && ! grep -q com.hidden.svc "$W/out"'

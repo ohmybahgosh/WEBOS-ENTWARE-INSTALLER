@@ -15,6 +15,10 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 - Releases on GitHub with the installer, the app, its manifest and a `SHA256SUMS` file, built by CI after the tests pass.
 - `SECURITY.md`, and this changelog.
 
+### Fixed
+
+- `close` couldn't close apps from SSH on webOS 25, which only accepts `close` from the app itself.  It now uses `closeByAppId`, found testing the TV app on a C2.
+
 ## [2.6.0] - 2026-11-01
 
 ### Added
