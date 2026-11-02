@@ -134,6 +134,7 @@ opt_ours() { [ /opt -ef "$BIND_SRC" ]; }
 # === Where Entware lives ===
 # The boot script names the folder (SRC=...), so that's the record of it
 boot_src() { sed -n 's/^ *SRC=//p' "$INIT_SCRIPT" 2>/dev/null | head -n 1; }
+# shellcheck disable=SC3013  # busybox and dash have test -ef
 resolve_src() {
     if [ /opt -ef "$APP_SRC" ]; then
         BIND_SRC=$APP_SRC
