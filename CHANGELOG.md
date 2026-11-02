@@ -2,6 +2,18 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.8.0] - 2026-11-02
+
+### Added
+
+- **Add-ons:** `addons`, `add <name>` and `remove <name>`, for packages worth one press and the setup each needs on webOS: nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl and jq.  The list is fixed in the installer.  In the TV app, an **Add-ons** screen adds, finishes setting up or removes each one in the background, and the menu over SSH has them too.
+- **CI:** an ES5 lint of the app (for older webOS browsers), a check of what's inside the built IPK and that its manifest matches, a headless run of the app driven with the remote's keys (screenshots saved with each run), actionlint, CodeQL, and Dependabot for the actions.  Every action is pinned to a commit, and newer pushes cancel older runs.
+
+### Changed
+
+- locate is set up from Add-ons now, so the app's separate "Set up locate" button is gone.  `webos-entware locate` still works.
+- The app's buttons are a little more compact, so every one fits above the footer even with an update showing.
+
 ## [2.7.0] - 2026-11-02
 
 ### Added

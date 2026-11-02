@@ -66,11 +66,15 @@ case "$1" in
         done ;;
     remove) shift
         for p in "$@"; do
+            case "$p" in -*) continue ;; esac
+            if [ "$p" = git ] && grep -qx git-http $DB; then echo "Package git is depended upon by git-http"; FAILED=1; continue; fi
+            echo "$p" >> /tmp/opkg-removed.log
             grep -vx "$p" $DB > $DB.new; mv $DB.new $DB
             rm -f /opt/lib/opkg/info/$p.control
             [ "$p" = mlocate ] && rm -f /opt/bin/updatedb /opt/bin/locate
             [ "$p" = ca-bundle ] && rm -f /opt/etc/ssl/certs/ca-certificates.crt
-        done ;;
+        done
+        exit ${FAILED:-0} ;;
     list-installed) sed 's/$/ - 1/' $DB ;;
     search) for l in /opt/lib/opkg/info/*.list; do
             [ -f "$l" ] && grep -qx "$2" "$l" && { n=${l##*/}; echo "${n%.list} - 1"; }
@@ -502,6 +506,61 @@ run install -y
 ok "a lock with no pid from minutes ago is cleared" 'grep -q "Entware installed successfully" "$W/out"'
 run uninstall -y
 ok "uninstall restarting itself from /tmp keeps and then releases the lock" 'grep -q "Entware removed" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
+
+echo "== [$SH] 30. add-ons"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run install -y
+run addons --json
+ok "addons --json lists the catalog with each one's state" 'python3 -c "
+import json,sys; d={a[\"id\"]: a for a in json.load(open(sys.argv[1]))}
+assert d[\"nano\"][\"state\"] == \"installed\" and d[\"nano\"][\"removable\"] is False, d[\"nano\"]
+assert d[\"htop\"][\"state\"] == \"notInstalled\" and d[\"git\"][\"packages\"] == \"git git-http\", d
+assert d[\"locate\"][\"state\"] == \"notInstalled\" and len(d) >= 10, d
+" "$W/out"'
+run add htop -y
+ok "add installs an add-on" 'grep -q "htop is ready" "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
+run add git -y
+ok "add git brings HTTPS certificates with it" '[ -f /opt/lib/opkg/info/git-http.control ] && [ -s /opt/etc/ssl/certs/ca-certificates.crt ]'
+run add locate -y
+ok "add locate sets locate up" 'grep -q "locate is ready" "$W/out" && [ -x /opt/bin/updatedb-webos ] && [ -f /opt/etc/updatedb.conf ]'
+run addons
+ok "addons lists states for people too" 'grep -q "htop.*installed" "$W/out" && grep -q "tmux.*not installed" "$W/out"'
+! run add "htop;reboot" -y
+ok "add refuses a name that isn't in the catalog" 'grep -q "Unknown add-on" "$W/out"'
+! run add vim -y
+ok "add refuses packages outside the catalog" 'grep -q "Unknown add-on: vim" "$W/out"'
+! run remove nano -y
+ok "remove keeps the base setup" 'grep -q "part of the base setup" "$W/out" && [ -x /opt/bin/nano ]'
+rm -f /tmp/opkg-removed.log
+run remove locate -y
+ok "remove locate takes its settings and cron job with it" 'grep -q "Removed locate" "$W/out" && [ ! -e /opt/bin/updatedb-webos ] && [ ! -e /opt/etc/cron.hourly/updatedb ] && [ ! -e /opt/etc/updatedb.conf ] && grep -qx mlocate /tmp/opkg-removed.log'
+printf '# my own\n' > /opt/etc/updatedb.conf
+run add locate -y; run remove locate -y
+ok "remove locate keeps an updatedb.conf you wrote" 'grep -q "my own" /opt/etc/updatedb.conf'
+rm -f /opt/etc/updatedb.conf
+run remove git -y
+ok "remove git takes git-http off first, and leaves the certificates" 'grep -q "Removed git" "$W/out" && [ ! -f /opt/lib/opkg/info/git.control ] && [ ! -f /opt/lib/opkg/info/git-http.control ] && [ -s /opt/etc/ssl/certs/ca-certificates.crt ]'
+! run add htop clean -y
+ok "add with another action after it is refused" '[ -f /opt/lib/opkg/info/htop.control ] && [ -x /opt/bin/opkg ]'
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job add tmux) > "$W/out" 2>&1
+ok "job add starts in the background" 'grep -q "Started: add tmux" "$W/out"'
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job-status --json) > "$W/out" 2>&1
+ok "job add finishes and reports its name" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"state\"] == \"done\" and d[\"name\"] == \"add tmux\" and d[\"exit\"] == 0, d
+assert any(\"tmux is ready\" in l for l in d[\"log\"]), d
+" "$W/out" && [ -f /opt/lib/opkg/info/tmux.control ]'
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job remove tmux) > "$W/out" 2>&1
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+ok "job remove removes without asking" '[ ! -f /opt/lib/opkg/info/tmux.control ] && grep -q "Removed tmux" /tmp/webos-entware-job/log'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job add "x y") > "$W/out" 2>&1
+ok "job add refuses names outside the catalog" 'grep -q "Unknown add-on" "$W/out"'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade htop) > "$W/out" 2>&1
+ok "job refuses a name on tasks that take none" 'grep -q "takes no name" "$W/out"'
+run uninstall -y
+! run add htop -y
+ok "add says what to do when Entware isn't installed" 'grep -q "isn.t mounted on /opt" "$W/out"'
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

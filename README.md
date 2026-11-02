@@ -25,7 +25,7 @@ A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**,
 >
 > Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
 >
-> - **Tests on every push:** 140+ [tests](tests/run_tests.sh) install, repair, reboot and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash, along with ShellCheck, a build of the TV app, and a check of the issue forms.  The CI badge above shows the latest run.
+> - **Tests on every push:** 160+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
 > - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
 >
 > Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
@@ -51,6 +51,7 @@ A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**,
 - [nano](#nano)
 - [HTTPS certificates](#https-certificates)
 - [locate (mlocate)](#locate-mlocate)
+- [Add-ons](#add-ons)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
   - [Upgrading from an older setup](#upgrading-from-an-older-setup)
 - [Reboots](#reboots)
@@ -70,7 +71,8 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 
 - **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
-- **Update packages**, **Set up locate** and **Uninstall Entware**, with a confirmation before anything is removed.
+- **Add-ons:** nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl and jq, each with the setup it needs on webOS.  One press adds, finishes setting up or removes one.
+- **Update packages** and **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check:** everything `doctor` looks at, on screen.
 - **Report a problem:** a QR code that opens a bug report on your phone with your TV, version, build and the full check already filled in.
@@ -81,7 +83,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 **Or install the IPK yourself:** download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.7.0_all.ipk"}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.8.0_all.ipk"}'
 ```
 
 Already installed Entware over SSH?  Open the app and it shows your install as it is.  The app and the `webos-entware` command run the same installer, and a repair from the app updates the saved command to the app's version.  Removing the app leaves Entware installed; use **Uninstall Entware** first if you want it gone too.
@@ -215,8 +217,11 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware uninstall` | Remove Entware and everything the installer added |
 | `webos-entware upgrade` | Refresh the package list and upgrade every package (same as `ent upgrade`) |
 | `webos-entware locate` | Set up locate (see [locate](#locate-mlocate)) |
+| `webos-entware addons` | List the [add-ons](#add-ons) and whether each is installed |
+| `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
+| `webos-entware remove <name>` | Uninstall an add-on |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
-| `webos-entware job <task>` | Run `install`, `uninstall`, `locate` or `upgrade` in the background; `job-status` follows it |
+| `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>` or `remove <name>` in the background; `job-status` follows it |
 | `webos-entware` | Open the menu |
 
 `doctor` shows your model, webOS version, kernel, Homebrew Channel and telnet status, the installed and recommended builds, whether `/opt` is mounted, whether `opkg` and bash run, and whether the boot script and shell files are in place. It ends with "Everything looks right" or a list of problems, each with its fix.
@@ -334,6 +339,34 @@ A full refresh takes a couple of seconds. Repairing Entware sets locate up again
 
 ---
 
+## Add-ons
+
+Packages worth one press, with the setup each needs on webOS.  Install them from the TV app's **Add-ons** screen, or over SSH:
+
+```sh
+webos-entware addons         # what's available and what's installed
+webos-entware add git        # install one
+webos-entware remove git     # and take it off again
+```
+
+| Add-on | Packages | What you get |
+|:-------|:---------|:-------------|
+| `nano` | nano-full | [Syntax colors](#nano) for 130+ languages and line numbers.  Part of the shell setup, so it stays |
+| `locate` | mlocate | [locate](#locate-mlocate) with settings for webOS and an hourly refresh.  Removing it takes the settings and the hourly job too |
+| `certs` | ca-bundle | [HTTPS certificates](#https-certificates).  Stays, since other packages rely on it |
+| `git` | git, git-http | git with HTTPS, and the certificates it needs |
+| `python` | python3, python3-pip | Python 3 with pip, and the certificates it needs.  The largest add-on |
+| `htop` | htop | A live view of CPU and memory use |
+| `tmux` | tmux | Terminal sessions that keep running when SSH drops |
+| `ncdu` | ncdu | Find what's filling up the disk |
+| `rsync` | rsync | Fast copies to and from the TV over SSH |
+| `curl` | curl | Fetch URLs and test APIs |
+| `jq` | jq | Read and filter JSON, like `luna-send` replies |
+
+Any other Entware package installs with `ent install <package>` as usual.  The list is fixed in the installer, so the app can only ever ask for one of these by name.
+
+---
+
 ## What it changes on the TV
 
 | Path | What |
@@ -448,7 +481,7 @@ Bug reports and ideas are welcome: use the [issue forms](https://github.com/ohmy
 
 AI-assisted pull requests are welcome too, held to the same standard as the rest of this project: say in the pull request that AI was used, make sure you understand and have reviewed every change, and test it on a real TV.
 
-To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app/build.sh`.  The IPK and its Homebrew Channel manifest land in `webos-app/out/`.
+To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app/build.sh`.  The IPK and its Homebrew Channel manifest land in `webos-app/out/`.  `tests/check-ipk.sh` checks the build, and `node tests/ui-test.js` (with `npm install playwright`) clicks through the app and saves screenshots to `tests/ui-out/`.
 
 ---
 

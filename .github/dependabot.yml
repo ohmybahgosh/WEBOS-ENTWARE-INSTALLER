@@ -1,0 +1,13 @@
+# Keeps the pinned GitHub Actions current: a weekly pull request when an
+# action has a new release, with its commit SHA updated.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "CI"

@@ -7,7 +7,7 @@
  * service of its own. Every command is a fixed string: nothing typed or
  * received is ever passed to the shell.
  *
- * Install, repair, uninstall, locate and package updates run as background
+ * Install, repair, uninstall, locate, add-ons and package updates run as background
  * tasks (the script's "job" command), detached from the app, so closing the
  * app can't stop one halfway. The app follows the task's log while it runs,
  * and picks it up again if it's reopened.
@@ -32,6 +32,9 @@
     var onConfirm = null;
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
+    var addons = [];         // last addons --json
+    var addonIndex = 0;      // focused row on the Add-ons screen
+    var backToAddons = false; // reopen Add-ons after an add-on task's result
 
     function $(id) { return document.getElementById(id); }
 
@@ -179,7 +182,7 @@
         $('install-title').textContent = s.installed ? (s.issues.length ? 'Repair Entware' : 'Check and repair') : 'Install Entware';
         $('install-hint').textContent = s.installed ? 'keeps your packages and settings' : 'about two minutes, needs internet';
         show('upgrade', s.installed && s.mounted);
-        show('locate', s.installed && s.mounted && s.locate !== 'ready');
+        show('addons', s.installed && s.mounted);
         show('uninstall', s.installed);
         show('update', !!latest);
         if (latest) { $('update-title').textContent = 'Update to v' + latest; }
@@ -211,11 +214,20 @@
         overlayMode = null;
         onConfirm = null;
         $('overlay').className = 'overlay hidden';
+        if (backToAddons) { backToAddons = false; openAddons(); return; }
         focusCurrent();
     }
     function confirmThen(title, text, fn) {
+        backToAddons = overlayMode === 'addons'; // BACK returns to the list
         onConfirm = fn;
         overlay('confirm', esc(title), esc(text), 'Press OK to go ahead, or BACK to cancel.');
+    }
+    // OK on a confirmation: go ahead, without returning to the screen behind it
+    function acceptConfirm() {
+        var fn = onConfirm;
+        backToAddons = false;
+        closeOverlay();
+        fn();
     }
     // Scroll a long log or report in the open panel
     function scrollPanel(by) {
@@ -226,6 +238,11 @@
     // ------------------------------------------------------------------ tasks
 
     function jobTitle(name) {
+        var m = /^(add|remove) ([a-z0-9]+)$/.exec(name || '');
+        if (m) {
+            var a = addonById(m[2]);
+            return (m[1] === 'add' ? 'Add ' : 'Remove ') + (a ? a.title : m[2]);
+        }
         return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate', upgrade: 'Update packages' }[name] || name || 'Task';
     }
 
@@ -235,7 +252,7 @@
 
     // Start a task in the background, then follow it
     function startJob(name) {
-        if (busy) { return; }
+        if (busy || !/^(install|uninstall|locate|upgrade|(add|remove) [a-z0-9]+)$/.test(name)) { return; }
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -273,6 +290,7 @@
                     return;
                 }
                 busy = false;
+                backToAddons = /^(add|remove) /.test(j.name || name);
                 var good = j.state === 'done' && j.exit === 0;
                 var heading = good ? title + ': done' : (j.state === 'lost' ? title + ' stopped before finishing' : title + ': something went wrong');
                 overlay('message', '<span class="' + (good ? 'result-ok' : 'result-bad') + '">' + esc(heading) + '</span>', logHtml(log),
@@ -282,6 +300,81 @@
             });
         }
         poll();
+    }
+
+    // ------------------------------------------------------------------ add-ons
+
+    function addonById(id) {
+        for (var i = 0; i < addons.length; i++) { if (addons[i].id === id) { return addons[i]; } }
+        return null;
+    }
+
+    function openAddons() {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', '<span class="spinner"></span>Add-ons', logHtml(['Checking what\'s installed…']), '');
+        runScript('addons --json', function (ok, out) {
+            busy = false;
+            var list = null;
+            var i = (out || '').indexOf('[');
+            try { list = i >= 0 ? JSON.parse(out.slice(i)) : null; } catch (e) { list = null; }
+            if (!list || !list.length) {
+                overlay('message', '<span class="result-bad">Couldn\'t list the add-ons</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to close.');
+                return;
+            }
+            addons = list;
+            if (addonIndex >= addons.length) { addonIndex = 0; }
+            renderAddons();
+        });
+    }
+
+    function addonPill(a) {
+        if (a.state === 'installed') { return a.removable ? '<span class="pill pill-ok">Installed</span>' : '<span class="pill pill-ok">Included</span>'; }
+        if (a.state === 'needsSetup') { return '<span class="pill pill-warn">Finish setup</span>'; }
+        return '<span class="pill pill-add">Add</span>';
+    }
+
+    function renderAddons() {
+        var html = '<div class="addons" id="addon-list">' + addons.map(function (a, i) {
+            return '<div class="addon' + (i === addonIndex ? ' focus' : '') + '" data-i="' + i + '">' +
+                '<div><b>' + esc(a.title) + '</b><small>' + esc(a.about) + '</small></div>' + addonPill(a) + '</div>';
+        }).join('') + '</div>';
+        overlay('addons', 'Add-ons', html, 'OK adds, finishes setup or removes.  BACK to close.');
+        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
+            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseAddon(); });
+        });
+        focusAddon(addonIndex);
+    }
+
+    function focusAddon(i) {
+        var rows = document.querySelectorAll('.addon');
+        if (!rows.length) { return; }
+        addonIndex = Math.max(0, Math.min(i, rows.length - 1));
+        for (var r = 0; r < rows.length; r++) { rows[r].className = 'addon' + (r === addonIndex ? ' focus' : ''); }
+        // Keep the focused row in view
+        var box = $('addon-list'), row = rows[addonIndex];
+        if (row.offsetTop < box.scrollTop) { box.scrollTop = row.offsetTop; }
+        else if (row.offsetTop + row.offsetHeight > box.scrollTop + box.clientHeight) { box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight; }
+    }
+
+    function chooseAddon() {
+        var a = addons[addonIndex];
+        // Ids are short names from the installer's fixed list; anything else is refused
+        if (!a || !/^[a-z0-9]+$/.test(a.id)) { return; }
+        if (a.state === 'notInstalled') {
+            confirmThen('Add ' + a.title + '?', a.about + '.  Installs ' + a.packages + ' from Entware, and needs internet.',
+                function () { startJob('add ' + a.id); });
+        } else if (a.state === 'needsSetup') {
+            confirmThen('Finish setting up ' + a.title + '?', 'It\'s installed, but not set up for webOS yet.  This finishes the setup.',
+                function () { startJob('add ' + a.id); });
+        } else if (a.removable) {
+            confirmThen('Remove ' + a.title + '?', 'Uninstalls ' + a.packages + (a.id === 'locate' ? ', its settings and the hourly refresh' : '') + '.  You can add it again any time.',
+                function () { startJob('remove ' + a.id); });
+        } else {
+            backToAddons = true;
+            overlay('message', esc(a.title), esc(a.title + ' is part of the base setup, so it stays installed.  ' + a.about + '.'), 'Press OK or BACK to go back.');
+        }
     }
 
     // ------------------------------------------------------------------ actions
@@ -302,7 +395,7 @@
             }
         },
         upgrade: function () { startJob('upgrade'); },
-        locate: function () { startJob('locate'); },
+        addons: function () { addonIndex = 0; openAddons(); },
         uninstall: function () {
             if (!state) { return; }
             confirmThen('Uninstall Entware?',
@@ -423,6 +516,14 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
+        if (overlayMode === 'addons') {
+            if (k === KEY.UP) { focusAddon(addonIndex - 1); }
+            else if (k === KEY.DOWN) { focusAddon(addonIndex + 1); }
+            else if (k === KEY.ENTER) { chooseAddon(); }
+            else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
+            e.preventDefault();
+            return;
+        }
         if (overlayMode) {
             if (k === KEY.UP) { scrollPanel(-140); }
             else if (k === KEY.DOWN) { scrollPanel(140); }
@@ -430,9 +531,7 @@
                 // A task keeps running in the background; BACK just closes the app
                 if (k === KEY.BACK || k === KEY.ESC) { exitApp(); }
             } else if (k === KEY.ENTER && overlayMode === 'confirm' && onConfirm) {
-                var fn = onConfirm;
-                closeOverlay();
-                fn();
+                acceptConfirm();
             } else if (k === KEY.ENTER || k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
                 closeOverlay();
             }
@@ -452,7 +551,7 @@
         btn.addEventListener('click', function () { current = buttons().indexOf(btn); act(btn); });
     });
     $('overlay').addEventListener('click', function () {
-        if (overlayMode === 'confirm' && onConfirm) { var fn = onConfirm; closeOverlay(); fn(); }
+        if (overlayMode === 'confirm' && onConfirm) { acceptConfirm(); }
         else if (overlayMode === 'message') { closeOverlay(); }
     });
     $('overlay').addEventListener('wheel', function (e) { scrollPanel(e.deltaY > 0 ? 140 : -140); });

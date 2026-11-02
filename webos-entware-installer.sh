@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.7.0"
+VERSION="2.8.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -95,19 +95,23 @@ confirm() {
 
 usage() {
     echo "WebOS Entware Installer v$VERSION"
-    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor|locate|upgrade] [options]"
+    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor|locate|upgrade|addons|add|remove] [options]"
     echo "  install        Install Entware, or repair an existing install (packages are kept)"
     echo "  uninstall      Remove Entware, its packages and the shell setup it added"
     echo "  status         Check the TV and the install, and say what to fix (alias: doctor)"
     echo "  locate         Set up locate/updatedb (mlocate) for webOS, with an hourly refresh"
     echo "  upgrade        Refresh the package list and upgrade every Entware package"
-    echo "  job <task>     Run install, uninstall, locate or upgrade in the background (the TV app uses this)"
+    echo "  addons         List the add-ons: packages with the setup they need on webOS"
+    echo "  add <name>     Install an add-on (nano, locate, certs, git, python, htop, tmux, ...)"
+    echo "  remove <name>  Uninstall an add-on"
+    echo "  job <task>     Run install, uninstall, locate, upgrade, add <name> or remove <name>"
+    echo "                 in the background (the TV app uses this)"
     echo "  job-status     Show the background task's progress"
     echo "Options:"
     echo "  -y, --yes      Don't ask; use the recommended build and answer yes"
     echo "  --no-shell     Install Entware only, leave .profile/.bashrc and the shell alone"
     echo "  --with-locate  Also set up locate (same as running locate after install)"
-    echo "  --json         With status or job-status: print JSON (the TV app reads this)"
+    echo "  --json         With status, addons or job-status: print JSON (the TV app reads this)"
     echo "  --arch=ARCH    Use aarch64-k3.10 (64-bit) or armv7sf-k3.2 (32-bit) without asking"
 }
 
@@ -393,8 +397,9 @@ job_state() {
 
 start_job() {
     case "$1" in
-        install|uninstall|locate|upgrade) ;;
-        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate or upgrade." ;;
+        install|uninstall|locate|upgrade) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
+        add|remove) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
+        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add or remove." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     # Only one start at a time: two at once would share one log and exit code
@@ -414,19 +419,20 @@ start_job() {
     [ -f "$SELF" ] || error_exit "Can't find this script ($SELF) to run it in the background."
     rm -rf "$JOB_DIR"
     mkdir -p "$JOB_DIR"
-    echo "$1" > "$JOB_DIR/name"
+    echo "$1${2:+ $2}" > "$JOB_DIR/name"
     date +%s > "$JOB_DIR/started"
     DETACH=""
     if command -v setsid >/dev/null 2>&1; then DETACH="setsid"
     elif command -v nohup >/dev/null 2>&1; then DETACH="nohup"
     fi
     # shellcheck disable=SC2016
-    $DETACH sh -c 'trap "" HUP; echo $$ > "$2/pid"; sh "$0" "$1" -y; echo $? > "$2/exit"' "$SELF" "$1" "$JOB_DIR" \
-        < /dev/null > "$JOB_DIR/log" 2>&1 &
+    # $0 is this script, $1 the job folder, then the task and its name
+    $DETACH sh -c 'trap "" HUP; d=$1; shift; echo $$ > "$d/pid"; sh "$0" "$@" -y; echo $? > "$d/exit"' \
+        "$SELF" "$JOB_DIR" "$1" ${2:+"$2"} < /dev/null > "$JOB_DIR/log" 2>&1 &
     # Hold the start until the task has written its pid
     n=0
     while [ ! -s "$JOB_DIR/pid" ] && [ $n -lt 50 ]; do sleep 0.1 2>/dev/null || sleep 1; n=$((n + 1)); done
-    echo "Started: $1. Follow it with: sh $SELF job-status"
+    echo "Started: $1${2:+ $2}. Follow it with: sh $SELF job-status"
 }
 
 job_status() {
@@ -1441,6 +1447,121 @@ locate_action() {
     return 0
 }
 
+# === Add-ons ===
+# Packages that are worth a button in the TV app, and the setup each one
+# needs on webOS. The list is fixed here: the app only ever names an id
+# from it, so nothing it sends reaches opkg as a package name.
+#   id|title|packages|removable|about
+addon_catalog() {
+    cat << 'ADDONS'
+nano|nano with syntax colors|nano-full|no|Colors for 130+ languages, line numbers, and it reopens files where you left off
+locate|locate|mlocate|yes|Fast file search, with settings for webOS and an hourly refresh
+certs|HTTPS certificates|ca-bundle|no|Lets wget-ssl, git, Python and others check HTTPS sites
+git|git|git git-http|yes|With HTTPS support and certificates, so clone and pull just work
+python|Python 3|python3 python3-pip|yes|With pip and HTTPS certificates (the largest add-on)
+htop|htop|htop|yes|See what's using the CPU and memory, live
+tmux|tmux|tmux|yes|Terminal sessions that keep running when SSH drops
+ncdu|ncdu|ncdu|yes|Find what's filling up the disk
+rsync|rsync|rsync|yes|Fast copies to and from the TV over SSH
+curl|curl|curl|yes|Fetch URLs and test APIs from the shell
+jq|jq|jq|yes|Read and filter JSON, like luna-send replies
+ADDONS
+}
+
+# Sets AD_ID, AD_TITLE, AD_PKGS, AD_REMOVABLE and AD_ABOUT, or fails
+addon_find() {
+    case "$1" in ''|*[!a-z0-9]*) return 1 ;; esac
+    line=$(addon_catalog | grep "^$1|") || return 1
+    IFS='|' read -r AD_ID AD_TITLE AD_PKGS AD_REMOVABLE AD_ABOUT << EOL
+$line
+EOL
+}
+
+addon_installed() {
+    for p in $AD_PKGS; do pkg_installed "$p" || return 1; done
+}
+
+# installed, needsSetup or notInstalled
+addon_state() {
+    addon_installed || { echo notInstalled; return; }
+    case "$AD_ID" in
+        nano) nanorc_colors || { echo needsSetup; return; } ;;
+        locate) locate_ready || { echo needsSetup; return; } ;;
+        certs) ca_ok || { echo needsSetup; return; } ;;
+        git|python) ca_ok || { echo needsSetup; return; } ;;
+    esac
+    echo installed
+}
+
+addons_list() {
+    if [ "$JSON" = 1 ]; then
+        first=1
+        printf '['
+        addon_catalog | while IFS='|' read -r AD_ID AD_TITLE AD_PKGS AD_REMOVABLE AD_ABOUT; do
+            [ "$first" = 1 ] || printf ','
+            first=0
+            printf '{"id":%s,"title":%s,"packages":%s,"about":%s,"removable":%s,"state":%s}' \
+                "$(json_str "$AD_ID")" "$(json_str "$AD_TITLE")" "$(json_str "$AD_PKGS")" "$(json_str "$AD_ABOUT")" \
+                "$( [ "$AD_REMOVABLE" = yes ] && echo true || echo false)" "$(json_str "$(addon_state)")"
+        done
+        printf ']\n'
+        return 0
+    fi
+    log "$CYAN" "Add-ons (webos-entware add <name>, webos-entware remove <name>)"
+    addon_catalog | while IFS='|' read -r AD_ID AD_TITLE AD_PKGS AD_REMOVABLE AD_ABOUT; do
+        case "$(addon_state)" in
+            installed) st="${GREEN}installed${NC}" ;;
+            needsSetup) st="${YELLOW}needs setup${NC}" ;;
+            *) st="not installed" ;;
+        esac
+        printf '  %-8s %b\n           %s\n' "$AD_ID" "$st" "$AD_ABOUT"
+    done
+}
+
+addon_add() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    addon_find "$1" || error_exit "Unknown add-on: ${1:-none}. See: webos-entware addons"
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    info "Adding $AD_TITLE..."
+    /opt/bin/opkg update >/dev/null 2>&1 || warn "Couldn't refresh the package list. Trying with the one already here."
+    # shellcheck disable=SC2086  # a list of package names from the catalog
+    /opt/bin/opkg install $AD_PKGS || error_exit "$AD_TITLE didn't install. Check the TV's internet connection and free space."
+    case "$AD_ID" in
+        nano) setup_nanorc ;;
+        locate) setup_locate || exit 1 ;;
+        certs) ca_ok || error_exit "ca-bundle installed, but $CA_FILE is missing." ;;
+        git|python)
+            if ! ca_ok; then
+                /opt/bin/opkg install ca-bundle >/dev/null 2>&1 && ca_ok ||
+                    warn "ca-bundle didn't install, so HTTPS may fail with certificate errors."
+            fi ;;
+    esac
+    ensure_ca
+    [ "$AD_ID" = locate ] && [ "$SETUP_SHELL" = 1 ] && info "Log in again to use plain updatedb."
+    success "$AD_TITLE is ready."
+}
+
+addon_remove() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    addon_find "$1" || error_exit "Unknown add-on: ${1:-none}. See: webos-entware addons"
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    [ "$AD_REMOVABLE" = yes ] || error_exit "$AD_TITLE is part of the base setup, so it stays. Remove it with ent remove if you really want to."
+    addon_installed || { info "$AD_TITLE isn't installed."; return 0; }
+    confirm "Remove $AD_TITLE ($AD_PKGS)?" || { info "Kept $AD_TITLE."; return 0; }
+    # Dependents first (git-http before git): opkg won't remove a package
+    # another one still needs. No --autoremove, so shared libraries and
+    # ca-bundle, which other packages may rely on, stay.
+    rev=""
+    for p in $AD_PKGS; do rev="$p $rev"; done
+    # shellcheck disable=SC2086
+    /opt/bin/opkg remove $rev || error_exit "$AD_TITLE didn't uninstall cleanly. See: ent list"
+    if [ "$AD_ID" = locate ]; then
+        rm -f "$LOCATE_CRON" "$UPDATEDB_WRAPPER" "$LOCATE_DB" /opt/etc/updatedb.group
+        if grep -qs "^#.*$MARKER" "$UPDATEDB_CONF"; then rm -f "$UPDATEDB_CONF"; fi
+    fi
+    success "Removed $AD_TITLE."
+}
+
 # === Mount Entware on every boot ===
 install_boot_script() {
     if [ ! -d /var/lib/webosbrew ]; then
@@ -1886,8 +2007,16 @@ if [ "$1" = post-install ]; then
     exit 0
 fi
 if [ "$1" = job ]; then
-    start_job "$2"
+    [ $# -le 3 ] || error_exit "Too many arguments for job."
+    start_job "${2:-}" "${3:-}"
     exit 0
+fi
+ADDON=""
+if [ "$1" = add ] || [ "$1" = remove ]; then
+    ACTION=$1
+    ADDON=${2:-}
+    [ -n "$ADDON" ] || error_exit "Name an add-on, e.g. webos-entware $1 htop. See: webos-entware addons"
+    shift 2
 fi
 if [ "$1" = job-status ]; then
     [ "$2" = --json ] && JSON=1
@@ -1896,9 +2025,10 @@ if [ "$1" = job-status ]; then
 fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate|upgrade) ACTION="$arg" ;;
-        doctor) ACTION="status" ;;
-        clean) ACTION="uninstall" ;;
+        install|uninstall|status|locate|upgrade|addons|doctor|clean)
+            # add and remove take only options after the name
+            [ -z "$ADDON" ] || { usage; exit 1; }
+            case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
         -y|--yes) ASSUME_YES=1 ;;
         --no-shell) SETUP_SHELL=0 ;;
         --with-locate) WITH_LOCATE=1 ;;
@@ -1922,20 +2052,25 @@ if [ -z "$ACTION" ]; then
     echo "2) Uninstall Entware"
     echo "3) Check status (doctor)"
     echo "4) Set up locate (mlocate)"
-    echo "5) Exit"
+    echo "5) Add-ons (nano colors, git, python, htop, ...)"
+    echo "6) Exit"
     echo
-    read_answer "Choose an option [1-5]: " || exit 1
+    read_answer "Choose an option [1-6]: " || exit 1
     case "$ANSWER" in
         1) ACTION="install" ;;
         2) ACTION="uninstall" ;;
         3) ACTION="status" ;;
         4) ACTION="locate" ;;
+        5) JSON=0; addons_list; echo
+            read_answer "Add-on to install (blank to go back): " || exit 1
+            [ -n "$ANSWER" ] || exit 0
+            ACTION="add"; ADDON="$ANSWER" ;;
         *) log "$CYAN" "Goodbye!"; exit 0 ;;
     esac
 fi
 
 case "$ACTION" in
-    install|uninstall|locate|upgrade)
+    install|uninstall|locate|upgrade|add|remove)
         take_lock
         trap 'release_lock' EXIT
         trap 'exit 1' INT TERM HUP ;;
@@ -1947,4 +2082,7 @@ case "$ACTION" in
     status) if [ "$JSON" = 1 ]; then status_json; else show_status; fi ;;
     locate) locate_action ;;
     upgrade) upgrade_packages ;;
+    addons) addons_list ;;
+    add) addon_add "$ADDON" ;;
+    remove) addon_remove "$ADDON" ;;
 esac

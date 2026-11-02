@@ -21,6 +21,7 @@ So you can judge it yourself:
 - **Shell files** in `/home/root` (`.profile`, `.bash_profile`, `.bashrc`), only without `--no-shell`.  Your own files are backed up first and put back on uninstall.  Interactive SSH logins switch to bash only if bash runs.
 - **Small tools** in `/opt`: `ent`, `webos-entware`, `webos-tv` and its commands, and settings for nano and locate.  Everything in `/opt` goes away with Entware.
 - **Cleanup of old setups:** it removes Entware package lists from webOS's own `/var/lib/opkg` and `/var/cache/opkg` (only lists that hold Entware's packages), an old log and an empty folder from early setups, and renames old boot scripts that also mounted Entware so they stop running.
+- **Add-ons** install Entware packages from the same server into `/opt`, and nano and locate get settings files there.  Removing one only uninstalls its own packages and files.
 - **locate** gets an `mlocate` group only inside a private mount namespace while `updatedb` runs.  No system file is changed.
 - **A lock** in `/tmp` keeps the app and SSH from changing things at the same time.  Background tasks log to `/tmp` (RAM).
 
@@ -29,6 +30,7 @@ It never changes the system partitions, opens ports, or sends anything about you
 ## The TV app
 
 - It runs the installer bundled inside it through the Homebrew Channel's root service.  Every command it runs is fixed in the app's code.  Nothing typed, received or downloaded is ever passed to the shell.
+- Add-ons are a list fixed in the installer.  The app only sends an add-on's short name, which the installer checks against that list before anything reaches `opkg`, so it can't be used to install or remove anything else.
 - Its only network request is reading the latest release number from the GitHub API, to say when an update is out.  Updates themselves come from the Homebrew Channel.
 - The bug report QR code holds the output of `doctor` (TV model, versions, what's installed).  It's only sent if you scan it and submit the report yourself.
 
