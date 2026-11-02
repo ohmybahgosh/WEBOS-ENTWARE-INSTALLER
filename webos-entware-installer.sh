@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.5.0"
+VERSION="2.5.1"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -661,6 +661,9 @@ setup_shell_environment() {
     /opt/bin/opkg install bash || warn "bash may not have installed."
     /opt/bin/opkg install nano-full || warn "nano-full may not have installed."
     /opt/bin/opkg install coreutils-dircolors || warn "dircolors may not have installed."
+    # GNU ls sizes its columns to fit; busybox ls pads every column to a
+    # fixed width, which leaves wide gaps in ls -l
+    /opt/bin/opkg install coreutils-ls || warn "GNU ls may not have installed. ls will use the busybox version."
     if ! /opt/bin/bash -c true >/dev/null 2>&1; then
         warn "bash didn't install or doesn't run, so your login shell was left as it was."
         return 0

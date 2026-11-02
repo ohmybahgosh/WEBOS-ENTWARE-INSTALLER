@@ -230,7 +230,7 @@ Anything else is passed straight to `opkg`, so `ent list-installed` works too.
 
 ## Shell setup and shortcuts
 
-Unless you use `--no-shell`, the installer adds bash, nano-full and dircolors, and sets SSH logins to switch to bash. If bash is ever missing or broken, logins stay on the stock shell instead of failing.
+Unless you use `--no-shell`, the installer adds bash, nano-full, dircolors and GNU ls (`coreutils-ls`, which fits `ls -l` columns to their contents, unlike busybox ls), and sets SSH logins to switch to bash. If bash is ever missing or broken, logins stay on the stock shell instead of failing.
 
 | Shortcut | What it does |
 |:---------|:-------------|

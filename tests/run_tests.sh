@@ -349,6 +349,7 @@ rm -rf /home/root/.[!.]* /home/root/*
 run install -y
 ok "nanorc written with the syntax includes" 'grep -q "^include \"/opt/share/nano/\*.nanorc\"" /opt/etc/nanorc && grep -q "^set linenumbers" /opt/etc/nanorc && grep -q webos-entware-installer /opt/etc/nanorc'
 ok "nano history folder made" '[ -d /home/root/.local/share/nano ]'
+ok "GNU ls installed with the shell setup" 'grep -qx coreutils-ls /opt/lib/opkg/fake-installed'
 run status
 ok "doctor shows nano colors on, certificates not needed" 'grep -q "nano colors:.*on" "$W/out" && grep -q "HTTPS certificates: not needed yet" "$W/out" && grep -q "Everything looks right" "$W/out"'
 
