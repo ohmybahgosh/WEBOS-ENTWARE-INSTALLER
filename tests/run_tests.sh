@@ -234,6 +234,8 @@ reboot_tv skip-hbc; login
 ok "login mounted /opt" 'mounted'
 run status; ok "doctor notes it, nothing to fix" 'grep -q "mounted when you log in over SSH, not at boot" "$W/out" && grep -q "Everything looks right" "$W/out"'
 run uninstall -y; umount /var/lib
+# Put the Homebrew Channel folder back for the scenarios after this one
+mkdir -p /var/lib/webosbrew && mount -t tmpfs tmpfs /var/lib/webosbrew && mkdir -p /var/lib/webosbrew/init.d
 
 echo "== [$SH] 15. repair an install left by a 2025 version of the installer"
 rm -rf /home/root/.[!.]* /home/root/* /mnt/lg/user/opt /var/lib/webosbrew/init.d/*

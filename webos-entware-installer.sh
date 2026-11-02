@@ -112,6 +112,8 @@ usage() {
 }
 
 # True when /opt is our bind mount
+# test -ef isn't in POSIX, but busybox sh (the TV) and dash both have it
+# shellcheck disable=SC3013
 opt_ours() { [ /opt -ef "$BIND_SRC" ]; }
 opt_mounted() { grep -qs " /opt " /proc/mounts; }
 
@@ -821,6 +823,7 @@ ENTWRAP
 
     # Keep a copy of this script, since /tmp is wiped on reboot
     if [ -f "$SELF" ] && grep -qs "$MARKER" "$SELF"; then
+        # shellcheck disable=SC3013  # busybox and dash have test -ef
         [ "$SELF" -ef "$MANAGER" ] || cp "$SELF" "$MANAGER"
         chmod 755 "$MANAGER"
     elif wget -q -O "$MANAGER.new" "$SCRIPT_URL" && grep -qs "$MARKER" "$MANAGER.new"; then
