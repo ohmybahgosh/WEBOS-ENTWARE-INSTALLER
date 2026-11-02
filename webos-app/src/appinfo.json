@@ -1,0 +1,15 @@
+{
+    "id": "org.ohmybahgosh.entware",
+    "version": "2.7.0",
+    "vendor": "OhMyBahGosh",
+    "type": "web",
+    "main": "index.html",
+    "title": "Entware",
+    "icon": "icon80.png",
+    "largeIcon": "icon130.png",
+    "iconColor": "#0b1220",
+    "bgColor": "#0b1220",
+    "appDescription": "Install and manage Entware on a rooted LG TV",
+    "disableBackHistoryAPI": true,
+    "resolution": "1920x1080"
+}

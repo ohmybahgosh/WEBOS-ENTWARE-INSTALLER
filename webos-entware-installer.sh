@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.6.0"
+VERSION="2.7.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -47,6 +47,12 @@ LEGACY_LIB="/mnt/lg/user/lib/opkg"
 ASSUME_YES=0
 SETUP_SHELL=1
 WITH_LOCATE=0
+JSON=0
+LOCKED=0
+# One install, repair or uninstall at a time, from SSH or the TV app
+LOCK_DIR="/tmp/webos-entware.lock"
+# Tasks the TV app starts in the background: name, pid, log, exit code
+JOB_DIR="/tmp/webos-entware-job"
 FORCE_ARCH=""
 ROLLBACK=0
 SNAPSHOT=0
@@ -89,15 +95,19 @@ confirm() {
 
 usage() {
     echo "WebOS Entware Installer v$VERSION"
-    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor|locate] [options]"
+    echo "Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor|locate|upgrade] [options]"
     echo "  install        Install Entware, or repair an existing install (packages are kept)"
     echo "  uninstall      Remove Entware, its packages and the shell setup it added"
     echo "  status         Check the TV and the install, and say what to fix (alias: doctor)"
     echo "  locate         Set up locate/updatedb (mlocate) for webOS, with an hourly refresh"
+    echo "  upgrade        Refresh the package list and upgrade every Entware package"
+    echo "  job <task>     Run install, uninstall, locate or upgrade in the background (the TV app uses this)"
+    echo "  job-status     Show the background task's progress"
     echo "Options:"
     echo "  -y, --yes      Don't ask; use the recommended build and answer yes"
     echo "  --no-shell     Install Entware only, leave .profile/.bashrc and the shell alone"
     echo "  --with-locate  Also set up locate (same as running locate after install)"
+    echo "  --json         With status or job-status: print JSON (the TV app reads this)"
     echo "  --arch=ARCH    Use aarch64-k3.10 (64-bit) or armv7sf-k3.2 (32-bit) without asking"
 }
 
@@ -295,6 +305,138 @@ old_installer_copies() {
         [ -f "$f" ] || continue
         case "${f##*/}" in *[Ee]ntware*) echo "$f" ;; esac
     done
+}
+
+# === One task at a time ===
+lock_pid() { cat "$LOCK_DIR/pid" 2>/dev/null; }
+
+# Install, repair, uninstall, locate and upgrade take this lock, so the TV
+# app and an SSH session can never change things at the same time
+take_lock() {
+    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+        lp=$(lock_pid)
+        if [ "$lp" = "$$" ]; then
+            # This process again, after uninstall restarted itself from /tmp
+            LOCKED=1
+            return 0
+        fi
+        if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then
+            error_exit "Another install, repair or uninstall is running (process $lp). Wait for it to finish, then try again."
+        fi
+        # Left by a task that was killed or a TV that rebooted
+        rm -rf "$LOCK_DIR"
+        mkdir "$LOCK_DIR" 2>/dev/null || error_exit "Couldn't take the lock $LOCK_DIR."
+    fi
+    echo $$ > "$LOCK_DIR/pid"
+    LOCKED=1
+}
+release_lock() {
+    [ "$LOCKED" = 1 ] && [ "$(lock_pid)" = "$$" ] && rm -rf "$LOCK_DIR"
+    LOCKED=0
+}
+
+# === JSON output, for the TV app ===
+ESC=$(printf '\033')
+# A JSON string: colors removed, quotes and backslashes escaped, line breaks as \n
+json_str() {
+    printf '"%s"' "$(printf '%s' "$1" | sed -e "s/$ESC\[[0-9;]*m//g" -e 's/\\/\\\\/g' -e 's/"/\\"/g' |
+        tr '\t' ' ' | tr -d '\000-\010\013-\037' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')"
+}
+json_bool() { if "$@" >/dev/null 2>&1; then printf true; else printf false; fi; }
+# Lines on stdin as a JSON array of strings
+json_lines() {
+    first=1
+    printf '['
+    while IFS= read -r l || [ -n "$l" ]; do
+        [ -n "$l" ] || continue
+        [ "$first" = 1 ] || printf ','
+        json_str "$l"
+        first=0
+    done
+    printf ']'
+}
+json_num() { case "$1" in ''|*[!0-9]*) printf null ;; *) printf '%s' "$1" ;; esac; }
+
+# === Background tasks, for the TV app ===
+# The app starts a task and checks on it every second or so. It runs
+# detached (setsid), so closing the app doesn't stop it halfway.
+job_state() {
+    if [ ! -f "$JOB_DIR/name" ]; then
+        echo none
+    elif [ -f "$JOB_DIR/exit" ]; then
+        echo "done"
+    else
+        jp=$(cat "$JOB_DIR/pid" 2>/dev/null)
+        if [ -n "$jp" ] && kill -0 "$jp" 2>/dev/null; then
+            echo running
+        elif [ -z "$jp" ] && [ $(( $(date +%s) - $(cat "$JOB_DIR/started" 2>/dev/null || echo 0) )) -lt 10 ]; then
+            echo running    # just started
+        else
+            echo lost       # stopped without finishing: killed, or the TV restarted
+        fi
+    fi
+}
+
+start_job() {
+    case "$1" in
+        install|uninstall|locate|upgrade) ;;
+        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate or upgrade." ;;
+    esac
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    [ "$(job_state)" = running ] && error_exit "Another task is running: $(cat "$JOB_DIR/name")."
+    lp=$(lock_pid)
+    if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then
+        error_exit "An install, repair or uninstall is running from SSH (process $lp)."
+    fi
+    [ -f "$SELF" ] || error_exit "Can't find this script ($SELF) to run it in the background."
+    rm -rf "$JOB_DIR"
+    mkdir -p "$JOB_DIR"
+    echo "$1" > "$JOB_DIR/name"
+    date +%s > "$JOB_DIR/started"
+    DETACH=""
+    command -v setsid >/dev/null 2>&1 && DETACH=setsid
+    # shellcheck disable=SC2016
+    $DETACH sh -c 'echo $$ > "$2/pid"; sh "$0" "$1" -y; echo $? > "$2/exit"' "$SELF" "$1" "$JOB_DIR" \
+        < /dev/null > "$JOB_DIR/log" 2>&1 &
+    echo "Started: $1. Follow it with: sh $SELF job-status"
+}
+
+job_status() {
+    st=$(job_state)
+    name=$(cat "$JOB_DIR/name" 2>/dev/null)
+    code=$(cat "$JOB_DIR/exit" 2>/dev/null)
+    if [ "$JSON" = 1 ]; then
+        printf '{"state":%s,"name":%s,"exit":%s,"started":%s,"log":' "$(json_str "$st")" "$(json_str "$name")" \
+            "$(json_num "$code")" "$(json_num "$(cat "$JOB_DIR/started" 2>/dev/null)")"
+        tail -n 60 "$JOB_DIR/log" 2>/dev/null | json_lines
+        printf '}\n'
+        return 0
+    fi
+    case "$st" in
+        none) echo "No task has run since the TV started." ;;
+        running) echo "Running: $name"; tail -n 20 "$JOB_DIR/log" 2>/dev/null ;;
+        done) echo "Finished: $name (exit code $code)"; tail -n 20 "$JOB_DIR/log" 2>/dev/null ;;
+        lost) echo "Stopped before finishing: $name"; tail -n 20 "$JOB_DIR/log" 2>/dev/null ;;
+    esac
+}
+
+# === Upgrade packages ===
+upgrade_packages() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    info "Refreshing the package list..."
+    /opt/bin/opkg update || error_exit "Couldn't refresh the package list. Check the TV's internet connection."
+    /opt/bin/opkg list 2>/dev/null | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
+    UPGRADABLE=$(/opt/bin/opkg list-upgradable 2>/dev/null)
+    if [ -z "$UPGRADABLE" ]; then
+        success "Every package is up to date."
+        return 0
+    fi
+    info "Upgrading:"
+    echo "$UPGRADABLE"
+    /opt/bin/opkg upgrade || error_exit "Some packages didn't upgrade. Run it again, or 'ent upgrade' to see why."
+    ensure_ca
+    success "Packages upgraded."
 }
 
 # How to run this installer again from a shell. The copy saved in Entware's
@@ -1359,6 +1501,7 @@ on_install_exit() {
         warn "The repair didn't finish. Your existing install and packages were kept."
         info "Run '$(run_cmd) doctor' to see what needs fixing."
     fi
+    release_lock
 }
 
 # Checks the result before calling the install done
@@ -1648,6 +1791,59 @@ show_status() {
     return 1
 }
 
+# Everything doctor checks, as JSON for the TV app
+status_json() {
+    show_status > /dev/null 2>&1
+    tv_info
+    recommend_build
+    installed=false build="" pkgs="" used=""
+    if [ -e "$BIND_SRC/bin/opkg" ]; then
+        installed=true
+        build=$(feed_build "$BIND_SRC/etc/opkg.conf")
+    fi
+    if opkg_works; then
+        pkgs=$(/opt/bin/opkg list-installed 2>/dev/null | wc -l | tr -d ' ')
+        used=$(du -sh "$BIND_SRC" 2>/dev/null | awk '{print $1}')
+    fi
+    free_kb=$(data_free_kb)
+    if [ ! -x /opt/bin/nano ]; then nano=none; elif nanorc_colors; then nano=on; else nano=off; fi
+    if ca_ok; then certs=yes; elif needs_ca; then certs=missing; else certs=notNeeded; fi
+    lockdb=""
+    if ! locate_installed; then
+        loc=notInstalled
+    elif ! locate_ready; then
+        loc=notSetUp
+    elif [ -f "$LOCATE_DB" ]; then
+        loc=ready
+        lockdb=$(date -r "$LOCATE_DB" '+%Y-%m-%d %H:%M' 2>/dev/null)
+    else
+        loc=noDatabase
+    fi
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+    printf '{'
+    printf '"version":%s,"model":%s,"webos":%s,"webosRelease":%s,"firmware":%s,' "$(json_str "$VERSION")" \
+        "$(json_str "$TV_MODEL")" "$(json_str "$WEBOS_NAME")" "$(json_str "$WEBOS_RELEASE")" "$(json_str "$FIRMWARE")"
+    printf '"kernel":%s,"kernelBits":%s,"ip":%s,' "$(json_str "$KERNEL_ARCH")" "$(json_num "$KERNEL_BITS")" "$(json_str "$ip")"
+    printf '"root":%s,"homebrewChannel":%s,"telnet":%s,' "$(json_bool [ "$(id -u)" -eq 0 ])" "$(json_bool hbc_present)" \
+        "$(json_bool [ ! -e "$TELNET_OFF" ])"
+    printf '"installed":%s,"build":%s,"buildLabel":%s,"recommended":%s,' "$installed" "$(json_str "$build")" \
+        "$(json_str "$(build_label "$build")")" "$(json_str "$RECOMMENDED")"
+    printf '"mounted":%s,"opkg":%s,"packages":%s,"diskUsed":%s,"freeMB":%s,' "$(json_bool opt_ours)" "$(json_bool opkg_works)" \
+        "$(json_num "$pkgs")" "$(json_str "$used")" "$(json_num "$( [ -n "$free_kb" ] && echo $((free_kb / 1024)) )")"
+    printf '"bootScript":%s,"bootLog":%s,"bash":%s,"shellFiles":%s,"helpers":%s,"tvHelpers":%s,' \
+        "$(json_bool [ -x "$INIT_SCRIPT" ])" "$(json_str "$(tail -n 1 "$BOOT_LOG" 2>/dev/null)")" \
+        "$(json_bool /opt/bin/bash -c true)" "$(json_bool is_ours "$HOME_DIR/.profile")" "$(json_bool helpers_ok)" \
+        "$(json_bool tv_helpers_ok)"
+    printf '"nano":%s,"certs":%s,"locate":%s,"locateDb":%s,' "$(json_str "$nano")" "$(json_str "$certs")" \
+        "$(json_str "$loc")" "$(json_str "$lockdb")"
+    printf '"job":%s,"jobName":%s,' "$(json_str "$(job_state)")" "$(json_str "$(cat "$JOB_DIR/name" 2>/dev/null)")"
+    printf '"issues":'
+    printf '%s\n' "$ISSUES" | sed -n 's/^  - //p' | json_lines
+    printf ',"notes":'
+    printf '%s\n' "$NOTES" | sed -n 's/^  - //p' | json_lines
+    printf '}\n'
+}
+
 # === Arguments ===
 ACTION=""
 if [ "$1" = post-install ]; then
@@ -1655,14 +1851,24 @@ if [ "$1" = post-install ]; then
     post_install_action "$@"
     exit 0
 fi
+if [ "$1" = job ]; then
+    start_job "$2"
+    exit 0
+fi
+if [ "$1" = job-status ]; then
+    [ "$2" = --json ] && JSON=1
+    job_status
+    exit 0
+fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate) ACTION="$arg" ;;
+        install|uninstall|status|locate|upgrade) ACTION="$arg" ;;
         doctor) ACTION="status" ;;
         clean) ACTION="uninstall" ;;
         -y|--yes) ASSUME_YES=1 ;;
         --no-shell) SETUP_SHELL=0 ;;
         --with-locate) WITH_LOCATE=1 ;;
+        --json) JSON=1 ;;
         --arch=aarch64-k3.10|--arch=armv7sf-k3.2) FORCE_ARCH="${arg#--arch=}" ;;
         -h|--help) usage; exit 0 ;;
         *) usage; exit 1 ;;
@@ -1695,8 +1901,16 @@ if [ -z "$ACTION" ]; then
 fi
 
 case "$ACTION" in
+    install|uninstall|locate|upgrade)
+        take_lock
+        trap 'release_lock' EXIT
+        trap 'exit 1' INT TERM HUP ;;
+esac
+
+case "$ACTION" in
     install) install_entware ;;
     uninstall) uninstall_entware ;;
-    status) show_status ;;
+    status) if [ "$JSON" = 1 ]; then status_json; else show_status; fi ;;
     locate) locate_action ;;
+    upgrade) upgrade_packages ;;
 esac

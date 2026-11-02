@@ -8,7 +8,12 @@ name: Notify ohmybahgosh.dev
 on:
   push:
     branches: [main]
-    paths: ["webos-entware-installer.sh"]   # no GitHub releases yet: the version lives in the script
+    paths: ["webos-entware-installer.sh"]   # the version also lives in the script
+  # A release made by the Release workflow doesn't trigger "release" events
+  # (GitHub skips events from its own token), so follow that workflow too
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   release:
     types: [published, edited, deleted]
   workflow_dispatch:
@@ -17,13 +22,14 @@ permissions: {}
 
 jobs:
   notify:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Send repository_dispatch to the site
         env:
           TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
           REPO: ${{ github.repository }}
-          TAG: ${{ github.event.release.tag_name || github.sha }}
+          TAG: ${{ github.event.release.tag_name || github.event.workflow_run.head_branch || github.sha }}
         run: |
           if [ -z "$TOKEN" ]; then
             echo "::notice::No SITE_DISPATCH_TOKEN secret; the site will pick this up on its next check."

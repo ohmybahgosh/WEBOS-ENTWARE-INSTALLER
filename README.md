@@ -6,7 +6,8 @@
 
 **One-line Entware for rooted LG webOS TVs.  Checks your TV first, picks the right build, survives reboots and uninstalls cleanly.**
 
-[![Version](https://img.shields.io/badge/version-2.6.0-ff3ea5)](webos-entware-installer.sh)
+[![CI](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/actions/workflows/ci.yml/badge.svg)](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ohmybahgosh/WEBOS-ENTWARE-INSTALLER?sort=semver)](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest)
 [![webOS](https://img.shields.io/badge/webOS-23%20%C2%B7%2024%20%C2%B7%2025-ffb547)](#supported-tvs)
 [![Shell](https://img.shields.io/badge/POSIX-sh-89e051)](webos-entware-installer.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -19,12 +20,23 @@ A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**,
 > [!IMPORTANT]
 > **This changes a rooted TV, so read what it does first.**  It installs into `/mnt/lg/user/opt`, adds one Homebrew Channel boot script and, unless you use `--no-shell`, swaps in its own shell files after backing yours up.  Everything it adds is listed in [What it changes on the TV](#what-it-changes-on-the-tv), and `webos-entware uninstall` takes it all back out.  Keep **telnet** on in the Homebrew Channel as a way back in.  Provided as-is, with no warranty.
 
+> [!NOTE]
+> **How this is built.**  I, [OhMyBahGosh](https://github.com/ohmybahgosh), wrote the first versions by hand.  From v2.0 on, it's written with AI coding agents (Claude), directed, reviewed and tested by me.  I've been building software for over 17 years.  My day job is data engineering, and network security and pentesting are what I do for fun.  AI writes a lot of the code here; I decide what it does, check how it does it, and nothing ships until it's run on a real TV (an LG C2 on webOS 25).
+>
+> Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
+>
+> - **Tests on every push:** 140+ [tests](tests/run_tests.sh) install, repair, reboot and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash, along with ShellCheck, a build of the TV app, and a check of the issue forms.  The CI badge above shows the latest run.
+> - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
+>
+> Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
+
 **Found a bug or have an idea?**  [Open an issue](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose), or use the [templates on ohmybahgosh.dev](https://ohmybahgosh.dev/contact/?t=ent-bug).
 
 ---
 
 ## Contents
 
+- [The TV app](#the-tv-app)
 - [Features](#features)
 - [Supported TVs](#supported-tvs)
 - [Requirements](#requirements)
@@ -45,7 +57,34 @@ A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**,
 - [Uninstall](#uninstall)
 - [Troubleshooting and recovery](#troubleshooting-and-recovery)
 - [FAQ](#faq)
+- [Contributing](#contributing)
 - [Credits](#credits)
+
+---
+
+## The TV app
+
+<img src="webos-app/src/icon160.png" width="80" align="right" alt="">
+
+The easiest way in.  It runs the same installer underneath, as root through the Homebrew Channel, so you don't need SSH to install or manage Entware.
+
+- **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
+- **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
+- **Update packages**, **Set up locate** and **Uninstall Entware**, with a confirmation before anything is removed.
+- **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
+- **Full check:** everything `doctor` looks at, on screen.
+- **Report a problem:** a QR code that opens a bug report on your phone with your TV, version, build and the full check already filled in.
+- **Updates:** tells you when a new version is out.  Updates come from the Homebrew Channel.
+
+**Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
+
+**Or install the IPK yourself:** download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
+
+```sh
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.7.0_all.ipk"}'
+```
+
+Already installed Entware over SSH?  Open the app and it shows your install as it is.  The app and the `webos-entware` command run the same installer, and a repair from the app updates the saved command to the app's version.  Removing the app leaves Entware installed; use **Uninstall Entware** first if you want it gone too.
 
 ---
 
@@ -151,6 +190,8 @@ On a TV with a 32-bit kernel it recommends the 32-bit build, explains that this 
 | `--arch=aarch64-k3.10` | Use the 64-bit build without asking |
 | `--arch=armv7sf-k3.2` | Use the 32-bit build without asking |
 | `--no-shell` | Install Entware only. Your `.profile`, `.bashrc` and login shell are left alone |
+| `--with-locate` | Also set up locate |
+| `--json` | With `status` or `job-status`: print JSON |
 | `-h`, `--help` | Show the commands and options |
 
 ---
@@ -172,11 +213,17 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware doctor` | Check the TV and the install, and say what to fix (same as `status`) |
 | `webos-entware install` | Repair or update the install. Your packages are kept |
 | `webos-entware uninstall` | Remove Entware and everything the installer added |
+| `webos-entware upgrade` | Refresh the package list and upgrade every package (same as `ent upgrade`) |
+| `webos-entware locate` | Set up locate (see [locate](#locate-mlocate)) |
+| `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
+| `webos-entware job <task>` | Run `install`, `uninstall`, `locate` or `upgrade` in the background; `job-status` follows it |
 | `webos-entware` | Open the menu |
 
 `doctor` shows your model, webOS version, kernel, Homebrew Channel and telnet status, the installed and recommended builds, whether `/opt` is mounted, whether `opkg` and bash run, and whether the boot script and shell files are in place. It ends with "Everything looks right" or a list of problems, each with its fix.
 
 The installer also writes `/opt/etc/webos-entware/install.info` with the installer version, date, model, webOS version, firmware, kernel and build. It's handy to paste into a bug report.
+
+Install, repair, uninstall, locate and upgrade take a lock, so two of them can never run at once, from SSH or the TV app.  If one is running, the other says so and stops.  A lock left by a task that was stopped is cleared on its own.
 
 If you piped the installer into sh, there's no file to copy, so it saves the published version from GitHub instead. If that download fails, it tells you, and you can download it to `/opt/bin/webos-entware` yourself.
 
@@ -392,6 +439,16 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 - **Never overwrite** system partitions or the stock `/opt` folder manually.
 - **Stay cautious** when installing packages that could affect system networking or shell behavior.
 - **Keep telnet on** in Homebrew Channel settings as a backup way in.
+
+---
+
+## Contributing
+
+Bug reports and ideas are welcome: use the [issue forms](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose).  For pull requests, run the tests first (`sudo tests/run_tests.sh` and `sudo tests/run_tests.sh dash`, which need root for their private mount namespace) and test on a real TV if you can, saying which model and webOS version.
+
+AI-assisted pull requests are welcome too, held to the same standard as the rest of this project: say in the pull request that AI was used, make sure you understand and have reviewed every change, and test it on a real TV.
+
+To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app/build.sh`.  The IPK and its Homebrew Channel manifest land in `webos-app/out/`.
 
 ---
 

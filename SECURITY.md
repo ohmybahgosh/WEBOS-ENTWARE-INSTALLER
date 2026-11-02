@@ -1,0 +1,43 @@
+# Security policy
+
+The installer and the TV app run as root on your TV and change how it boots and how SSH logins start, so security problems matter even for a small project.
+
+## Supported versions
+
+Only the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) gets fixes.
+
+## Reporting a problem
+
+Please don't open a public issue for a security problem.  Report it privately through GitHub's [private vulnerability reporting](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/security/advisories/new) instead.
+
+Include what you found, how to reproduce it, and which version you used.  You'll get a reply as soon as possible, and credit in the changelog if you'd like it.
+
+## What it does as root
+
+So you can judge it yourself:
+
+- **Entware itself** goes in `/mnt/lg/user/opt`, bind-mounted on `/opt`.  Its packages come from Entware's own server (`bin.entware.net`), the same way every Entware install gets them.  Entware serves them over HTTP and doesn't sign them; that's how Entware works everywhere, not something this installer adds.
+- **One boot script**, `/var/lib/webosbrew/init.d/S99entware`, remounts `/opt` and starts Entware services.  It runs in the background, so it can't hold up the boot.
+- **Shell files** in `/home/root` (`.profile`, `.bash_profile`, `.bashrc`), only without `--no-shell`.  Your own files are backed up first and put back on uninstall.  Interactive SSH logins switch to bash only if bash runs.
+- **Small tools** in `/opt`: `ent`, `webos-entware`, `webos-tv` and its commands, and settings for nano and locate.  Everything in `/opt` goes away with Entware.
+- **Cleanup of old setups:** it removes Entware package lists from webOS's own `/var/lib/opkg` and `/var/cache/opkg` (only lists that hold Entware's packages), an old log and an empty folder from early setups, and renames old boot scripts that also mounted Entware so they stop running.
+- **locate** gets an `mlocate` group only inside a private mount namespace while `updatedb` runs.  No system file is changed.
+- **A lock** in `/tmp` keeps the app and SSH from changing things at the same time.  Background tasks log to `/tmp` (RAM).
+
+It never changes the system partitions, opens ports, or sends anything about your TV anywhere.
+
+## The TV app
+
+- It runs the installer bundled inside it through the Homebrew Channel's root service.  Every command it runs is fixed in the app's code.  Nothing typed, received or downloaded is ever passed to the shell.
+- Its only network request is reading the latest release number from the GitHub API, to say when an update is out.  Updates themselves come from the Homebrew Channel.
+- The bug report QR code holds the output of `doctor` (TV model, versions, what's installed).  It's only sent if you scan it and submit the report yourself.
+
+## Verifying a download
+
+Every release has a `SHA256SUMS` file covering the installer and the app.  Download it next to them and run:
+
+```sh
+sha256sum -c SHA256SUMS
+```
+
+The Homebrew Channel checks the app's SHA-256 against its manifest before installing it.

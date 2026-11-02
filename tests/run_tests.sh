@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2034  # variables are read inside the checks that ok() evals
 # End-to-end tests for webos-entware-installer.sh on a Linux PC (not a TV).
 # Needs root and unshare. Runs in a private mount namespace, with tmpfs over
 # the TV paths and fake wget/opkg/uname, so nothing is downloaded and the PC
@@ -446,6 +447,40 @@ out=$(cd /tmp && $SH /opt/bin/entwrap du 50 2>&1)
 ok "ent du counts a package with no files as empty, not the current folder" 'echo "$out" | grep -q "0.0 MB  meta-only"'
 ok "ent du lists packages and free space" 'echo "$out" | grep -q "MB  nano-full" && echo "$out" | grep -q "Free on the data partition"'
 run uninstall -y
+
+echo "== [$SH] 29. status --json, background tasks and the lock (for the TV app)"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run status --json
+ok "status --json before install is valid JSON and says not installed" 'python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d[\"installed\"] is False and d[\"version\"]" "$W/out"'
+run install -y
+run status --json
+ok "status --json after install has the checks and no issues" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"installed\"] and d[\"mounted\"] and d[\"opkg\"] and d[\"bootScript\"] and d[\"tvHelpers\"], d
+assert d[\"issues\"] == [] and d[\"nano\"] == \"on\" and d[\"job\"] == \"none\", d
+" "$W/out"'
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade) > "$W/out" 2>&1
+ok "job starts a task in the background" 'grep -q "Started: upgrade" "$W/out"'
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job-status --json) > "$W/out" 2>&1
+ok "job-status --json reports it finished, with its log" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"state\"] == \"done\" and d[\"name\"] == \"upgrade\" and d[\"exit\"] == 0, d
+assert any(\"up to date\" in l or \"Packages upgraded\" in l for l in d[\"log\"]), d
+" "$W/out"'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job rm-everything) > "$W/out" 2>&1
+ok "job refuses unknown tasks" 'grep -q "Unknown task" "$W/out" && [ "$(cat /tmp/webos-entware-job/name)" = upgrade ]'
+sleep 30 & HOLDER=$!
+mkdir -p /tmp/webos-entware.lock; echo $HOLDER > /tmp/webos-entware.lock/pid
+! run install -y
+ok "install waits its turn while another task holds the lock" 'grep -q "Another install, repair or uninstall is running (process $HOLDER)" "$W/out"'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job install) > "$W/out" 2>&1
+ok "the app can't start a task while SSH holds the lock" 'grep -q "running from SSH" "$W/out"'
+kill $HOLDER; wait $HOLDER 2>/dev/null
+run install -y
+ok "a lock left by a stopped task is cleared" 'grep -q "Entware installed successfully" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
+run uninstall -y
+ok "uninstall restarting itself from /tmp keeps and then releases the lock" 'grep -q "Entware removed" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

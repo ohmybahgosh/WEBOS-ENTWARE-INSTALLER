@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck the installer (POSIX sh, like the TV)
+        run: shellcheck -s sh -S warning webos-entware-installer.sh
+      - name: ShellCheck the test suite
+        run: shellcheck -S warning tests/run_tests.sh
+      - name: Installer parses under dash and busybox sh
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq busybox dash
+          dash -n webos-entware-installer.sh
+          busybox sh -n webos-entware-installer.sh
+
+  issue-forms:
+    name: Issue forms
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the issue forms, and the fields the TV app fills in
+        run: python3 tests/check-issue-forms.py
+
+  test:
+    name: Tests (${{ matrix.shell }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: ["busybox sh", dash]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shells
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq busybox dash
+      - name: Run the test suite (needs root for its private mount namespace)
+        run: sudo tests/run_tests.sh "${{ matrix.shell }}"
+
+  app:
+    name: TV app (IPK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check the app's JavaScript parses
+        run: node --check webos-app/src/app.js && node --check webos-app/gen-manifest.js
+      - name: Build the IPK and manifest
+        run: |
+          npm install -g @webos-tools/cli
+          webos-app/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipk
+          path: webos-app/out/
