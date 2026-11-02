@@ -1,21 +1,22 @@
 <div align="center">
 
-<img src="images/WEBOS-ENTWARE-INSTALLER-BANNER.png" alt="WEBOS-ENTWARE-INSTALLER" width="720">
+<img src="images/banner.png" alt="Entware for rooted LG webOS TVs: hundreds of Linux packages, a real bash shell, and a TV app to run it all from the remote" width="100%">
 
 # WEBOS-ENTWARE-INSTALLER
 
-**One-line Entware for rooted LG webOS TVs.  Checks your TV first, picks the right build, survives reboots and uninstalls cleanly.**
+**Entware for rooted LG webOS TVs, from the remote or one line over SSH.  Checks your TV first, picks the right build, survives reboots and uninstalls cleanly.**
 
 [![CI](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/actions/workflows/ci.yml/badge.svg)](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ohmybahgosh/WEBOS-ENTWARE-INSTALLER?sort=semver)](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest)
 [![webOS](https://img.shields.io/badge/webOS-23%20%C2%B7%2024%20%C2%B7%2025-ffb547)](#supported-tvs)
+[![Homebrew Channel](https://img.shields.io/badge/Homebrew%20Channel-app-4cc3ff)](#the-tv-app)
 [![Shell](https://img.shields.io/badge/POSIX-sh-89e051)](webos-entware-installer.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![ohmybahgosh.dev](https://img.shields.io/badge/ohmybahgosh.dev-project%20page-33e1ff)](https://ohmybahgosh.dev/webos-entware-installer/)
 
 </div>
 
-A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`.  No external dependencies.  One file, pure `/bin/sh`.
+Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`, and gives you a bash shell, handy webOS commands and one-press [add-ons](#add-ons) like git, Python and htop.  Run it from the **[TV app](#the-tv-app)** with your remote, or over SSH.  Either way it's one POSIX shell script with no dependencies.
 
 > [!IMPORTANT]
 > **This changes a rooted TV, so read what it does first.**  It installs into `/mnt/lg/user/opt`, adds one Homebrew Channel boot script and, unless you use `--no-shell`, swaps in its own shell files after backing yours up.  Everything it adds is listed in [What it changes on the TV](#what-it-changes-on-the-tv), and `webos-entware uninstall` takes it all back out.  Keep **telnet** on in the Homebrew Channel as a way back in.  Provided as-is, with no warranty.
@@ -32,10 +33,24 @@ A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**,
 
 **Found a bug or have an idea?**  [Open an issue](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose), or use the [templates on ohmybahgosh.dev](https://ohmybahgosh.dev/contact/?t=ent-bug).
 
+## Quick start
+
+**With the remote:** in the Homebrew Channel, open Settings, add the repository `https://ohmybahgosh.dev/repo`, install **Entware**, open it and choose **Install Entware**.  [More about the app](#the-tv-app).
+
+**Over SSH:**
+
+```sh
+wget -O /tmp/webos-entware-installer.sh https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh
+sh /tmp/webos-entware-installer.sh install
+```
+
+Then log in again for the bash shell, and try `ent search htop` or `webos-entware add git`.  [Full install guide](#install).
+
 ---
 
 ## Contents
 
+- [Quick start](#quick-start)
 - [The TV app](#the-tv-app)
 - [Features](#features)
 - [Supported TVs](#supported-tvs)
@@ -77,6 +92,12 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Full check:** everything `doctor` looks at, on screen.
 - **Report a problem:** a QR code that opens a bug report on your phone with your TV, version, build and the full check already filled in.
 - **Updates:** tells you when a new version is out.  Updates come from the Homebrew Channel.
+- **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
+
+<p align="center">
+  <img src="images/app-status.png" width="49%" alt="The Entware app's main screen: status of the install and the actions">
+  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen: nano, locate, certificates, git, Python and more, each with Add or Installed">
+</p>
 
 **Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
 
@@ -92,6 +113,8 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 
 ## Features
 
+- ✅ **A TV app** for the Homebrew Channel: install, repair, add-ons, updates and uninstall from the remote, with live progress.
+- ✅ **One-press add-ons** (nano colors, locate, git, Python, htop, tmux and more), each set up for webOS.
 - ✅ **Checks the TV before touching anything**: root, model, webOS version, kernel, Homebrew Channel, free space and the Entware download server.
 - ✅ **Picks the right Entware build**: recommends 64-bit (`aarch64`) or 32-bit (`armv7`) from your kernel, tells you why, and asks you to continue, switch or exit.
 - ✅ **Test-runs the build first**. If the 64-bit build can't run, it falls back to 32-bit.
@@ -104,6 +127,8 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 - ✅ **Optional bash shell** with nano, colors, a neon prompt and handy aliases, plus a safe fallback to the stock shell if bash is ever missing or broken.
 - ✅ **Backs up your own `.profile` and `.bashrc`** and puts them back on uninstall. Your edits to the installer's `.bashrc` survive a repair.
 - ✅ **Fixes "I have no name!"** by linking Entware to the system user files.
+- ✅ **webOS helpers** (`toast`, `launch`, `close`, `apps`, `applog`, `tvshot`) for scripting the TV from SSH.
+- ✅ **One task at a time:** the app and SSH can never change things at once.
 - ✅ **Clean uninstall** that removes everything it added.
 
 ---
@@ -463,7 +488,9 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 **Can I keep my own shell?** Yes. Install with `--no-shell`. Entware programs are in `/opt/bin` and `/opt/sbin`. Without the shell setup there's no backup remount at login, so `/opt` depends on the boot script alone.
 
-**How is it tested?** `tests/run_tests.sh` runs install, repair, reboots and uninstall on a Linux PC as root, inside a private mount namespace with fake `wget` and `opkg`, under busybox sh, dash and bash. It doesn't touch the PC or download anything. It can't stand in for a real TV.
+**How is it tested?** `tests/run_tests.sh` runs install, repair, reboots, add-ons and uninstall on a Linux PC as root, inside a private mount namespace with fake `wget` and `opkg`, under busybox sh and dash. It doesn't touch the PC or download anything. CI also builds the TV app, checks the IPK and clicks through the app in a headless browser. None of it can stand in for a real TV, so changes are tried on one (an LG C2 on webOS 25) before release.
+
+**Does the app phone home?** No. Its only network request reads the latest release number from GitHub, to say when an update is out. See [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -489,13 +516,14 @@ To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app
 
 - Developed and maintained by [OhMyBahGosh](https://github.com/ohmybahgosh)
 - Built on [Entware](https://github.com/Entware/Entware) and the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel)
+- The app's QR codes use [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) by Kazuhiko Arase (MIT)
 - Special thanks to the webOS homebrew and rooting community
 
 ---
 
 ## License
 
-MIT License (see LICENSE file)
+MIT License.  See [LICENSE](LICENSE).
 
 ---
 
