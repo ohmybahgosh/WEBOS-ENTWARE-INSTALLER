@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.8.0"
+VERSION="2.9.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -19,7 +19,13 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # === Paths and URLs ===
-BIND_SRC="/mnt/lg/user/opt"
+# Where Entware lives: user data (the default, shared with webOS) or app
+# storage (bigger, and kept by "Reset to initial settings"). BIND_SRC is
+# the one in use, worked out by resolve_src.
+USER_SRC="/mnt/lg/user/opt"
+APP_PART="/mnt/lg/appstore"
+APP_SRC="$APP_PART/entware"
+BIND_SRC="$USER_SRC"
 HOME_DIR="/home/root"
 INIT_SCRIPT="/var/lib/webosbrew/init.d/S99entware"
 BOOT_LOG="/tmp/webos-entware-boot.log"
@@ -54,6 +60,8 @@ LOCK_DIR="/tmp/webos-entware.lock"
 # Tasks the TV app starts in the background: name, pid, log, exit code
 JOB_DIR="/tmp/webos-entware-job"
 FORCE_ARCH=""
+LOCATION=""
+MOVE_TO=""
 ROLLBACK=0
 SNAPSHOT=0
 NEW_BACKUPS=""
@@ -104,6 +112,7 @@ usage() {
     echo "  addons         List the add-ons: packages with the setup they need on webOS"
     echo "  add <name>     Install an add-on (nano, locate, certs, git, python, htop, tmux, ...)"
     echo "  remove <name>  Uninstall an add-on"
+    echo "  move <place>   Move Entware to app storage (appstore) or back to user data (user)"
     echo "  job <task>     Run install, uninstall, locate, upgrade, add <name> or remove <name>"
     echo "                 in the background (the TV app uses this)"
     echo "  job-status     Show the background task's progress"
@@ -112,6 +121,8 @@ usage() {
     echo "  --no-shell     Install Entware only, leave .profile/.bashrc and the shell alone"
     echo "  --with-locate  Also set up locate (same as running locate after install)"
     echo "  --json         With status, addons or job-status: print JSON (the TV app reads this)"
+    echo "  --location=L   Where a new install goes: user (user data, the default) or appstore"
+    echo "                 (app storage: more space, and kept by Reset to initial settings)"
     echo "  --arch=ARCH    Use aarch64-k3.10 (64-bit) or armv7sf-k3.2 (32-bit) without asking"
 }
 
@@ -119,6 +130,87 @@ usage() {
 # test -ef isn't in POSIX, but busybox sh (the TV) and dash both have it
 # shellcheck disable=SC3013
 opt_ours() { [ /opt -ef "$BIND_SRC" ]; }
+
+# === Where Entware lives ===
+# The boot script names the folder (SRC=...), so that's the record of it
+boot_src() { sed -n 's/^ *SRC=//p' "$INIT_SCRIPT" 2>/dev/null | head -n 1; }
+resolve_src() {
+    if [ /opt -ef "$APP_SRC" ]; then
+        BIND_SRC=$APP_SRC
+    elif [ /opt -ef "$USER_SRC" ]; then
+        BIND_SRC=$USER_SRC
+    else
+        case "$(boot_src)" in
+            "$APP_SRC") BIND_SRC=$APP_SRC ;;
+            "$USER_SRC") BIND_SRC=$USER_SRC ;;
+            *) if [ -e "$APP_SRC/bin/opkg" ] && [ ! -e "$USER_SRC/bin/opkg" ]; then
+                   BIND_SRC=$APP_SRC
+               else
+                   BIND_SRC=$USER_SRC
+               fi ;;
+        esac
+    fi
+}
+loc_of() { if [ "$1" = "$APP_SRC" ]; then echo appstore; else echo user; fi; }
+loc_label() { if [ "$1" = "$APP_SRC" ]; then echo "app storage"; else echo "user data"; fi; }
+part_of() { if [ "$1" = "$APP_SRC" ]; then echo "$APP_PART"; else echo /mnt/lg/user; fi; }
+free_kb_of() { df -k "$1" 2>/dev/null | tail -n 1 | awk '{print $(NF-2)}'; }
+
+# The Entware folder must be root's alone: a real folder (not a link), owned
+# by root, that no one else can write to. Its parent /mnt/lg/user can be
+# written by any user on webOS, so otherwise a process that isn't root could
+# swap in a folder of its own, and the boot script would run it as root.
+# Prints the group and other write bits and the owner, e.g. "-- 0".
+mode_owner() { ls -ldn "$1" 2>/dev/null | awk '{print substr($1, 6, 1) substr($1, 9, 1) " " $3}'; }
+entry_safe() { [ ! -L "$1" ] && [ "$(mode_owner "$1")" = "-- 0" ]; }
+src_safe() { [ -d "$1" ] && entry_safe "$1"; }
+# Checking a folder by its path and then mounting it by path can be raced,
+# since anyone can rename things in /mnt/lg/user. So what counts is checked
+# on /opt itself after mounting, where it can't change: the folder, and
+# everything on the way to what runs as root at boot.
+OPT_KEY="/opt /opt/bin /opt/sbin /opt/etc /opt/etc/init.d /opt/lib /opt/bin/opkg /opt/etc/init.d/rc.unslung"
+opt_trusted() {
+    for k in $OPT_KEY; do
+        [ -e "$k" ] || [ -L "$k" ] || continue
+        entry_safe "$k" || return 1
+    done
+}
+# Entware is root's alone: checked on /opt when it's mounted, else the folder
+entware_safe() { if opt_ours; then opt_trusted; else src_safe "$BIND_SRC"; fi; }
+# A folder's identity: its device and inode
+dev_ino() { stat -c '%d %i' "$1" 2>/dev/null; }
+# Deletes an Entware folder through a private mount of it, after making sure
+# it's the folder meant: the one with identity $2, or with no $2, one that's
+# root's alone with root's opkg in it. The path alone could have been
+# swapped for some other folder, which root would then delete.
+remove_tree() {
+    rt=$(mktemp -d /tmp/.webos-entware-rm.XXXXXX) || return 1
+    if ! mount --bind "$1" "$rt" 2>/dev/null; then
+        rmdir "$rt"
+        return 1
+    fi
+    if { [ -n "${2:-}" ] && [ "$(dev_ino "$rt")" = "$2" ]; } ||
+        { [ -z "${2:-}" ] && src_safe "$rt" && entry_safe "$rt/bin/opkg"; }; then
+        rm -rf "${rt:?}"/* "$rt"/.[!.]* "$rt"/..?* 2>/dev/null
+        umount "$rt" && rmdir "$rt"
+        rmdir "$1" 2>/dev/null    # by path: if it was swapped, an empty folder at most
+        [ ! -e "$1" ]
+        return
+    fi
+    umount "$rt" && rmdir "$rt"
+    return 1
+}
+check_src() {
+    [ -e "$BIND_SRC" ] || [ -L "$BIND_SRC" ] || return 0
+    src_safe "$BIND_SRC" && return 0
+    mo=$(mode_owner "$BIND_SRC")
+    if [ -d "$BIND_SRC" ] && [ ! -L "$BIND_SRC" ] && [ "${mo#* }" = 0 ]; then
+        chmod go-w "$BIND_SRC" || error_exit "Couldn't make $BIND_SRC writable by root only."
+        warn "$BIND_SRC could be changed by other users. It's root's alone now."
+        return 0
+    fi
+    error_exit "$BIND_SRC isn't a folder owned by root, so it may not be the Entware this installer set up, and it wasn't used. Look at what's in it, move it out of the way, then install again."
+}
 opt_mounted() { grep -qs " /opt " /proc/mounts; }
 
 # True when a file was written by this installer (any version)
@@ -371,6 +463,10 @@ json_lines() {
         END { printf "]" }'
 }
 json_num() { case "$1" in ''|*[!0-9]*) printf null ;; *) printf '%s' "$1" ;; esac; }
+# KB to MB, or nothing when it isn't a number
+mb_of() { case "$1" in ''|*[!0-9]*) ;; *) echo $(($1 / 1024)) ;; esac; }
+# KB as words: "under 1 MB" or "25 MB"
+size_text() { if [ "$1" -lt 1024 ]; then echo "under 1 MB"; else echo "$(($1 / 1024)) MB"; fi; }
 
 # === Background tasks, for the TV app ===
 # The app starts a task and checks on it every second or so. It runs
@@ -399,7 +495,8 @@ start_job() {
     case "$1" in
         install|uninstall|locate|upgrade) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
         add|remove) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
-        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add or remove." ;;
+        move) case "${2:-}" in user|appstore) ;; *) error_exit "Move it where? Use: move appstore or move user." ;; esac ;;
+        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove or move." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     # Only one start at a time: two at once would share one log and exit code
@@ -560,6 +657,9 @@ preflight() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root. Root the TV first (see webosbrew.org/rooting)."
     [ -d "/mnt/lg/user" ] || error_exit "Not a webOS TV (missing /mnt/lg/user)."
     [ -d "/opt" ] || error_exit "This firmware has no /opt folder, so Entware can't be mounted."
+    if [ "$BIND_SRC" = "$APP_SRC" ] && ! grep -qs " $APP_PART " /proc/mounts; then
+        error_exit "App storage ($APP_PART) isn't mounted on this TV, so Entware can't go there. Install without --location=appstore."
+    fi
     command -v wget >/dev/null 2>&1 || error_exit "wget is missing."
 
     print_tv
@@ -581,7 +681,7 @@ preflight() {
 }
 
 check_free_space() {
-    SPACE=$(df -k /mnt/lg/user 2>/dev/null | tail -n 1 | awk '{print $(NF-2)}')
+    SPACE=$(free_kb_of "$(part_of "$BIND_SRC")")
     case "$SPACE" in ''|*[!0-9]*) return 0 ;; esac
     if [ "$SPACE" -lt 51200 ]; then
         warn "Low free space: ${SPACE}K (about 50 MB recommended)"
@@ -591,9 +691,14 @@ check_free_space() {
 
 # === Mount /opt ===
 mount_opt() {
-    opt_ours && return 0
-    opt_mounted && error_exit "/opt is already mounted from somewhere else. Reboot the TV and try again."
-    mount --bind "$BIND_SRC" /opt || error_exit "Failed to bind $BIND_SRC to /opt"
+    if ! opt_ours; then
+        opt_mounted && error_exit "/opt is already mounted from somewhere else. Reboot the TV and try again."
+        mount --bind "$BIND_SRC" /opt || error_exit "Failed to bind $BIND_SRC to /opt"
+    fi
+    if ! opt_trusted; then
+        umount -l /opt 2>/dev/null
+        error_exit "The Entware in $BIND_SRC isn't root's alone (a folder in it is a link, not owned by root, or others can write to it), so it wasn't used. Run: $(run_cmd) doctor"
+    fi
 }
 
 # === Pick the Entware build ===
@@ -706,8 +811,8 @@ bootstrap_opkg() {
         [ -n "$FALLBACK" ] && [ "$ARCH" = "$BUILD" ] && info "Trying the 32-bit build instead."
     done
     rm -f /opt/bin/opkg /opt/etc/opkg.conf
-    if grep -qs " /mnt/lg/user .*noexec" /proc/mounts; then
-        error_exit "/mnt/lg/user is mounted noexec on this firmware, so programs stored there can't run."
+    if grep -qs " $(part_of "$BIND_SRC") .*noexec" /proc/mounts; then
+        error_exit "$(part_of "$BIND_SRC") is mounted noexec on this firmware, so programs stored there can't run."
     fi
     error_exit "The Entware build didn't run on this TV. Try '$(fix_cmd)' again and pick the other build."
 }
@@ -859,8 +964,8 @@ case "$1" in
             continue
         fi
         # opkg records /opt paths, not the folder behind the bind mount
-        p=$(printf '%s\n' "$p" | sed 's#^/mnt/lg/user/opt/#/opt/#')
-        r=$(readlink -f "$p" 2>/dev/null | sed 's#^/mnt/lg/user/opt/#/opt/#')
+        p=$(printf '%s\n' "$p" | sed -e 's#^/mnt/lg/user/opt/#/opt/#' -e 's#^/mnt/lg/appstore/entware/#/opt/#')
+        r=$(readlink -f "$p" 2>/dev/null | sed -e 's#^/mnt/lg/user/opt/#/opt/#' -e 's#^/mnt/lg/appstore/entware/#/opt/#')
         out=$({ $OPKG_BIN search "$p"; [ -n "$r" ] && [ "$r" != "$p" ] && $OPKG_BIN search "$r"; } 2>/dev/null | sort -u)
         if [ -n "$out" ]; then
             printf '%s: %s\n' "$f" "$(echo "$out" | awk '{print $1}' | tr '\n' ' ')"
@@ -882,9 +987,9 @@ case "$1" in
         echo "$kb ${pkg%.list}"
     done | sort -rn | head -n "$n" | awk '{printf "  %7.1f MB  %s\n", $1/1024, $2}'
     echo
-    printf 'Entware in total:  %s\n' "$(du -sh /mnt/lg/user/opt 2>/dev/null | awk '{print $1}')"
-    printf 'Free on the data partition (shared with webOS): %s\n' \
-        "$(df -h /mnt/lg/user 2>/dev/null | awk 'NR==2 {print $(NF-2)}')" ;;
+    printf 'Entware in total:  %s\n' "$(du -sh /opt/ 2>/dev/null | awk '{print $1}')"
+    printf 'Free where Entware lives: %s\n' "$(df -h /opt/ 2>/dev/null | awk 'NR==2 {print $(NF-2)}')"
+    printf 'Free on user data (webOS needs some): %s\n' "$(df -h /mnt/lg/user 2>/dev/null | awk 'NR==2 {print $(NF-2)}')" ;;
   update) $OPKG_BIN update && refresh_cache ;;
   upgradable) $OPKG_BIN list-upgradable ;;
   upgrade) $OPKG_BIN update && refresh_cache && $OPKG_BIN upgrade ;;
@@ -1050,9 +1155,17 @@ BASHRC
 [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
 PROFILE
 
-    # Only switch interactive sh logins to bash, only once, and only if bash runs.
-    write_managed "$HOME_DIR/.profile" << 'PROFILE'
-# Entware shell setup (webos-entware-installer)
+    write_login_profile
+
+    success "Bash profile and aliases configured."
+}
+
+# ~/.profile: only switches interactive sh logins to bash, only once, and
+# only if bash runs. Also mounts Entware at login if the boot script didn't.
+write_login_profile() {
+    gen="$HOME_DIR/.profile.entware-gen"
+    { printf '# Entware shell setup (webos-entware-installer)\n# Where Entware lives, for mounting it at login\nENTWARE_SRC=%s\n' "$BIND_SRC"
+      cat << 'PROFILE'
 # Your own login settings, once per login: the guard stops a loop if they
 # start bash themselves
 if [ -z "$WEBOS_ENTWARE_PRE" ] && [ -f "$HOME/.profile.pre-entware" ]; then
@@ -1060,29 +1173,55 @@ if [ -z "$WEBOS_ENTWARE_PRE" ] && [ -f "$HOME/.profile.pre-entware" ]; then
     export WEBOS_ENTWARE_PRE
     . "$HOME/.profile.pre-entware"
 fi
-# If the boot script didn't mount Entware at this boot, do it now (issue #2)
-if [ "$(id -u)" = 0 ] && [ -x /mnt/lg/user/opt/bin/opkg ] && ! grep -qs " /opt " /proc/mounts &&
-    ! [ /opt -ef /mnt/lg/user/opt ]; then
-    if mount --bind /mnt/lg/user/opt /opt 2>/dev/null; then
+# If the boot script didn't mount Entware at this boot, do it now (issue #2).
+# Where it lives comes first (ENTWARE_SRC above, then the boot script's),
+# and it's only used if it's root's alone, checked on /opt after mounting.
+if [ "$(id -u)" = 0 ] && ! grep -qs " /opt " /proc/mounts; then
+    for s in "$ENTWARE_SRC" $(sed -n 's/^ *SRC=//p' /var/lib/webosbrew/init.d/S99entware 2>/dev/null) /mnt/lg/user/opt /mnt/lg/appstore/entware; do
+        [ -x "$s/bin/opkg" ] || continue
+        mount --bind "$s" /opt 2>/dev/null || continue
+        for p in /opt /opt/bin /opt/sbin /opt/etc /opt/etc/init.d /opt/lib /opt/bin/opkg /opt/etc/init.d/rc.unslung; do
+            [ -e "$p" ] || continue
+            if [ -L "$p" ] || [ "$(ls -ldn "$p" | awk '{print substr($1, 6, 1) substr($1, 9, 1) " " $3}')" != "-- 0" ]; then
+                umount -l /opt 2>/dev/null
+                echo "$(date '+%H:%M:%S') refused to mount $s at login: $p isn't root's alone" >> /tmp/webos-entware-boot.log
+                break 2
+            fi
+        done
         echo "$(date '+%H:%M:%S') mounted /opt at login, the boot script hadn't" >> /tmp/webos-entware-boot.log
         if [ -x /opt/etc/init.d/rc.unslung ]; then
             (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung start </dev/null >/dev/null 2>&1 &)
         fi
-    fi
+        break
+    done
 fi
+# Use Entware (PATH, bash) only if what's on /opt is root's alone
+ENTWARE_OK=""
 if [ -d /opt/bin ]; then
+    ENTWARE_OK=1
+    for p in /opt /opt/bin /opt/sbin /opt/etc /opt/etc/init.d /opt/lib /opt/bin/opkg /opt/bin/bash; do
+        [ -e "$p" ] || continue
+        if [ -L "$p" ] || [ "$(ls -ldn "$p" | awk '{print substr($1, 6, 1) substr($1, 9, 1) " " $3}')" != "-- 0" ]; then
+            ENTWARE_OK=""
+            echo "Entware on /opt isn't root's alone ($p), so this login doesn't use it. Check it with a fresh copy of the installer: sh webos-entware-installer.sh doctor" >&2
+            break
+        fi
+    done
+fi
+if [ -n "$ENTWARE_OK" ]; then
     case ":$PATH:" in *:/opt/bin:*) ;; *) PATH="/opt/bin:/opt/sbin:$PATH"; export PATH ;; esac
 fi
 case "$-" in
     *i*)
-        if [ -z "$BASH_VERSION" ] && [ -x /opt/bin/bash ] && /opt/bin/bash -c true >/dev/null 2>&1; then
+        if [ -n "$ENTWARE_OK" ] && [ -z "$BASH_VERSION" ] && [ -x /opt/bin/bash ] && /opt/bin/bash -c true >/dev/null 2>&1; then
             exec /opt/bin/bash -l
         fi
         ;;
 esac
 PROFILE
-
-    success "Bash profile and aliases configured."
+    } > "$gen"
+    write_managed "$HOME_DIR/.profile" < "$gen"
+    rm -f "$gen"
 }
 
 # Writes ~/.bashrc. One from an older installer has the aliases in it; they
@@ -1409,7 +1548,8 @@ write_updatedb_conf() {
 # one path only:
 #   data partition: /home, /var, /opt and /mnt/lg/user
 #     (/mnt/lg/cmn_data and /mnt/lg/flash are the same partition again)
-#   app store: /media (/mnt/lg/appstore is the same partition)
+#   app store: /media (/mnt/lg/appstore is the same partition; Entware on
+#     app storage is indexed as /opt, not /media/entware)
 #   app database: /var/db (/mnt/lg/db8 is the same partition)
 #   app jails (/var/palm/jail): each one re-mounts system folders for one app
 #
@@ -1420,7 +1560,7 @@ PRUNE_BIND_MOUNTS = "no"
 # and also USB drives, which webOS mounts under /tmp/usb
 PRUNEFS = "proc sysfs devtmpfs devpts tmpfs ramfs cgroup cgroup2 debugfs tracefs configfs securityfs pstore bpf fusectl mqueue binfmt_misc autofs usbfs vfat exfat ntfs fuseblk nfs nfs4 cifs smbfs"
 
-PRUNEPATHS = "/proc /sys /dev /run /tmp /var/tmp /var/volatile /var/run /var/lock /var/palm/jail /mnt/lg/cmn_data /mnt/lg/flash /mnt/lg/appstore /mnt/lg/db8 /mnt/lg/user/opt /mnt/lg/user/home /mnt/lg/user/var /opt/tmp /opt/var/mlocate"
+PRUNEPATHS = "/proc /sys /dev /run /tmp /var/tmp /var/volatile /var/run /var/lock /var/palm/jail /mnt/lg/cmn_data /mnt/lg/flash /mnt/lg/appstore /mnt/lg/db8 /mnt/lg/user/opt /mnt/lg/user/home /mnt/lg/user/var /media/entware /opt/tmp /opt/var/mlocate"
 
 PRUNENAMES = ".git .bzr .hg .svn"
 UPDATEDB
@@ -1657,25 +1797,37 @@ install_boot_script() {
 # Notes what happened in $BOOT_LOG, which 'ent doctor' shows.
 # Runs in the background so it never holds up the rest of the boot.
 (
+    SRC=$BIND_SRC
     note() { echo "\$(date '+%H:%M:%S') \$1" >> $BOOT_LOG; }
     note "boot script started"
     n=0
-    while [ ! -x $BIND_SRC/bin/opkg ]; do
+    while [ ! -x "\$SRC/bin/opkg" ]; do
         if [ \$n -ge 30 ]; then
-            note "gave up: $BIND_SRC/bin/opkg wasn't there after 60 seconds"
+            note "gave up: \$SRC/bin/opkg wasn't there after 60 seconds"
             exit 0
         fi
         sleep 2
         n=\$((n + 1))
     done
-    if [ /opt -ef $BIND_SRC ]; then
+    if [ /opt -ef "\$SRC" ]; then
         note "/opt was already mounted"
-    elif mount --bind $BIND_SRC /opt 2>> $BOOT_LOG; then
+    elif mount --bind "\$SRC" /opt 2>> $BOOT_LOG; then
         note "mounted /opt"
     else
         note "failed to mount /opt"
         exit 0
     fi
+    # Only Entware that's root's alone, checked on /opt itself now that it's
+    # mounted: the folder, and everything on the way to what runs as root.
+    # Anything else may have been swapped in, so it's unmounted unused.
+    for p in $OPT_KEY; do
+        [ -e "\$p" ] || continue
+        if [ -L "\$p" ] || [ "\$(ls -ldn "\$p" | awk '{print substr(\$1, 6, 1) substr(\$1, 9, 1) " " \$3}')" != "-- 0" ]; then
+            umount -l /opt 2>/dev/null
+            note "refused to mount \$SRC: \$p isn't root's alone (owner or permissions changed)"
+            exit 0
+        fi
+    done
     if [ -x /opt/etc/init.d/rc.unslung ]; then
         unset LD_PRELOAD LD_LIBRARY_PATH
         /opt/etc/init.d/rc.unslung start >/dev/null 2>&1
@@ -1765,17 +1917,19 @@ firmware=${FIRMWARE:-unknown}
 kernel=$KERNEL_ARCH $(uname -r)
 build=$(feed_build /opt/etc/opkg.conf)
 build_choice=${HOW:-${OLD_HOW:-unknown}}
+location=$(loc_of "$BIND_SRC") $BIND_SRC
 EOF
 }
 
 install_entware() {
     preflight
+    check_src
     check_free_space
 
     BUILD="" FALLBACK=""
     if [ -e "$BIND_SRC/bin/opkg" ]; then
         BUILD=$(feed_build "$BIND_SRC/etc/opkg.conf")
-        info "Entware is already installed in $BIND_SRC (build: $(build_label "$BUILD"))."
+        info "Entware is already installed in $BIND_SRC, on $(loc_label "$BIND_SRC") (build: $(build_label "$BUILD"))."
         if [ -n "$FORCE_ARCH" ] && [ -n "$BUILD" ] && [ "$BUILD" != "$FORCE_ARCH" ]; then
             error_exit "Entware is installed for $BUILD. Uninstall first to switch to $FORCE_ARCH."
         fi
@@ -1784,6 +1938,7 @@ install_entware() {
         [ -n "$BUILD" ] || choose_build
         INSTALLING=1
     else
+        info "Entware goes in $BIND_SRC, on $(loc_label "$BIND_SRC")."
         choose_build
         CREATED_SRC=0
         [ -e "$BIND_SRC" ] || CREATED_SRC=1
@@ -1794,6 +1949,7 @@ install_entware() {
     trap 'exit 1' INT TERM HUP
 
     mkdir -p "$BIND_SRC/bin" "$BIND_SRC/etc" "$BIND_SRC/lib/opkg" "$BIND_SRC/tmp" "$BIND_SRC/var/lock"
+    chmod 755 "$BIND_SRC"
     mount_opt
     cd /opt || error_exit "Cannot cd /opt"
     # Older versions replaced opkg with a wrapper; put the real one back
@@ -1802,7 +1958,8 @@ install_entware() {
     bootstrap_opkg
     /opt/bin/opkg update || error_exit "opkg update failed"
     /opt/bin/opkg install entware-opt || warn "entware-opt may have failed"
-    chmod 777 /opt/tmp
+    # Everyone's scratch space, sticky so no one can rename or remove others' files
+    chmod 1777 /opt/tmp
 
     setup_identity_files
     install_entwrap
@@ -1869,17 +2026,186 @@ uninstall_entware() {
     legacy_cleanup
 
     cd /
+    OLD_ID=""
+    opt_ours && OLD_ID=$(dev_ino /opt)
     if ! unmount_opt; then
         warn "Couldn't unmount /opt, so $BIND_SRC was kept. Reboot the TV and run uninstall again to remove it."
     elif grep -qs " $BIND_SRC/" /proc/mounts; then
         warn "Something is still mounted inside $BIND_SRC, so it was kept to avoid deleting that. Unmount it, then run uninstall again."
-    else
-        rm -rf "${BIND_SRC:?}"
+    elif [ -e "$BIND_SRC" ] && ! remove_tree "$BIND_SRC" "$OLD_ID"; then
+        warn "Couldn't confirm $BIND_SRC is the Entware folder (it may have been changed), so it was kept. Look at what's in it, and delete it yourself if it is."
     fi
 
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
     success "Entware removed."
     info "Disconnect and SSH in again to get the stock shell back."
+}
+
+# === Move Entware between user data and app storage ===
+# Copies everything through a private mount of a fresh folder, checks the
+# copy, switches /opt over, checks /opt is that copy, and only then removes
+# the old folder (through a private mount too, after checking it's the one).
+# Any failure before the switch leaves Entware where it was, untouched.
+services() { [ -x /opt/etc/init.d/rc.unslung ] && (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung "$1" </dev/null >/dev/null 2>&1); return 0; }
+# Every name with its type, mode and owner, every link target and every
+# file's checksum under a folder, as one checksum. tmp is left out: it's
+# scratch space.
+tree_sum() {
+    (cd "$1" || exit 1
+     find . -mindepth 1 -path ./tmp -prune -o -print | sort | while IFS= read -r f; do
+         if [ -L "$f" ]; then echo "L $f -> $(readlink "$f")"
+         elif [ -d "$f" ]; then echo "D $f"
+         elif [ -f "$f" ]; then echo "F $f $(md5sum < "$f" | cut -c1-32)"
+         else echo "O $f"
+         fi
+     done
+     find . -mindepth 1 -path ./tmp -prune -o -exec stat -c '%n %a %u %g' {} + | sort
+    ) | md5sum | cut -c1-32
+}
+# Programs using Entware (files open in it, running from it, or sitting in
+# a folder of it), other than this one and the shells it was started from:
+# moving now could lose what they write. A path under /opt counts only if
+# it's on Entware's own device (not the stock /opt hidden under it).
+opt_users() {
+    odev=$(stat -c %d /opt/ 2>/dev/null)
+    mine=" $$ "
+    p=$$
+    while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+        p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null)
+        mine="$mine$p "
+    done
+    for d in /proc/[0-9]*; do
+        pid=${d#/proc/}
+        case "$mine" in *" $pid "*) continue ;; esac
+        for l in "$d/exe" "$d/cwd" "$d"/fd/*; do
+            case "$(readlink "$l" 2>/dev/null)" in
+                /opt|/opt/*|"$BIND_SRC"|"$BIND_SRC"/*)
+                    if [ "$(stat -L -c %d "$l" 2>/dev/null)" = "$odev" ]; then
+                        echo "$(cat "$d/comm" 2>/dev/null) ($pid)"
+                        break
+                    fi ;;
+            esac
+        done
+    done | sort -u | tr '\n' ' '
+}
+move_entware() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    case "$1" in
+        appstore) TO=$APP_SRC ;;
+        user) TO=$USER_SRC ;;
+        *) error_exit "Move it where? Use: $(run_cmd) move appstore (app storage) or move user (user data)." ;;
+    esac
+    FROM=$BIND_SRC
+    [ -e "$FROM/bin/opkg" ] || error_exit "Entware isn't installed, so there's nothing to move. To install it on app storage: $(run_cmd) install --location=$1"
+    if [ "$FROM" = "$TO" ]; then
+        info "Entware is already on $(loc_label "$TO") ($TO)."
+        return 0
+    fi
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first, then move it."
+    opt_trusted || error_exit "The Entware on /opt isn't root's alone, so it wasn't moved. Run: $(run_cmd) doctor"
+    TOPART=$(part_of "$TO")
+    # App storage must be its own mounted partition, never the folder under it
+    if [ "$TO" = "$APP_SRC" ] && ! grep -qs " $APP_PART " /proc/mounts; then
+        error_exit "App storage ($APP_PART) isn't mounted, so Entware can't move there."
+    fi
+    [ -d "$TOPART" ] || error_exit "$TOPART is missing, so Entware can't move there."
+    if [ -e "$TO" ] || [ -L "$TO" ]; then
+        error_exit "$TO already exists, maybe from an earlier move. Look inside, remove it if you don't need it, then move again."
+    fi
+    # Mounts made inside Entware's /opt come after its own line in /proc/mounts
+    # (ones under the stock /opt, hidden by Entware, come before)
+    inner=$(awk '$2 == "/opt" {n = NR; m = ""} n && NR > n && $2 ~ "^/opt/" && m == "" {m = $2} END {print m}' /proc/mounts)
+    [ -z "$inner" ] || error_exit "Something is mounted inside /opt ($inner). Unmount it, then move again."
+    need=$(du -sk /opt/ 2>/dev/null | awk '{print $1}')
+    free=$(free_kb_of "$TOPART")
+    case "$need" in ''|*[!0-9]*) need="" ;; esac
+    case "$free" in ''|*[!0-9]*) free="" ;; esac
+    [ -n "$need" ] && [ -n "$free" ] || error_exit "Couldn't work out the space needed, so nothing was moved."
+    if [ $((free - need)) -lt 51200 ]; then
+        error_exit "Not enough space on $(loc_label "$TO"): Entware needs $(size_text "$need") plus 50 MB to spare, and $((free / 1024)) MB is free."
+    fi
+    info "Entware uses $(size_text "$need"). It moves from $(loc_label "$FROM") ($FROM) to $(loc_label "$TO") ($TO)."
+    confirm "Move Entware? Its services stop for a moment, and your packages and settings come along." || exit 0
+
+    # From here it runs to the end: Ctrl-C or a dropped SSH session can't
+    # stop it halfway
+    trap '' INT HUP TERM PIPE
+    info "Stopping Entware services..."
+    services stop
+    busy=$(opt_users)
+    if [ -n "$busy" ]; then
+        services start
+        error_exit "These are still using Entware, and moving now could lose what they write: $busy. Close them (and log out of other SSH sessions), then move again."
+    fi
+    OLD_ID=$(dev_ino /opt)
+    if [ -z "$OLD_ID" ]; then
+        services start
+        error_exit "Couldn't read /opt's identity (stat -c), so nothing was moved."
+    fi
+    info "Checking what's there..."
+    SUM=$(tree_sum /opt)
+
+    # A fresh folder (mkdir fails if anything has that name), used only
+    # through a private mount so it can't be swapped while it's filled
+    if ! mkdir -m 755 "$TO" 2>/dev/null; then
+        services start
+        error_exit "Couldn't create $TO, so nothing was changed."
+    fi
+    mp=$(mktemp -d /tmp/.webos-entware-move.XXXXXX) || { services start; error_exit "Couldn't make a temporary folder, so nothing was changed."; }
+    if ! mount --bind "$TO" "$mp" 2>/dev/null || ! src_safe "$mp" || [ -n "$(ls -A "$mp")" ]; then
+        umount "$mp" 2>/dev/null; rmdir "$mp"
+        services start
+        error_exit "$TO changed while it was being set up, so nothing was moved. Look at what's there before trying again."
+    fi
+    NEW_ID=$(dev_ino "$mp")
+    if [ -z "$NEW_ID" ]; then
+        umount "$mp"; rmdir "$mp"; rmdir "$TO" 2>/dev/null
+        services start
+        error_exit "Couldn't read the new folder's identity (stat -c), so nothing was moved."
+    fi
+    info "Copying..."
+    if ! cp -a /opt/. "$mp/" || [ "$(tree_sum "$mp")" != "$SUM" ]; then
+        rm -rf "${mp:?}"/* "$mp"/.[!.]* "$mp"/..?* 2>/dev/null
+        umount "$mp"; rmdir "$mp"
+        rmdir "$TO" 2>/dev/null
+        services start
+        error_exit "The copy failed or didn't match the original (out of space?), so nothing was changed. Entware is still on $(loc_label "$FROM")."
+    fi
+    umount "$mp"; rmdir "$mp"
+
+    # Switch /opt over. A shell or program still running from the old /opt
+    # keeps working (lazy unmount); new ones see the new place. What gets
+    # mounted must be the very folder that was filled and checked.
+    cd /
+    if ! umount /opt 2>/dev/null && ! umount -l /opt 2>/dev/null; then
+        remove_tree "$TO" "$NEW_ID"
+        services start
+        error_exit "Couldn't unmount /opt, so nothing was changed. Reboot the TV and try again."
+    fi
+    if ! mount --bind "$TO" /opt 2>/dev/null || [ "$(dev_ino /opt)" != "$NEW_ID" ] || ! opt_trusted || ! opkg_works; then
+        umount -l /opt 2>/dev/null
+        remove_tree "$TO" "$NEW_ID"
+        if mount --bind "$FROM" /opt 2>/dev/null && [ "$(dev_ino /opt)" = "$OLD_ID" ]; then
+            services start
+            error_exit "Entware didn't run from $(loc_label "$TO"), so it was put back on $(loc_label "$FROM"). Nothing was lost."
+        fi
+        umount -l /opt 2>/dev/null
+        error_exit "Entware didn't run from $(loc_label "$TO"), and $FROM had changed, so /opt was left unmounted. Run: $(fix_cmd)"
+    fi
+    BIND_SRC=$TO
+    # The login record first, then the boot script, which decides at boot
+    is_ours "$HOME_DIR/.profile" && write_login_profile
+    install_boot_script
+    write_install_info
+    services start
+    success "Entware now runs from $(loc_label "$TO") ($TO)."
+
+    if remove_tree "$FROM" "$OLD_ID"; then
+        success "Removed the old copy from $(loc_label "$FROM"), freeing $(size_text "$need") there."
+    else
+        warn "Couldn't confirm $FROM is the old copy (it may have changed), so it was kept. Look at what's in it, and delete it yourself if it is."
+    fi
+    info "Programs already running keep using the old copy until they restart. Log in again to use the new one."
 }
 
 # === Status / doctor ===
@@ -1913,6 +2239,8 @@ show_status() {
     CHOICE=$(sed -n 's/^build_choice=//p' "$BIND_SRC/etc/webos-entware/install.info" 2>/dev/null)
     [ -n "$CHOICE" ] && echo "How it was picked:  $CHOICE"
     echo "Recommended build:  $(build_label "$RECOMMENDED")"
+    echo "Location:           $(loc_label "$BIND_SRC") ($BIND_SRC)"
+    printf "Root's alone:       "; yesno entware_safe
     printf "/opt mounted:       "; yesno opt_ours
     printf "opkg runs:          "; yesno opkg_works
     if opkg_works; then
@@ -1927,10 +2255,16 @@ show_status() {
     printf "ent, webos-entware: "; yesno helpers_ok
     printf "webOS helpers:      "; yesno tv_helpers_ok
     FREE_KB=$(data_free_kb)
+    APP_KB=""
+    grep -qs " $APP_PART " /proc/mounts && APP_KB=$(free_kb_of "$APP_PART")
+    case "$APP_KB" in *[!0-9]*) APP_KB="" ;; esac
     case "$FREE_KB" in
         ''|*[!0-9]*) ;;
         *) printf "Free space:         "
-           if [ "$FREE_KB" -lt 51200 ]; then log "$RED" "$((FREE_KB / 1024)) MB"; else echo "$((FREE_KB / 1024)) MB"; fi ;;
+           if [ "$FREE_KB" -lt 51200 ]; then printf '%b' "$RED$((FREE_KB / 1024)) MB$NC"; else printf '%s' "$((FREE_KB / 1024)) MB"; fi
+           printf ' user data'
+           [ -n "$APP_KB" ] && printf ', %s MB app storage' "$((APP_KB / 1024))"
+           echo ;;
     esac
     printf "nano colors:        "
     if [ ! -x /opt/bin/nano ]; then
@@ -1997,10 +2331,25 @@ show_status() {
         fi
     fi
     tv_helpers_ok || issue "The webOS helpers (toast, launch, apps...) are missing. Fix: $(fix_cmd)"
+    if ! entware_safe; then
+        bad=""
+        for k in $OPT_KEY; do { [ -e "$k" ] || [ -L "$k" ]; } && ! entry_safe "$k" && { bad=$k; break; }; done
+        issue "Entware isn't root's alone (${bad:-$BIND_SRC} is a link, not owned by root, or others can write to it), so the boot script won't mount it. If root owns it, fix it with: chmod go-w ${bad:-$BIND_SRC}. Otherwise look at what's in it first: it may not be the Entware this installer set up."
+    fi
+    if [ "$BIND_SRC" = "$APP_SRC" ] && [ -n "$APP_KB" ] && [ "$APP_KB" -lt 51200 ]; then
+        issue "Only $((APP_KB / 1024)) MB is free on app storage, where Entware lives, so apps and packages may fail to install. 'ent du' shows the largest packages to remove."
+    fi
+    if [ "$BIND_SRC" = "$USER_SRC" ] && [ -n "$APP_KB" ] && [ "$APP_KB" -gt 512000 ]; then
+        case "$FREE_KB" in
+            ''|*[!0-9]*) ;;
+            *) [ "$FREE_KB" -lt 153600 ] &&
+                note "User data, which webOS shares with Entware, has $((FREE_KB / 1024)) MB free, and app storage has $((APP_KB / 1024)) MB. To give Entware more room: $(run_cmd) move appstore" ;;
+        esac
+    fi
     case "$FREE_KB" in
         ''|*[!0-9]*) ;;
         *) [ "$FREE_KB" -lt 51200 ] &&
-            issue "Only $((FREE_KB / 1024)) MB is free on the data partition, which webOS shares. Running out can cause problems with the TV itself. 'ent du' shows the largest packages to remove." ;;
+            issue "Only $((FREE_KB / 1024)) MB is free on user data, which webOS needs for itself. Running out can cause problems with the TV. 'ent du' shows the largest packages to remove." ;;
     esac
     needs_ca && ! ca_ok &&
         issue "HTTPS certificates are missing, so wget-ssl, git and Python can't check HTTPS sites. Fix: ent install ca-bundle"
@@ -2037,7 +2386,10 @@ status_json() {
         pkgs=$(/opt/bin/opkg list-installed 2>/dev/null | wc -l | tr -d ' ')
         used=$(du -sh "$BIND_SRC" 2>/dev/null | awk '{print $1}')
     fi
-    free_kb=$(data_free_kb)
+    free_kb=$(free_kb_of "$(part_of "$BIND_SRC")")
+    user_kb=$(data_free_kb)
+    app_kb=""
+    grep -qs " $APP_PART " /proc/mounts && app_kb=$(free_kb_of "$APP_PART")
     if [ ! -x /opt/bin/nano ]; then nano=none; elif nanorc_colors; then nano=on; else nano=off; fi
     if ca_ok; then certs=yes; elif needs_ca; then certs=missing; else certs=notNeeded; fi
     lockdb=""
@@ -2061,11 +2413,13 @@ status_json() {
     printf '"installed":%s,"build":%s,"buildLabel":%s,"recommended":%s,' "$installed" "$(json_str "$build")" \
         "$(json_str "$(build_label "$build")")" "$(json_str "$RECOMMENDED")"
     printf '"mounted":%s,"opkg":%s,"packages":%s,"diskUsed":%s,"freeMB":%s,' "$(json_bool opt_ours)" "$(json_bool opkg_works)" \
-        "$(json_num "$pkgs")" "$(json_str "$used")" "$(json_num "$(case "$free_kb" in ''|*[!0-9]*) ;; *) echo $((free_kb / 1024)) ;; esac)")"
+        "$(json_num "$pkgs")" "$(json_str "$used")" "$(json_num "$(mb_of "$free_kb")")"
     printf '"bootScript":%s,"bootLog":%s,"bash":%s,"shellFiles":%s,"helpers":%s,"tvHelpers":%s,' \
         "$(json_bool [ -x "$INIT_SCRIPT" ])" "$(json_str "$(tail -n 1 "$BOOT_LOG" 2>/dev/null)")" \
         "$(json_bool /opt/bin/bash -c true)" "$(json_bool is_ours "$HOME_DIR/.profile")" "$(json_bool helpers_ok)" \
         "$(json_bool tv_helpers_ok)"
+    printf '"location":%s,"srcSafe":%s,"userFreeMB":%s,"appFreeMB":%s,' "$(json_str "$(loc_of "$BIND_SRC")")" \
+        "$(json_bool entware_safe)" "$(json_num "$(mb_of "$user_kb")")" "$(json_num "$(mb_of "$app_kb")")"
     printf '"nano":%s,"certs":%s,"locate":%s,"locateDb":%s,' "$(json_str "$nano")" "$(json_str "$certs")" \
         "$(json_str "$loc")" "$(json_str "$lockdb")"
     printf '"job":%s,"jobName":%s,' "$(json_str "$(job_state)")" "$(json_str "$(cat "$JOB_DIR/name" 2>/dev/null)")"
@@ -2077,6 +2431,7 @@ status_json() {
 }
 
 # === Arguments ===
+resolve_src
 ACTION=""
 if [ "$1" = post-install ]; then
     shift
@@ -2089,7 +2444,12 @@ if [ "$1" = job ]; then
     exit 0
 fi
 ADDON=""
-if [ "$1" = add ] || [ "$1" = remove ]; then
+if [ "$1" = move ]; then
+    ACTION=move
+    MOVE_TO=${2:-}
+    [ -n "$MOVE_TO" ] || error_exit "Move it where? Use: webos-entware move appstore (app storage) or move user (user data)."
+    shift 2
+elif [ "$1" = add ] || [ "$1" = remove ]; then
     ACTION=$1
     ADDON=${2:-}
     [ -n "$ADDON" ] || error_exit "Name an add-on, e.g. webos-entware $1 htop. See: webos-entware addons"
@@ -2104,17 +2464,31 @@ for arg in "$@"; do
     case "$arg" in
         install|uninstall|status|locate|upgrade|addons|doctor|clean)
             # add and remove take only options after the name
-            [ -z "$ADDON" ] || { usage; exit 1; }
+            [ -z "$ADDON" ] && [ -z "$MOVE_TO" ] || { usage; exit 1; }
             case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
         -y|--yes) ASSUME_YES=1 ;;
         --no-shell) SETUP_SHELL=0 ;;
         --with-locate) WITH_LOCATE=1 ;;
         --json) JSON=1 ;;
+        --location=user|--location=appstore) LOCATION="${arg#--location=}" ;;
         --arch=aarch64-k3.10|--arch=armv7sf-k3.2) FORCE_ARCH="${arg#--arch=}" ;;
         -h|--help) usage; exit 0 ;;
         *) usage; exit 1 ;;
     esac
 done
+
+# --location picks where a new install goes. An existing install stays put;
+# move it with "move".
+if [ -n "$LOCATION" ]; then
+    if [ "$LOCATION" = appstore ]; then WANT=$APP_SRC; else WANT=$USER_SRC; fi
+    if [ -e "$BIND_SRC/bin/opkg" ]; then
+        if [ "$BIND_SRC" != "$WANT" ] && [ "$ACTION" = install ]; then
+            error_exit "Entware is already installed on $(loc_label "$BIND_SRC"). To move it: $(run_cmd) move $LOCATION"
+        fi
+    else
+        BIND_SRC=$WANT
+    fi
+fi
 
 # === Menu ===
 if [ -z "$ACTION" ]; then
@@ -2147,7 +2521,7 @@ if [ -z "$ACTION" ]; then
 fi
 
 case "$ACTION" in
-    install|uninstall|locate|upgrade|add|remove)
+    install|uninstall|locate|upgrade|add|remove|move)
         take_lock
         trap 'release_lock' EXIT
         trap 'exit 1' INT TERM HUP ;;
@@ -2162,4 +2536,5 @@ case "$ACTION" in
     addons) addons_list ;;
     add) addon_add "$ADDON" ;;
     remove) addon_remove "$ADDON" ;;
+    move) move_entware "$MOVE_TO" ;;
 esac

@@ -67,6 +67,7 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 - [HTTPS certificates](#https-certificates)
 - [locate (mlocate)](#locate-mlocate)
 - [Add-ons](#add-ons)
+- [Where Entware lives](#where-entware-lives)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
   - [Upgrading from an older setup](#upgrading-from-an-older-setup)
 - [Reboots](#reboots)
@@ -220,6 +221,7 @@ On a TV with a 32-bit kernel it recommends the 32-bit build, explains that this 
 | `--arch=armv7sf-k3.2` | Use the 32-bit build without asking |
 | `--no-shell` | Install Entware only. Your `.profile`, `.bashrc` and login shell are left alone |
 | `--with-locate` | Also set up locate |
+| `--location=appstore` | Put a new install on app storage instead of user data.  See [Where Entware lives](#where-entware-lives) |
 | `--json` | With `status` or `job-status`: print JSON |
 | `-h`, `--help` | Show the commands and options |
 
@@ -248,7 +250,8 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
 | `webos-entware remove <name>` | Uninstall an add-on |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
-| `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>` or `remove <name>` in the background; `job-status` follows it |
+| `webos-entware move appstore` | Move Entware to app storage (`move user` moves it back).  See [Where Entware lives](#where-entware-lives) |
+| `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>` or `move <place>` in the background; `job-status` follows it |
 | `webos-entware` | Open the menu |
 
 `doctor` shows your model, webOS version, kernel, Homebrew Channel and telnet status, the installed and recommended builds, whether `/opt` is mounted, whether `opkg` and bash run, and whether the boot script and shell files are in place. It ends with "Everything looks right" or a list of problems, each with its fix.
@@ -407,11 +410,40 @@ Any other Entware package installs with `ent install <package>` as usual.  The l
 
 ---
 
+## Where Entware lives
+
+LG TVs have two storage areas that Entware can use:
+
+| | User data (the default) | App storage |
+|:--|:--|:--|
+| Folder | `/mnt/lg/user/opt` | `/mnt/lg/appstore/entware` |
+| Size on a C2 | about 720 MB | about 2.7 GB |
+| Shared with | webOS's own settings, caches and databases | installed apps |
+| Firmware update | kept | kept |
+| "Reset to initial settings" | **deleted** | kept |
+| Factory reset | deleted | deleted |
+
+User data is small, and webOS needs some of it for itself, so a big install there can crowd webOS.  App storage has much more room and survives "Reset to initial settings".  Install there, or move an existing install, with:
+
+```sh
+sh webos-entware-installer.sh install --location=appstore    # a new install
+webos-entware move appstore                                   # an existing one
+webos-entware move user                                       # and back again
+```
+
+A move stops Entware's services, copies everything, checks the copy matches, switches `/opt` over, updates the boot script, and only then removes the old copy.  If anything fails before the switch, Entware stays where it was.  The TV app shows **Move to app storage** when user data is getting tight and app storage has room, and `doctor` suggests it too.  Both show the free space in each area.
+
+Entware goes in a new root-only folder at the top of app storage, not `/media/developer` or `/media/internal`: other apps can write to those, and Entware's programs run as root.
+
+**Only Entware that's root's alone is used.**  `/mnt/lg/user` can be written by any user on webOS, so a process that isn't root could otherwise swap in a folder of its own for the boot script to run as root.  So the boot script, the SSH login and the installer mount Entware first and then check `/opt` itself, where it can no longer be swapped: the folder and everything on the way to what runs as root (`bin`, `sbin`, `etc`, `etc/init.d`, `lib`, `opkg`, `rc.unslung`) must be real folders and files, owned by root, that no one else can write to.  Anything else is unmounted unused, and a login won't put it on your PATH or start its bash.  `doctor` shows this as "Root's alone" and names anything that fails.  Deleting an old copy (after a move, or on uninstall) goes through a private mount, after checking it's the very folder meant.
+
+---
+
 ## What it changes on the TV
 
 | Path | What |
 |:-----|:-----|
-| `/mnt/lg/user/opt` | Entware, all packages, and the `ent` and `webos-entware` commands |
+| `/mnt/lg/user/opt` | Entware, all packages, and the `ent` and `webos-entware` commands.  `/mnt/lg/appstore/entware` instead when it's on [app storage](#where-entware-lives) |
 | `/opt` | Bind mount of the folder above. On webOS 25 the stock `/opt` only holds LG's factory test programs (`/opt/webos/tests`), which are hidden while Entware is mounted. Nothing on the TV needs them |
 | `/var/lib/webosbrew/init.d/S99entware` | Boot script that remounts `/opt` and starts Entware services |
 | `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |

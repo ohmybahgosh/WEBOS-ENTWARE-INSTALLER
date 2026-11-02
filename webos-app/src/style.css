@@ -49,8 +49,8 @@ td:first-child { color: #7d8ba1; width: 34%; }
 
 .btn {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 28px; font-weight: 600; padding: 13px 30px; border-radius: 18px;
-  background: #142036; margin-bottom: 10px; border: 3px solid transparent; outline: none;
+  font-size: 28px; font-weight: 600; padding: 10px 30px; border-radius: 18px;
+  background: #142036; margin-bottom: 9px; border: 3px solid transparent; outline: none;
 }
 .btn small { display: block; font-size: 19px; color: #7d8ba1; font-weight: 500; margin-top: 3px; }
 .btn:focus, .btn.focus { border-color: #4cc3ff; background: #16304d; box-shadow: 0 0 0 6px rgba(76, 195, 255, .15); }

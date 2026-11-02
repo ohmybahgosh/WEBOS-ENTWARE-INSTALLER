@@ -458,7 +458,7 @@ out=$(cd /tmp && $SH /opt/bin/entwrap du 5 2>&1)
 touch /opt/lib/opkg/info/meta-only.list
 out=$(cd /tmp && $SH /opt/bin/entwrap du 50 2>&1)
 ok "ent du counts a package with no files as empty, not the current folder" 'echo "$out" | grep -q "0.0 MB  meta-only"'
-ok "ent du lists packages and free space" 'echo "$out" | grep -q "MB  nano-full" && echo "$out" | grep -q "Free on the data partition"'
+ok "ent du lists packages and free space" 'echo "$out" | grep -q "MB  nano-full" && echo "$out" | grep -q "Free where Entware lives"'
 run uninstall -y
 
 echo "== [$SH] 29. status --json, background tasks and the lock (for the TV app)"
@@ -571,6 +571,101 @@ ok "job refuses a name on tasks that take none" 'grep -q "takes no name" "$W/out
 run uninstall -y
 ! run add htop -y
 ok "add says what to do when Entware isn't installed" 'grep -q "isn.t mounted on /opt" "$W/out"'
+
+echo "== [$SH] 31. Entware on app storage, moving it, and only using a folder that's root's alone"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+mkdir -p /mnt/lg/appstore && mount -t tmpfs tmpfs /mnt/lg/appstore
+APP=/mnt/lg/appstore/entware
+run install --location=appstore -y
+ok "install --location=appstore puts Entware on app storage" 'grep -q "Entware installed successfully" "$W/out" && [ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt/bin/opkg ]'
+ok "the boot script names the folder" 'grep -q "^ *SRC=$APP$" /var/lib/webosbrew/init.d/S99entware'
+ok "install.info records it" 'grep -q "^location=appstore $APP$" /opt/etc/webos-entware/install.info'
+run status; sed -i 's/\x1b\[[0-9;]*m//g' "$W/out"
+ok "doctor shows where Entware is, that it's root's alone, and both free spaces" 'grep -q "Location: *app storage ($APP)" "$W/out" && grep -q "Root.s alone: *yes" "$W/out" && grep -q "MB user data, [0-9]* MB app storage" "$W/out" && grep -q "Everything looks right" "$W/out"'
+run status --json
+ok "status --json has the location, safety and both free spaces" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"location\"] == \"appstore\" and d[\"srcSafe\"] is True, d
+assert isinstance(d[\"appFreeMB\"], int) and isinstance(d[\"userFreeMB\"], int) and d[\"freeMB\"] == d[\"appFreeMB\"], d
+" "$W/out"'
+! run install --location=user -y
+ok "install --location=user on an app storage install says to move it" 'grep -q "already installed on app storage" "$W/out" && grep -q "move user" "$W/out"'
+run install -y
+ok "a repair keeps it on app storage" 'grep -q "Entware installed successfully" "$W/out" && [ /opt -ef $APP ]'
+reboot_tv
+ok "after a reboot the boot script mounts it from app storage" '[ /opt -ef $APP ] && grep -q "started Entware services" /tmp/webos-entware-boot.log'
+reboot_tv skip-hbc; login
+ok "the SSH login fallback mounts it from app storage" '[ /opt -ef $APP ] && grep -q "at login" /tmp/webos-entware-boot.log'
+
+PKGS=$(cat /opt/lib/opkg/fake-installed)
+run move user -y
+ok "move user moves it to user data" 'grep -q "now runs from user data" "$W/out" && [ /opt -ef /mnt/lg/user/opt ] && [ ! -e $APP ]'
+ok "the packages came along" '[ "$(cat /opt/lib/opkg/fake-installed)" = "$PKGS" ] && /opt/bin/opkg print-architecture | grep -q aarch64'
+ok "the boot script and install.info follow" 'grep -q "^ *SRC=/mnt/lg/user/opt$" /var/lib/webosbrew/init.d/S99entware && grep -q "^location=user " /opt/etc/webos-entware/install.info'
+run move user -y
+ok "moving to where it already is changes nothing" 'grep -q "already on user data" "$W/out" && [ /opt -ef /mnt/lg/user/opt ]'
+mkdir -p $APP/leftover
+! run move appstore -y
+ok "move won't overwrite a folder that's already there" 'grep -q "already exists" "$W/out" && [ /opt -ef /mnt/lg/user/opt ] && [ -d $APP/leftover ]'
+rm -rf $APP
+umount /mnt/lg/appstore
+! run move appstore -y
+ok "move says when app storage isn't mounted, and changes nothing" 'grep -q "isn.t mounted" "$W/out" && [ /opt -ef /mnt/lg/user/opt ]'
+mount -t tmpfs tmpfs /mnt/lg/appstore
+mount -o remount,size=1m /mnt/lg/appstore
+dd if=/dev/zero of=/opt/big bs=1024 count=2048 2>/dev/null
+! run move appstore -y
+ok "move checks for space first, and changes nothing" 'grep -q "Not enough space on app storage" "$W/out" && [ /opt -ef /mnt/lg/user/opt ] && [ ! -e $APP ]'
+rm -f /opt/big; mount -o remount,size=512m /mnt/lg/appstore
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job move appstore) > "$W/out" 2>&1
+for _ in $(seq 1 100); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+ok "job move appstore runs in the background" '[ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && [ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt ]'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job move /etc) > "$W/out" 2>&1
+ok "job move refuses any other place" 'grep -q "Move it where" "$W/out"'
+
+chmod 777 $APP
+run status; sed -i 's/\x1b\[[0-9;]*m//g' "$W/out"
+ok "doctor flags a folder others can write to" 'grep -q "Root.s alone: *no" "$W/out" && grep -q "isn.t root.s alone" "$W/out"'
+reboot_tv
+ok "the boot script refuses to mount a folder others can write to" '! mounted && grep -q "refused to mount" /tmp/webos-entware-boot.log'
+login
+ok "so does the SSH login fallback" '! mounted'
+run install -y
+ok "a repair makes it root's alone again" 'grep -q "It.s root.s alone now" "$W/out" && grep -q "Entware installed successfully" "$W/out" && [ "$(stat -c %a $APP)" = 755 ]'
+chown 65534 $APP
+umount /opt
+! run install -y
+ok "install refuses a folder root doesn't own" 'grep -q "isn.t a folder owned by root" "$W/out" && ! mounted'
+chown 0 $APP
+run install -y
+ok "the login profile records where Entware lives" 'grep -q "^ENTWARE_SRC=$APP$" /home/root/.profile'
+chmod 777 /opt/etc
+run status; sed -i 's/\x1b\[[0-9;]*m//g' "$W/out"
+ok "doctor flags a folder inside Entware that others can write to" 'grep -q "Root.s alone: *no" "$W/out" && grep -q "chmod go-w /opt/etc" "$W/out"'
+reboot_tv
+ok "the boot script checks inside Entware after mounting, and unmounts it" '! mounted && grep -q "refused to mount $APP: /opt/etc isn.t root.s alone" /tmp/webos-entware-boot.log'
+mount --bind $APP /opt
+out=$($SH -l -c 'echo "PATH=$PATH"' < /dev/null 2>&1)
+ok "a login doesn't use an /opt that isn't root's alone (no PATH, no bash)" 'echo "$out" | grep -q "this login doesn.t use it" && ! echo "$out" | grep -q "^PATH=.*/opt/bin"'
+chmod 755 /opt/etc
+out=$($SH -l -c 'echo "PATH=$PATH"' < /dev/null 2>&1)
+ok "and does once it's root's alone again" 'echo "$out" | grep -q "^PATH=/opt/bin"' 
+(exec 9>> /opt/etc/busy-file; sleep 15) & BUSY=$!
+sleep 0.3
+! run move user -y
+ok "move waits while a program has files open in Entware, and changes nothing" 'grep -q "still using Entware" "$W/out" && [ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt ]'
+kill $BUSY 2>/dev/null; wait $BUSY 2>/dev/null; rm -f /opt/etc/busy-file
+run move user -y
+ok "then the move goes through" 'grep -q "now runs from user data" "$W/out" && [ /opt -ef /mnt/lg/user/opt ] && [ ! -e $APP ] && grep -q "^ENTWARE_SRC=/mnt/lg/user/opt$" /home/root/.profile'
+run move appstore -y
+ok "and back" '[ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt ] && [ "$(stat -c %a /opt/tmp)" = 1777 ]'
+run uninstall -y
+ok "uninstall removes Entware from app storage" 'grep -q "Entware removed" "$W/out" && [ ! -e $APP ] && [ ! -e /var/lib/webosbrew/init.d/S99entware ]'
+mkdir -p /mnt/lg/user/opt/keep; echo mine > /mnt/lg/user/opt/keep/file
+run uninstall -y
+ok "uninstall won't delete a folder that isn't root's Entware" '[ -f /mnt/lg/user/opt/keep/file ] && grep -q "Couldn.t confirm" "$W/out"'
+rm -rf /mnt/lg/user/opt
+umount /mnt/lg/appstore
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

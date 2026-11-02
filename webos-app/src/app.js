@@ -167,9 +167,18 @@
             html += row('Kernel', esc(s.kernel + (s.kernelBits ? ' (' + s.kernelBits + '-bit)' : '')));
             html += row('Homebrew Channel', yes(s.homebrewChannel, 'yes', 'not found', 'warn'));
         }
-        if (s.freeMB !== null) {
-            html += row('Free space', s.freeMB < 50 ? '<span class="bad">' + esc(s.freeMB + ' MB') + '</span>' : esc(s.freeMB + ' MB'));
+        if (s.installed) {
+            html += row('Location', (s.location === 'appstore' ? 'app storage' : 'user data') +
+                (s.srcSafe === false ? ' · <span class="bad">not root\'s alone</span>' : ''));
         }
+        var free = [];
+        if (s.userFreeMB !== null && s.userFreeMB !== undefined) {
+            free.push(s.userFreeMB < 50 ? '<span class="bad">' + esc(s.userFreeMB + ' MB') + '</span> user data' : esc(s.userFreeMB + ' MB') + ' user data');
+        }
+        if (s.appFreeMB !== null && s.appFreeMB !== undefined) {
+            free.push(s.appFreeMB < 50 ? '<span class="bad">' + esc(s.appFreeMB + ' MB') + '</span> apps' : esc(s.appFreeMB + ' MB') + ' apps');
+        }
+        if (free.length) { html += row('Free space', free.join(' · ')); }
         html += row('Telnet recovery', yes(s.telnet, 'on', 'off', 'warn'));
         $('facts').innerHTML = html;
 
@@ -183,6 +192,7 @@
         $('install-hint').textContent = s.installed ? 'keeps your packages and settings' : 'about two minutes, needs internet';
         show('upgrade', s.installed && s.mounted);
         show('addons', s.installed && s.mounted);
+        show('move', canMove(s));
         show('uninstall', s.installed);
         show('update', !!latest);
         if (latest) { $('update-title').textContent = 'Update to v' + latest; }
@@ -191,6 +201,13 @@
 
         // A task started earlier (or from another screen) is still running
         if (s.job === 'running' && !jobTimer) { followJob(s.jobName); }
+    }
+
+    // Offer app storage when webOS's user data is getting tight and app
+    // storage has room (the same rule doctor uses)
+    function canMove(s) {
+        return !!(s.installed && s.mounted && s.location === 'user' && s.srcSafe !== false &&
+            s.userFreeMB !== null && s.userFreeMB < 150 && s.appFreeMB !== null && s.appFreeMB > 500);
     }
 
     function show(action, on) {
@@ -243,7 +260,8 @@
             var a = addonById(m[2]);
             return (m[1] === 'add' ? 'Add ' : 'Remove ') + (a ? a.title : m[2]);
         }
-        return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate', upgrade: 'Update packages' }[name] || name || 'Task';
+        return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate', upgrade: 'Update packages',
+            'move appstore': 'Move to app storage', 'move user': 'Move to user data' }[name] || name || 'Task';
     }
 
     function logHtml(lines) {
@@ -252,7 +270,7 @@
 
     // Start a task in the background, then follow it
     function startJob(name) {
-        if (busy || !/^(install|uninstall|locate|upgrade|(add|remove) [a-z0-9]+)$/.test(name)) { return; }
+        if (busy || !/^(install|uninstall|locate|upgrade|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -396,6 +414,14 @@
         },
         upgrade: function () { startJob('upgrade'); },
         addons: function () { addonIndex = 0; openAddons(); },
+        move: function () {
+            if (!state) { return; }
+            confirmThen('Move Entware to app storage?',
+                'User data, which webOS needs for itself, has ' + state.userFreeMB + ' MB free.  App storage has ' + state.appFreeMB + ' MB.  ' +
+                'Entware and all ' + (state.packages || 'its') + ' packages move there, along with your settings, and its services restart.  ' +
+                'It\'s copied and checked before anything is removed, and it also keeps Entware through "Reset to initial settings".',
+                function () { startJob('move appstore'); });
+        },
         uninstall: function () {
             if (!state) { return; }
             confirmThen('Uninstall Entware?',

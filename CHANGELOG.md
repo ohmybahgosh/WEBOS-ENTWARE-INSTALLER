@@ -2,7 +2,16 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
-## Unreleased
+## [2.9.0] - 2026-11-02
+
+### Added
+
+- **Entware on app storage:** `install --location=appstore` puts a new install on the TV's app storage, which is much bigger than user data and keeps Entware through "Reset to initial settings".  `webos-entware move appstore` moves an existing install there (and `move user` moves it back): it copies everything, checks the copy, switches over, and only then removes the old copy.  The TV app offers **Move to app storage** when user data is getting tight.  Researched on a C2 with webOS 25.
+- `doctor` and the app show where Entware lives and the free space in both areas.
+
+### Security
+
+- Entware is only used when it's root's alone.  `/mnt/lg/user`, where it lives by default, can be written by any user on webOS, so a process that isn't root could otherwise swap in its own folder to run as root at the next boot.  The boot script, the SSH login and the installer now mount Entware first and then check `/opt` itself (so it can't be swapped between the check and its use): the folder and everything on the way to what runs as root must be owned by root and writable by no one else.  Anything else is unmounted unused, and a login won't use it.  Old copies are deleted only through a private mount after checking their identity.  `/opt/tmp` is now sticky (1777).  Found researching app storage, and checked by an independent review.
 
 ### Changed
 
