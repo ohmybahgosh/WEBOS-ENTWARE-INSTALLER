@@ -11,6 +11,7 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 
 ### Changed
 
+- A new app icon: the package box with a terminal badge, for packages plus a real shell.
 - locate is set up from Add-ons now, so the app's separate "Set up locate" button is gone.  `webos-entware locate` still works.
 - The app's buttons are a little more compact, so every one fits above the footer even with an update showing.
 
