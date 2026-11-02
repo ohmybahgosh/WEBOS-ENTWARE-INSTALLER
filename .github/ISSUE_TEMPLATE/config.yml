@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Rooting help
+    url: https://cani.rootmy.tv/
+    about: Check whether your TV can be rooted.  Rooting itself isn't covered here.
+  - name: Private or security report
+    url: https://ohmybahgosh.dev/contact/?t=mail-private
+    about: Anything that shouldn't be public goes by email.

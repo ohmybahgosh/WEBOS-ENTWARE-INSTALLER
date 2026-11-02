@@ -1,47 +1,25 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/refs/heads/main/images/WEBOS-ENTWARE-INSTALLER-BANNER.png" alt="WEBOS-ENTWARE-INSTALLER" width="800">
-</p>
+<div align="center">
 
----
+<img src="images/WEBOS-ENTWARE-INSTALLER-BANNER.png" alt="WEBOS-ENTWARE-INSTALLER" width="720">
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/refs/heads/main/images/attention.gif" alt="Attention GIF" width="250">
-</p>
+# WEBOS-ENTWARE-INSTALLER
 
-<h2 align="center">⚠️ Please Read Carefully ⚠️</h2>
+**One-line Entware for rooted LG webOS TVs.  Checks your TV first, picks the right build, survives reboots and uninstalls cleanly.**
 
-<br>
+[![Version](https://img.shields.io/badge/version-2.6.0-ff3ea5)](webos-entware-installer.sh)
+[![webOS](https://img.shields.io/badge/webOS-23%20%C2%B7%2024%20%C2%B7%2025-ffb547)](#supported-tvs)
+[![Shell](https://img.shields.io/badge/POSIX-sh-89e051)](webos-entware-installer.sh)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![ohmybahgosh.dev](https://img.shields.io/badge/ohmybahgosh.dev-project%20page-33e1ff)](https://ohmybahgosh.dev/webos-entware-installer/)
 
-🚧 **This project is under active development!**  
-❗ **Use at your own risk.**
+</div>
 
-I have taken every reasonable precaution to ensure safe, stable, and reliable operation.  
-However, no script can guarantee a completely risk-free modification.
+A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`.  No external dependencies.  One file, pure `/bin/sh`.
 
----
+> [!IMPORTANT]
+> **This changes a rooted TV, so read what it does first.**  It installs into `/mnt/lg/user/opt`, adds one Homebrew Channel boot script and, unless you use `--no-shell`, swaps in its own shell files after backing yours up.  Everything it adds is listed in [What it changes on the TV](#what-it-changes-on-the-tv), and `webos-entware uninstall` takes it all back out.  Keep **telnet** on in the Homebrew Channel as a way back in.  Provided as-is, with no warranty.
 
-### 🛡️ Before proceeding:
-- ✅ **Review** all planned actions carefully.
-- ✅ **Backup** your important data and system files.
-- ✅ **Prepare** recovery options if anything unexpected occurs.
-
----
-
-### ✍️ By using this installer, you acknowledge:
-- You **accept full responsibility** for any changes made to your device.
-- This software is provided **"as-is"** without any warranties or guarantees.
-
----
-
-<p align="center"><strong>✨ Stay smart. Stay cautious. Stay awesome. ✨</strong></p>
-
----
-
-# WebOS Entware Manager
-
-A **POSIX shell** installer that sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`. It checks your TV first, picks the right build, survives reboots and uninstalls cleanly.
-
-No external dependencies. One file, pure `/bin/sh`.
+**Found a bug or have an idea?**  [Open an issue](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose), or use the [templates on ohmybahgosh.dev](https://ohmybahgosh.dev/contact/?t=ent-bug).
 
 ---
 

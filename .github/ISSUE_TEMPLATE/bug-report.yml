@@ -1,0 +1,57 @@
+name: Bug report
+description: Install, repair, uninstall or a helper command went wrong.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting.  The `doctor` output below answers most questions before they're asked.
+        Please leave out anything private (passwords, home IP addresses).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you ran
+      description: The command or menu choice, exactly as you used it.
+      placeholder: sh /tmp/webos-entware-installer.sh install
+      render: shell
+  - type: input
+    id: tv
+    attributes:
+      label: TV model and webOS version
+      placeholder: OLED65C2PUA, webOS 25 (10.3.1)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Installer version
+      description: Shown at the top of the menu, or `webos-entware --help`.
+      placeholder: "2.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Entware build
+      options:
+        - 64-bit (aarch64-k3.10)
+        - 32-bit (armv7sf-k3.2)
+        - Not sure
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `webos-entware doctor`
+      description: If `/opt` isn't mounted, run `sh /mnt/lg/user/opt/bin/webos-entware doctor` instead.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
