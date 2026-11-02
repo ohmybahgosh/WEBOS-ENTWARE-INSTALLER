@@ -423,6 +423,8 @@ ok "apps --ids lists IDs for tab completion" '[ "$(/opt/bin/webos-tv apps --ids 
 printf 'line one netflix\nline two app.tivibro.tv started\n' > "$W/messages"
 WEBOS_TV_LOG="$W/messages" timeout 2 /opt/bin/applog tivibro > "$W/out" 2>&1
 ok "applog follows the log, filtered" 'grep -q "app.tivibro.tv started" "$W/out" && ! grep -q "line one" "$W/out"'
+sleep 1
+ok "applog stopped from outside leaves no tail or grep running" '! pgrep -f "tail -n 200 -F $W/messages" >/dev/null'
 /opt/bin/tvshot /tmp/shot.png > "$W/out" 2>&1
 ok "tvshot saves a screenshot and says how to copy it" '[ -s /tmp/shot.png ] && grep -q "Saved /tmp/shot.png" "$W/out" && grep -q "scp root@" "$W/out"'
 ok "webos-tv help lists the commands" '/opt/bin/webos-tv help | grep -q "tvshot"'
@@ -439,6 +441,9 @@ out=$(cd /tmp && PATH="/opt/bin:$PATH" $SH /opt/bin/entwrap owns nano /opt/bin/n
 ok "ent owns finds the package for a command and a path" 'echo "$out" | grep -q "^nano: nano-full" && echo "$out" | grep -q "^/opt/bin/nano: nano-full"'
 ok "ent owns says when a file is part of webOS or missing" 'echo "$out" | grep -q "^/bin/sh: part of webOS" && echo "$out" | grep -q "no-such-cmd: not found"'
 out=$(cd /tmp && $SH /opt/bin/entwrap du 5 2>&1)
+touch /opt/lib/opkg/info/meta-only.list
+out=$(cd /tmp && $SH /opt/bin/entwrap du 50 2>&1)
+ok "ent du counts a package with no files as empty, not the current folder" 'echo "$out" | grep -q "0.0 MB  meta-only"'
 ok "ent du lists packages and free space" 'echo "$out" | grep -q "MB  nano-full" && echo "$out" | grep -q "Free on the data partition"'
 run uninstall -y
 

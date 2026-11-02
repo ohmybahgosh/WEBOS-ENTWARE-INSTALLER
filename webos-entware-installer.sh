@@ -628,7 +628,7 @@ case "$1" in
     for l in /opt/lib/opkg/info/*.list; do
         [ -f "$l" ] || continue
         kb=$(while IFS= read -r f; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done < "$l" |
-            tr '\n' '\0' | xargs -0 du -k 2>/dev/null | awk '{s+=$1} END {print s+0}')
+            tr '\n' '\0' | xargs -0 -r du -k 2>/dev/null | awk '{s+=$1} END {print s+0}')
         pkg=${l##*/}
         echo "$kb ${pkg%.list}"
     done | sort -rn | head -n "$n" | awk '{printf "  %7.1f MB  %s\n", $1/1024, $2}'
@@ -997,13 +997,17 @@ apps)
     ;;
 applog)
     [ -r "$LOG" ] || die "The system log $LOG isn't there on this TV."
+    # Run in the background and wait, so a stop from outside (timeout,
+    # kill) also stops tail and grep, not just this script
+    trap 'pkill -P $$ 2>/dev/null; kill $(jobs -p) 2>/dev/null; exit 130' INT TERM HUP
     if [ -n "$1" ]; then
         echo "Following $LOG for lines with \"$1\" (Ctrl+C to stop)..."
-        tail -n 200 -F "$LOG" 2>/dev/null | grep --line-buffered -i -F -- "$1"
+        tail -n 200 -F "$LOG" 2>/dev/null | grep --line-buffered -i -F -- "$1" &
     else
         echo "Following $LOG (Ctrl+C to stop)..."
-        tail -n 20 -F "$LOG"
+        tail -n 20 -F "$LOG" &
     fi
+    wait
     ;;
 tvshot)
     out=${1:-/tmp/tvshot-$(date +%Y%m%d-%H%M%S).png}
