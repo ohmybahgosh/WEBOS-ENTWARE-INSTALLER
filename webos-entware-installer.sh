@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.9.1"
+VERSION="2.9.2"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -67,6 +67,8 @@ LOCATION=""
 MOVE_TO=""
 # A place you chose (install --location or move): repairs won't move it
 LOC_CHOICE=""
+PKG=""
+REFRESH=0
 ROLLBACK=0
 SNAPSHOT=0
 NEW_BACKUPS=""
@@ -113,7 +115,8 @@ usage() {
     echo "  uninstall      Remove Entware, its packages and the shell setup it added"
     echo "  status         Check the TV and the install, and say what to fix (alias: doctor)"
     echo "  locate         Set up locate/updatedb (mlocate) for webOS, with an hourly refresh"
-    echo "  upgrade        Refresh the package list and upgrade every Entware package"
+    echo "  upgrade [name] Refresh the package list and upgrade every package, or just the one named"
+    echo "  updates        List packages with updates (--refresh downloads the package list first)"
     echo "  addons         List the add-ons: packages with the setup they need on webOS"
     echo "  add <name>     Install an add-on (nano, locate, certs, git, python, htop, tmux, ...)"
     echo "  remove <name>  Uninstall an add-on"
@@ -513,7 +516,8 @@ job_state() {
 
 start_job() {
     case "$1" in
-        install|uninstall|locate|upgrade|app-update) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
+        install|uninstall|locate|app-update) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
+        upgrade) [ -z "${2:-}" ] || pkg_name_ok "$2" || error_exit "That isn't a package name: $2" ;;
         add|remove) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
         move) case "${2:-}" in user|appstore) ;; *) error_exit "Move it where? Use: move appstore or move user." ;; esac ;;
         *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, move or app-update." ;;
@@ -572,9 +576,67 @@ job_status() {
 }
 
 # === Upgrade packages ===
+# Package names as opkg writes them: nothing a shell would read as more
+pkg_name_ok() { case "$1" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._+-]*) return 1 ;; esac; return 0; }
+# The package list's age: when it was last refreshed from Entware's server
+lists_file() { ls -t /opt/var/opkg-lists/* 2>/dev/null | head -n 1; }
+lists_date() { f=$(lists_file); [ -n "$f" ] && date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null; }
+lists_age_hours() { f=$(lists_file); [ -n "$f" ] && echo $(( $(age_of "$f") / 3600 )); }
+# "name installed available" for each package with an update, from the
+# package list on the TV (no download)
+upgradable() { /opt/bin/opkg list-upgradable 2>/dev/null | awk -F ' - ' 'NF >= 3 && $1 !~ / / {print $1, $2, $3}'; }
+
+# Lists packages with updates. --refresh downloads the package list first.
+check_updates() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    opt_ours && opkg_works || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    if [ "$REFRESH" = 1 ]; then
+        [ "$JSON" = 1 ] || info "Refreshing the package list..."
+        if ! /opt/bin/opkg update > /dev/null 2>&1; then
+            [ "$JSON" = 1 ] && REFRESH_FAILED=1 || warn "Couldn't reach Entware's server, so this is the list from $(lists_date)."
+        fi
+        /opt/bin/opkg list 2>/dev/null | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
+    fi
+    UP=$(upgradable)
+    if [ "$JSON" = 1 ]; then
+        printf '{"checked":%s,"ageHours":%s,"refreshFailed":%s,"packages":[' "$(json_str "$(lists_date)")" \
+            "$(json_num "$(lists_age_hours)")" "$( [ "${REFRESH_FAILED:-0}" = 1 ] && echo true || echo false)"
+        first=1
+        printf '%s\n' "$UP" | while read -r n i a; do
+            [ -n "$n" ] || continue
+            [ "$first" = 1 ] || printf ','
+            first=0
+            printf '{"name":%s,"installed":%s,"available":%s}' "$(json_str "$n")" "$(json_str "$i")" "$(json_str "$a")"
+        done
+        printf ']}\n'
+        return 0
+    fi
+    if [ -z "$UP" ]; then
+        success "Every package is up to date (package list from $(lists_date))."
+        return 0
+    fi
+    log "$CYAN" "$(printf '%s\n' "$UP" | wc -l | tr -d ' ') package updates (package list from $(lists_date)):"
+    printf '%s\n' "$UP" | awk '{printf "  %-28s %s -> %s\n", $1, $2, $3}'
+    echo "Update them all: $(run_cmd) upgrade   One: $(run_cmd) upgrade <name>"
+}
+
+# upgrade: refresh the package list and upgrade everything.
+# upgrade <name>: upgrade that one package, if it has an update.
 upgrade_packages() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    if [ -n "$PKG" ]; then
+        pkg_name_ok "$PKG" || error_exit "That isn't a package name: $PKG"
+        line=$(upgradable | awk -v n="$PKG" '$1 == n')
+        [ -n "$line" ] || error_exit "$PKG has no update (or isn't installed). See: $(run_cmd) updates"
+        set -- $line
+        info "Updating $PKG from $2 to $3..."
+        /opt/bin/opkg upgrade "$PKG" || error_exit "$PKG didn't update. Run 'ent upgrade $PKG' to see why."
+        ensure_ca
+        [ "$PKG" = mlocate ] && locate_ready && write_updatedb_conf
+        success "$PKG is now $3."
+        return 0
+    fi
     info "Refreshing the package list..."
     /opt/bin/opkg update || error_exit "Couldn't refresh the package list. Check the TV's internet connection."
     /opt/bin/opkg list 2>/dev/null | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
@@ -2509,6 +2571,11 @@ show_status() {
     opt_ours && is_ours "$HOME_DIR/.profile" && ! /opt/bin/bash -c true >/dev/null 2>&1 &&
         issue "Your login is set to switch to bash, but bash doesn't run, so SSH stays on the stock shell. Fix: $(fix_cmd)"
 
+    if opt_ours && opkg_works; then
+        n_up=$(upgradable | wc -l | tr -d ' ')
+        [ "${n_up:-0}" -gt 0 ] 2>/dev/null &&
+            note "$n_up package updates are available (package list from $(lists_date)). See them: $(run_cmd) updates"
+    fi
     [ -n "$NOTES" ] && { echo; info "Notes:$NOTES"; }
     echo
     if [ -z "$ISSUES" ]; then
@@ -2566,6 +2633,9 @@ status_json() {
         "$(json_bool /opt/bin/bash -c true)" "$(json_bool is_ours "$HOME_DIR/.profile")" "$(json_bool helpers_ok)" \
         "$(json_bool tv_helpers_ok)"
     printf '"locationChoice":%s,' "$(json_str "$(loc_choice)")"
+    up_n=""
+    opkg_works && up_n=$(upgradable | wc -l | tr -d ' ')
+    printf '"updates":%s,"updatesChecked":%s,"updatesAgeHours":%s,' "$(json_num "$up_n")" "$(json_str "$(lists_date)")" "$(json_num "$(lists_age_hours)")"
     printf '"location":%s,"srcSafe":%s,"userFreeMB":%s,"appFreeMB":%s,' "$(json_str "$(loc_of "$BIND_SRC")")" \
         "$(json_bool entware_safe)" "$(json_num "$(mb_of "$user_kb")")" "$(json_num "$(mb_of "$app_kb")")"
     printf '"nano":%s,"certs":%s,"locate":%s,"locateDb":%s,' "$(json_str "$nano")" "$(json_str "$certs")" \
@@ -2592,7 +2662,12 @@ if [ "$1" = job ]; then
     exit 0
 fi
 ADDON=""
-if [ "$1" = move ]; then
+if [ "$1" = upgrade ] && [ -n "${2:-}" ] && [ "${2#-}" = "$2" ]; then
+    ACTION=upgrade
+    PKG=$2
+    MOVE_TO=-    # so no other action can follow
+    shift 2
+elif [ "$1" = move ]; then
     ACTION=move
     MOVE_TO=${2:-}
     LOC_CHOICE=$MOVE_TO
@@ -2611,7 +2686,7 @@ if [ "$1" = job-status ]; then
 fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update)
+        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates)
             # add and remove take only options after the name
             [ -z "$ADDON" ] && [ -z "$MOVE_TO" ] || { usage; exit 1; }
             case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
@@ -2619,6 +2694,7 @@ for arg in "$@"; do
         --no-shell) SETUP_SHELL=0 ;;
         --with-locate) WITH_LOCATE=1 ;;
         --json) JSON=1 ;;
+        --refresh) REFRESH=1 ;;
         --location=user|--location=appstore) LOCATION="${arg#--location=}" ;;
         --arch=aarch64-k3.10|--arch=armv7sf-k3.2) FORCE_ARCH="${arg#--arch=}" ;;
         -h|--help) usage; exit 0 ;;
@@ -2694,4 +2770,6 @@ case "$ACTION" in
     remove) addon_remove "$ADDON" ;;
     move) move_entware "$MOVE_TO" ;;
     app-update) app_update ;;
+    updates) [ "$REFRESH" = 1 ] && take_lock && trap 'release_lock' EXIT
+        check_updates ;;
 esac

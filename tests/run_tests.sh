@@ -36,7 +36,13 @@ mkdir -p /opt/lib/opkg; touch $DB
 case "$1" in
     print-architecture) echo "arch all 1"; echo "arch aarch64-3.10 10" ;;
     update) [ -e /run/entware-fail-update ] && { echo "fake: update failed"; exit 1; }
+        mkdir -p /opt/var/opkg-lists; touch /opt/var/opkg-lists/entware
         echo "Updated list of available packages" ;;
+    list-upgradable) cat /opt/lib/opkg/fake-upgradable 2>/dev/null ;;
+    upgrade) shift
+        if [ $# -eq 0 ]; then : > /opt/lib/opkg/fake-upgradable
+        else for p in "$@"; do grep -v "^$p - " /opt/lib/opkg/fake-upgradable > /opt/lib/opkg/fake-up.new; mv /opt/lib/opkg/fake-up.new /opt/lib/opkg/fake-upgradable; done
+        fi ;;
     install) shift
         for p in "$@"; do
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
@@ -580,7 +586,7 @@ for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2;
 ok "job remove removes without asking" '[ ! -f /opt/lib/opkg/info/tmux.control ] && grep -q "Removed tmux" /tmp/webos-entware-job/log'
 ! (cd /tmp && $SH /tmp/webos-entware-installer.sh job add "x y") > "$W/out" 2>&1
 ok "job add refuses names outside the catalog" 'grep -q "Unknown add-on" "$W/out"'
-! (cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade htop) > "$W/out" 2>&1
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job install htop) > "$W/out" 2>&1
 ok "job refuses a name on tasks that take none" 'grep -q "takes no name" "$W/out"'
 run uninstall -y
 ! run add htop -y
@@ -776,6 +782,40 @@ for _ in $(seq 1 100); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2
 ok "job app-update runs in the background" '[ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && [ "$(appv)" = 9.9.9 ] && grep -q "The app is now v9.9.9" /tmp/webos-entware-job/log'
 run uninstall -y
 umount /media/developer
+
+echo "== [$SH] 34. package updates: list them, update one or all"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run install -y
+run updates
+ok "updates says when every package is up to date" 'grep -q "Every package is up to date" "$W/out"'
+printf 'htop - 3.4.1-1 - 3.4.2-1\ncurl - 8.11.1-1 - 8.12.0-1\n' > /opt/lib/opkg/fake-upgradable
+run updates
+ok "updates lists each package with its versions" 'grep -q "2 package updates" "$W/out" && grep -q "htop .*3.4.1-1 -> 3.4.2-1" "$W/out"'
+run updates --json --refresh
+ok "updates --json --refresh refreshes the list and reports it" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert [p[\"name\"] for p in d[\"packages\"]] == [\"htop\", \"curl\"] and d[\"packages\"][1][\"available\"] == \"8.12.0-1\", d
+assert d[\"checked\"] and d[\"ageHours\"] == 0 and d[\"refreshFailed\"] is False, d
+" "$W/out"'
+run status --json
+ok "status --json counts the updates" 'grep -q "\"updates\":2," "$W/out"'
+run status
+ok "doctor mentions them" 'grep -q "2 package updates are available" "$W/out"'
+! run upgrade "htop;reboot" -y
+ok "upgrade refuses something that isn't a package name" 'grep -q "isn.t a package name" "$W/out"'
+! run upgrade vim -y
+ok "upgrade says when a package has no update" 'grep -q "vim has no update" "$W/out"'
+run upgrade htop -y
+ok "upgrade <name> updates just that package" 'grep -q "htop is now 3.4.2-1" "$W/out" && ! grep -q "^htop" /opt/lib/opkg/fake-upgradable && grep -q "^curl" /opt/lib/opkg/fake-upgradable'
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade curl) > "$W/out" 2>&1
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+ok "job upgrade <name> runs in the background" '[ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && grep -q "curl is now 8.12.0-1" /tmp/webos-entware-job/log && [ ! -s /opt/lib/opkg/fake-upgradable ]'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade "x y") > "$W/out" 2>&1
+ok "job upgrade refuses something that isn't a package name" 'grep -q "isn.t a package name" "$W/out"'
+printf 'htop - 3.4.1-1 - 3.4.2-1\n' > /opt/lib/opkg/fake-upgradable
+run upgrade -y
+ok "upgrade with no name updates everything" 'grep -q "Packages upgraded" "$W/out" && [ ! -s /opt/lib/opkg/fake-upgradable ]'
+run uninstall -y
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

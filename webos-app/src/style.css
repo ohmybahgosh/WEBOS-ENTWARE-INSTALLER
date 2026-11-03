@@ -98,3 +98,8 @@ footer .right { margin: 0 0 0 auto; }
 #notes li.tip { color: #9be7ff; white-space: normal; padding: 12px 16px 12px 46px; margin-bottom: 6px;
   background: rgba(76, 195, 255, .08); border: 1px solid rgba(76, 195, 255, .25); border-radius: 14px; }
 #notes li.tip:before { content: "\2192"; left: 18px; top: 12px; color: #4cc3ff; }
+
+/* Package updates */
+.list-head { font-size: 23px; color: #c9d6e8; margin: -4px 0 18px; }
+.list-head .dim { display: block; font-size: 19px; margin-top: 4px; }
+.btn-attn small { color: #4cc3ff; font-weight: 700; }

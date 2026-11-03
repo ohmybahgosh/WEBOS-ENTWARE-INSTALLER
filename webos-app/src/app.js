@@ -33,8 +33,11 @@
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
     var addons = [];         // last addons --json
-    var addonIndex = 0;      // focused row on the Add-ons screen
-    var backToAddons = false; // reopen Add-ons after an add-on task's result
+    var listIndex = 0;       // focused row on the Add-ons or Package updates screen
+    var backTo = '';         // 'addons' or 'updates': the screen to reopen after a task's result
+    var upd = null;          // last updates --json
+    var updRows = [];        // rows on the Package updates screen
+    var autoChecked = false; // refreshed the package list once this session
 
     function $(id) { return document.getElementById(id); }
 
@@ -201,6 +204,10 @@
         $('install-title').textContent = s.installed ? (s.issues.length ? 'Repair Entware' : 'Check and repair') : 'Install Entware';
         $('install-hint').textContent = s.installed ? 'keeps your packages and settings' : 'about two minutes, needs internet';
         show('upgrade', s.installed && s.mounted);
+        var n = s.updates;
+        $('upgrade-hint').textContent = n > 0 ? n + (n === 1 ? ' update' : ' updates') + ' available' :
+            (n === 0 ? 'all up to date' + (s.updatesChecked ? ' · list from ' + s.updatesChecked.split(' ')[0] : '') : 'see what can be updated');
+        document.querySelector('[data-action="upgrade"]').className = 'btn' + (n > 0 ? ' btn-attn' : '');
         show('addons', s.installed && s.mounted);
         show('move', canMove(s));
         show('uninstall', s.installed);
@@ -246,18 +253,23 @@
         overlayMode = null;
         onConfirm = null;
         $('overlay').className = 'overlay hidden';
-        if (backToAddons) { backToAddons = false; openAddons(); return; }
+        if (backTo) {
+            var b = backTo;
+            backTo = '';
+            if (b === 'updates') { openUpdates(false); } else { openAddons(); }
+            return;
+        }
         focusCurrent();
     }
     function confirmThen(title, text, fn) {
-        backToAddons = overlayMode === 'addons'; // BACK returns to the list
+        backTo = (overlayMode === 'addons' || overlayMode === 'updates') ? overlayMode : ''; // BACK returns to the list
         onConfirm = fn;
         overlay('confirm', esc(title), esc(text), 'Press OK to go ahead, or BACK to cancel.');
     }
     // OK on a confirmation: go ahead, without returning to the screen behind it
     function acceptConfirm() {
         var fn = onConfirm;
-        backToAddons = false;
+        backTo = '';
         closeOverlay();
         fn();
     }
@@ -270,13 +282,16 @@
     // ------------------------------------------------------------------ tasks
 
     function jobTitle(name) {
+        var u = /^upgrade (.+)$/.exec(name || '');
+        if (u) { return 'Update ' + u[1]; }
         var m = /^(add|remove) ([a-z0-9]+)$/.exec(name || '');
         if (m) {
             var a = addonById(m[2]);
             return (m[1] === 'add' ? 'Add ' : 'Remove ') + (a ? a.title : m[2]);
         }
-        return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate', upgrade: 'Update packages',
-            'move appstore': 'Move to app storage', 'move user': 'Move to user data', 'app-update': 'Update the app' }[name] || name || 'Task';
+        return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate',
+            'move appstore': 'Move to app storage', 'move user': 'Move to user data', 'app-update': 'Update the app',
+            upgrade: 'Update all packages' }[name] || name || 'Task';
     }
 
     function logHtml(lines) {
@@ -285,7 +300,7 @@
 
     // Start a task in the background, then follow it
     function startJob(name) {
-        if (busy || !/^(install|uninstall|locate|upgrade|app-update|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
+        if (busy || !/^(install|uninstall|locate|upgrade|app-update|upgrade [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -323,7 +338,8 @@
                     return;
                 }
                 busy = false;
-                backToAddons = /^(add|remove) /.test(j.name || name);
+                var jn = j.name || name;
+                backTo = /^(add|remove) /.test(jn) ? 'addons' : (/^upgrade/.test(jn) ? 'updates' : '');
                 var good = j.state === 'done' && j.exit === 0;
                 var heading = good ? title + ': done' : (j.state === 'lost' ? title + ' stopped before finishing' : title + ': something went wrong');
                 overlay('message', '<span class="' + (good ? 'result-ok' : 'result-bad') + '">' + esc(heading) + '</span>', logHtml(log),
@@ -356,7 +372,7 @@
                 return;
             }
             addons = list;
-            if (addonIndex >= addons.length) { addonIndex = 0; }
+            if (listIndex >= addons.length) { listIndex = 0; }
             renderAddons();
         });
     }
@@ -369,7 +385,7 @@
 
     function renderAddons() {
         var html = '<div class="addons" id="addon-list">' + addons.map(function (a, i) {
-            return '<div class="addon' + (i === addonIndex ? ' focus' : '') + '" data-i="' + i + '">' +
+            return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
                 '<div><b>' + esc(a.title) + '</b><small>' + esc(a.about) + '</small></div>' + addonPill(a) + '</div>';
         }).join('') + '</div>';
         overlay('addons', 'Add-ons', html, 'OK adds, finishes setup or removes.  BACK to close.');
@@ -377,22 +393,22 @@
             row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
             row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseAddon(); });
         });
-        focusAddon(addonIndex);
+        focusAddon(listIndex);
     }
 
     function focusAddon(i) {
         var rows = document.querySelectorAll('.addon');
         if (!rows.length) { return; }
-        addonIndex = Math.max(0, Math.min(i, rows.length - 1));
-        for (var r = 0; r < rows.length; r++) { rows[r].className = 'addon' + (r === addonIndex ? ' focus' : ''); }
+        listIndex = Math.max(0, Math.min(i, rows.length - 1));
+        for (var r = 0; r < rows.length; r++) { rows[r].className = 'addon' + (r === listIndex ? ' focus' : ''); }
         // Keep the focused row in view
-        var box = $('addon-list'), row = rows[addonIndex];
+        var box = $('addon-list'), row = rows[listIndex];
         if (row.offsetTop < box.scrollTop) { box.scrollTop = row.offsetTop; }
         else if (row.offsetTop + row.offsetHeight > box.scrollTop + box.clientHeight) { box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight; }
     }
 
     function chooseAddon() {
-        var a = addons[addonIndex];
+        var a = addons[listIndex];
         // Ids are short names from the installer's fixed list; anything else is refused
         if (!a || !/^[a-z0-9]+$/.test(a.id)) { return; }
         if (a.state === 'notInstalled') {
@@ -405,9 +421,87 @@
             confirmThen('Remove ' + a.title + '?', 'Uninstalls ' + a.packages + (a.id === 'locate' ? ', its settings and the hourly refresh' : '') + '.  You can add it again any time.',
                 function () { startJob('remove ' + a.id); });
         } else {
-            backToAddons = true;
+            backTo = 'addons';
             overlay('message', esc(a.title), esc(a.title + ' is part of the base setup, so it stays installed.  ' + a.about + '.'), 'Press OK or BACK to go back.');
         }
+    }
+
+    // ------------------------------------------------------------------ package updates
+
+    // refreshList: download the package list from Entware's server first
+    function openUpdates(refreshList) {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', '<span class="spinner"></span>Package updates',
+            logHtml([refreshList ? 'Checking Entware\'s server for updates…' : 'Reading the package list…']), '');
+        runScript('updates --json' + (refreshList ? ' --refresh' : ''), function (ok, out) {
+            busy = false;
+            var d = parseJson(out);
+            if (!d || !d.packages) {
+                overlay('message', '<span class="result-bad">Couldn\'t check for updates</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to close.');
+                return;
+            }
+            upd = d;
+            if (state) {
+                state.updates = d.packages.length;
+                state.updatesChecked = d.checked;
+                state.updatesAgeHours = d.ageHours;
+            }
+            renderUpdates();
+        });
+    }
+
+    function renderUpdates() {
+        var p = upd.packages;
+        updRows = [];
+        if (p.length > 1) {
+            updRows.push({ kind: 'all', title: 'Update all ' + p.length + ' packages', sub: 'refreshes the package list, then updates every package', pill: 'Update all' });
+        }
+        p.forEach(function (x) {
+            updRows.push({ kind: 'pkg', name: x.name, installed: x.installed, available: x.available,
+                title: x.name, sub: x.installed + '  →  ' + x.available, pill: 'Update' });
+        });
+        updRows.push({ kind: 'check', title: 'Check again', sub: 'downloads the package list from Entware\'s server', pill: '' });
+        if (listIndex >= updRows.length) { listIndex = 0; }
+        var head = '<div class="list-head">' +
+            (p.length ? esc(p.length + (p.length === 1 ? ' package has an update.' : ' packages have updates.')) : '<span class="ok">Every package is up to date.</span>') +
+            '  <span class="dim">Package list from ' + esc(upd.checked || 'unknown') +
+            (upd.refreshFailed ? ' (Entware\'s server couldn\'t be reached)' : '') + '</span></div>';
+        var html = head + '<div class="addons" id="addon-list">' + updRows.map(function (r, i) {
+            return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
+                '<div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
+                (r.pill ? '<span class="pill pill-add">' + esc(r.pill) + '</span>' : '') + '</div>';
+        }).join('') + '</div>';
+        overlay('updates', 'Package updates', html, 'OK updates or checks again.  BACK to close.');
+        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
+            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseUpdate(); });
+        });
+        focusAddon(listIndex);
+    }
+
+    function chooseUpdate() {
+        var r = updRows[listIndex];
+        if (!r) { return; }
+        if (r.kind === 'check') { openUpdates(true); return; }
+        if (r.kind === 'all') {
+            confirmThen('Update all ' + upd.packages.length + ' packages?',
+                'Refreshes the package list, then updates every package that has an update.  Your settings are kept.  A service restarts if its package updates.',
+                function () { startJob('upgrade'); });
+            return;
+        }
+        if (!/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(r.name)) { return; }
+        confirmThen('Update ' + r.name + '?', 'From ' + r.installed + ' to ' + r.available + '.  Its settings are kept.',
+            function () { startJob('upgrade ' + r.name); });
+    }
+
+    // Once a session, if the package list is a day old, refresh it quietly so
+    // the update count is current
+    function autoCheckUpdates(s) {
+        if (autoChecked || window.ENTWARE_DEMO || !s || !s.installed || !s.mounted) { return; }
+        autoChecked = true;
+        if (s.updatesAgeHours !== null && s.updatesAgeHours < 24) { return; }
+        runScript('updates --json --refresh', function () { if (!busy && !overlayMode) { refresh(); } });
     }
 
     // ------------------------------------------------------------------ actions
@@ -429,8 +523,8 @@
                     function () { startJob('install'); });
             }
         },
-        upgrade: function () { startJob('upgrade'); },
-        addons: function () { addonIndex = 0; openAddons(); },
+        upgrade: function () { listIndex = 0; openUpdates(!!(state && (state.updatesAgeHours === null || state.updatesAgeHours >= 24))); },
+        addons: function () { listIndex = 0; openAddons(); },
         move: function () {
             if (!state) { return; }
             confirmThen('Move Entware to app storage?',
@@ -568,10 +662,10 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
-        if (overlayMode === 'addons') {
-            if (k === KEY.UP) { focusAddon(addonIndex - 1); }
-            else if (k === KEY.DOWN) { focusAddon(addonIndex + 1); }
-            else if (k === KEY.ENTER) { chooseAddon(); }
+        if (overlayMode === 'addons' || overlayMode === 'updates') {
+            if (k === KEY.UP) { focusAddon(listIndex - 1); }
+            else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
+            else if (k === KEY.ENTER) { if (overlayMode === 'updates') { chooseUpdate(); } else { chooseAddon(); } }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
             e.preventDefault();
             return;
@@ -617,5 +711,5 @@
     setInterval(function () { if (state) { checkUpdate(state.version); } }, 6 * 3600 * 1000);
 
     focusCurrent();
-    refresh(function (s) { if (s) { checkUpdate(s.version); } });
+    refresh(function (s) { if (s) { checkUpdate(s.version); autoCheckUpdates(s); } });
 }());

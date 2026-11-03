@@ -2,6 +2,13 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.9.2] - 2026-11-02
+
+### Added
+
+- **Package updates in the app:** **Package updates** (the old **Update packages**) opens a screen listing every package with an update, with its current and new version.  **Update** updates one, **Update all** updates them all, and **Check again** downloads the package list from Entware's server.  The button says how many updates there are, and the app refreshes the package list once a day when it opens.  Each update runs in the background and returns to the list.
+- `webos-entware updates [--refresh] [--json]` lists packages with updates, and `webos-entware upgrade <name>` updates one package.  `doctor` mentions how many updates there are.
+
 ## [2.9.1] - 2026-11-02
 
 ### Added

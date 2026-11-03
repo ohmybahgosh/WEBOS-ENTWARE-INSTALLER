@@ -35,6 +35,7 @@ function demo(scenario) {
         ['curl', 'curl', 'curl', true, 'notInstalled'],
         ['jq', 'jq', 'jq', true, 'notInstalled']
     ].map(([id, title, packages, removable, state]) => ({ id, title, packages, removable, state, about: 'About ' + title }));
+    let UPDATES = [{ name: 'htop', installed: '3.4.1-1', available: '3.4.2-1' }, { name: 'curl', installed: '8.11.1-1', available: '8.12.0-1' }];
     const base = {
         version: '2.8.0', model: 'OLED55C2PUA', webos: 'webOS 25', webosRelease: '10.2.1', firmware: '33.21.30',
         kernel: 'aarch64', kernelBits: 64, ip: '192.168.1.50', root: true, homebrewChannel: true, telnet: true,
@@ -50,10 +51,13 @@ function demo(scenario) {
     window.ENTWARE_DEMO = function (args, cb) {
         window.ENTWARE_CALLS.push(args);
         const reply = (out) => setTimeout(() => cb(true, out, ''), 30);
-        if (args === 'status --json') { return reply(JSON.stringify(Object.assign({}, base, { job: job ? job.state : 'none', jobName: job ? job.name : '' }))); }
+        if (args === 'status --json') { return reply(JSON.stringify(Object.assign({}, base, { updates: UPDATES.length, updatesChecked: '2026-11-02 20:58', updatesAgeHours: 0, job: job ? job.state : 'none', jobName: job ? job.name : '' }))); }
         if (args === 'addons --json') { return reply(JSON.stringify(ADDONS)); }
+        if (/^updates --json( --refresh)?$/.test(args)) {
+            return reply(JSON.stringify({ checked: '2026-11-02 20:58', ageHours: 0, refreshFailed: false, packages: UPDATES }));
+        }
         if (args === 'status') { return reply('Entware status\n  Everything looks right.\n'); }
-        let m = /^job (add|remove|move) ([a-z0-9]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
+        let m = /^job (add|remove|move|upgrade) ([A-Za-z0-9._+-]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
         if (m) {
             job = { name: m[2] ? m[1] + ' ' + m[2] : m[1], state: 'running', polls: 0 };
             return reply('Started: ' + job.name + '.');
@@ -64,6 +68,8 @@ function demo(scenario) {
             if (job.polls > 1) {
                 job.state = 'done';
                 log.push('[SUCCESS] Done.');
+                const up = /^upgrade ?(.*)$/.exec(job.name);
+                if (up) { UPDATES = up[1] ? UPDATES.filter((x) => x.name !== up[1]) : []; }
                 const a = /^(add|remove) (.*)$/.exec(job.name);
                 if (a) { ADDONS.find((x) => x.id === a[2]).state = a[1] === 'add' ? 'installed' : 'notInstalled'; }
                 if (job.name === 'move appstore') { Object.assign(base, { location: 'appstore', userFreeMB: 181, appFreeMB: 1639, freeMB: 1639 }); }
@@ -178,6 +184,37 @@ function check(name, cond) {
     await page.waitForSelector('.addon');
     await press(page, 'Escape');
     check('BACK closes Add-ons', await page.$eval('#overlay', (o) => o.classList.contains('hidden')));
+
+    console.log('== Package updates');
+    check('the button says how many updates there are', /2 updates available/.test(await page.textContent('#upgrade-hint')));
+    let order4 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
+    await press(page, 'ArrowUp', 10);
+    await press(page, 'ArrowDown', order4.indexOf('upgrade'));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => document.getElementById('overlay-title').textContent === 'Package updates' && document.querySelector('.addon'));
+    let rows = await page.$$eval('.addon b', (bs) => bs.map((b) => b.textContent));
+    check('it lists Update all, each package and Check again', rows.join('|') === 'Update all 2 packages|htop|curl|Check again');
+    check('each package shows its versions', await page.$eval('#addon-list', (l) => /3\.4\.1-1\s+→\s+3\.4\.2-1/.test(l.textContent)));
+    check('and when the list is from', /Package list from 2026-11-02 20:58/.test(await page.textContent('#overlay-body')));
+    await page.screenshot({ path: path.join(OUT, '10-package-updates.png') });
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    check('asks before updating one package', /Update htop\?/.test(await overlayTitle(page)) && /3\.4\.1-1 to 3\.4\.2-1/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
+    check('updates just that package in the background', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job upgrade htop') && /Update htop: done/.test(await overlayTitle(page)));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => document.getElementById('overlay-title').textContent === 'Package updates' && document.querySelector('.addon'));
+    rows = await page.$$eval('.addon b', (bs) => bs.map((b) => b.textContent));
+    check('then returns to the list, without htop', rows.join('|') === 'curl|Check again');
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    await page.waitForFunction(() => document.getElementById('overlay-title').textContent === 'Package updates' && document.querySelector('.addon'));
+    check('Check again downloads the package list', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('updates --json --refresh'));
+    await press(page, 'Escape');
+    check('BACK closes it', await page.$eval('#overlay', (o) => o.classList.contains('hidden')));
+    await page.waitForFunction(() => /1 update available/.test(document.getElementById('upgrade-hint').textContent));
+    check('and the button now says 1 update', true);
 
     console.log('== Move to app storage');
     check('the main screen shows where Entware is and both free spaces', await page.$eval('#facts', (t) => /user data/.test(t.textContent) && /1700 MB apps/.test(t.textContent)));

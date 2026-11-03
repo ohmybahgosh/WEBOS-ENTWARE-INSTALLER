@@ -88,7 +88,8 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
 - **Add-ons:** nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl and jq, each with the setup it needs on webOS.  One press adds, finishes setting up or removes one.
-- **Update packages** and **Uninstall Entware**, with a confirmation before anything is removed.
+- **Package updates:** a screen listing every package with an update, its current and new version, with **Update** for one or **Update all**.  The button shows how many there are, and the app checks Entware's server for new ones once a day.
+- **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check:** everything `doctor` looks at, on screen.
 - **Report a problem:** a QR code that opens a bug report on your phone with your TV, version, build and the full check already filled in.
@@ -244,7 +245,8 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware doctor` | Check the TV and the install, and say what to fix (same as `status`) |
 | `webos-entware install` | Repair or update the install. Your packages are kept |
 | `webos-entware uninstall` | Remove Entware and everything the installer added |
-| `webos-entware upgrade` | Refresh the package list and upgrade every package (same as `ent upgrade`) |
+| `webos-entware updates` | List packages with updates and their versions (`--refresh` downloads the package list first, `--json` for scripts) |
+| `webos-entware upgrade` | Refresh the package list and upgrade every package (same as `ent upgrade`).  `upgrade <name>` updates just that one |
 | `webos-entware locate` | Set up locate (see [locate](#locate-mlocate)) |
 | `webos-entware addons` | List the [add-ons](#add-ons) and whether each is installed |
 | `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
