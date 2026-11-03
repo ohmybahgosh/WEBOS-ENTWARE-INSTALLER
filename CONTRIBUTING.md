@@ -1,6 +1,6 @@
 # Contributing to the WebOS Entware installer
 
-Thanks for helping.  Reports from real TVs, fixes, docs and code are all welcome.
+Thanks for helping.  Reports from real TVs, fixes, docs and code are all welcome.  Please follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting how it went on your TV
 

@@ -100,17 +100,20 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 <p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, adding the Login banner and watching it install, then opening Package updates"></p>
 
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app's main screen on an LG C2: Entware is ready, 36 packages on app storage, with Check and repair, Package updates (2 updates available), Add-ons, Full check, Report a problem and Uninstall Entware">
+  <img src="images/app-status.png" width="49%" alt="The Entware app's main screen on an LG C2: Entware is ready, 36 packages on app storage, with Check and repair, Package updates (2 updates available), Add-ons, Full check, Report for GitHub and Uninstall Entware">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux, ncdu, rsync, curl and jq with Add, and the Login banner installed">
 </p>
-<p align="center"><img src="images/app-updates.png" width="49%" alt="The Package updates screen: Update all 2 packages, htop 3.4.1-1 to 3.4.2-1 and curl 8.11.1-1 to 8.12.0-1, each with Update, and Check again"></p>
+<p align="center">
+  <img src="images/app-updates.png" width="49%" alt="The Package updates screen: Update all 2 packages, htop 3.4.1-1 to 3.4.2-1 and curl 8.11.1-1 to 8.12.0-1, each with Update, and Check again">
+  <img src="images/app-report.png" width="49%" alt="Report for GitHub: It works on my TV for a compatibility report, or Something went wrong for a bug report, each with a QR code">
+</p>
 
 **Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
 
 **Or install the IPK yourself:** download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.10.0_all.ipk"}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.10.1_all.ipk"}'
 ```
 
 Already installed Entware over SSH?  Open the app and it shows your install as it is.  The app and the `webos-entware` command run the same installer, and a repair from the app updates the saved command to the app's version.  Removing the app leaves Entware installed; use **Uninstall Entware** first if you want it gone too.
@@ -590,7 +593,7 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 ## Contributing
 
-Compatibility reports, bug reports and ideas are welcome: use the [issue forms](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose), or **Report for GitHub** in the TV app.  [CONTRIBUTING.md](CONTRIBUTING.md) has the details.  For pull requests, run the tests first (`sudo tests/run_tests.sh` and `sudo tests/run_tests.sh dash`, which need root for their private mount namespace) and test on a real TV if you can, saying which model and webOS version.
+Compatibility reports, bug reports and ideas are welcome: use the [issue forms](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose), or **Report for GitHub** in the TV app.  [CONTRIBUTING.md](CONTRIBUTING.md) has the details, and everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).  For pull requests, run the tests first (`sudo tests/run_tests.sh` and `sudo tests/run_tests.sh dash`, which need root for their private mount namespace) and test on a real TV if you can, saying which model and webOS version.
 
 AI-assisted pull requests are welcome too, held to the same standard as the rest of this project: say in the pull request that AI was used, make sure you understand and have reviewed every change, and test it on a real TV.
 
