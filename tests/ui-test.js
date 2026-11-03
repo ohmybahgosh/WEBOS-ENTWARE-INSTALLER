@@ -43,6 +43,7 @@ function demo(scenario) {
         bash: true, shellFiles: true, helpers: true, tvHelpers: true, nano: 'on', certs: 'yes', locate: 'notInstalled',
         locateDb: '', job: 'none', jobName: '', issues: [], notes: []
     };
+    if (scenario === 'update') { window.ENTWARE_LATEST = '9.9.9'; }
     if (scenario === 'fresh') { Object.assign(base, { installed: false, mounted: false, opkg: false, packages: null, diskUsed: '' }); }
     let job = null;
     window.ENTWARE_CALLS = [];
@@ -52,7 +53,7 @@ function demo(scenario) {
         if (args === 'status --json') { return reply(JSON.stringify(Object.assign({}, base, { job: job ? job.state : 'none', jobName: job ? job.name : '' }))); }
         if (args === 'addons --json') { return reply(JSON.stringify(ADDONS)); }
         if (args === 'status') { return reply('Entware status\n  Everything looks right.\n'); }
-        let m = /^job (add|remove|move) ([a-z0-9]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade)$/.exec(args);
+        let m = /^job (add|remove|move) ([a-z0-9]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
         if (m) {
             job = { name: m[2] ? m[1] + ' ' + m[2] : m[1], state: 'running', polls: 0 };
             return reply('Started: ' + job.name + '.');
@@ -181,6 +182,9 @@ function check(name, cond) {
     console.log('== Move to app storage');
     check('the main screen shows where Entware is and both free spaces', await page.$eval('#facts', (t) => /user data/.test(t.textContent) && /1700 MB apps/.test(t.textContent)));
     check('Move to app storage shows when user data is tight', await visible(page, 'move'));
+    check('a notice says it can move to app storage', await page.$eval('#notes', (n) => /Move it to app storage: 1700 MB free/.test(n.textContent)));
+    check('the status card still fits with the notice', !(await overflows(page)));
+    await page.screenshot({ path: path.join(OUT, '2b-move-notice.png') });
     let order3 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
     await press(page, 'ArrowUp', 10);
     await press(page, 'ArrowDown', order3.indexOf('move'));
@@ -193,6 +197,26 @@ function check(name, cond) {
     await press(page, 'Enter');
     await page.waitForFunction(() => /app storage/.test(document.getElementById('facts').textContent));
     check('afterwards it shows app storage, and the button is gone', !(await visible(page, 'move')));
+    check('and the notice is gone', !(await page.$eval('#notes', (n) => /Move it to app storage/.test(n.textContent))));
+
+    console.log('== App update');
+    await page.close();
+    ({ page, errors } = await open('update'));
+    await page.waitForFunction(() => document.querySelector('[data-action="update"]').style.display !== 'none');
+    check('a newer release shows Update to v9.9.9 first', /Update to v9\.9\.9/.test(await page.textContent('#update-title')) &&
+        (await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none')[0].getAttribute('data-action'))) === 'update');
+    check('every button still fits above the footer', await page.evaluate(() => {
+        const bs = Array.prototype.filter.call(document.querySelectorAll('.btn'), (b) => b.style.display !== 'none');
+        return bs[bs.length - 1].getBoundingClientRect().bottom <= document.querySelector('footer').getBoundingClientRect().top - 8;
+    }));
+    await page.screenshot({ path: path.join(OUT, '9-update-available.png') });
+    await press(page, 'ArrowUp', 10);
+    await press(page, 'Enter');
+    check('asks before updating, and says what happens', /Update the app to v9\.9\.9\?/.test(await overlayTitle(page)) && /checks it against the release/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
+    check('updates as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job app-update') && /Update the app: done/.test(await overlayTitle(page)));
+    await press(page, 'Enter');
 
     console.log('== Full check');
     const order2 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));

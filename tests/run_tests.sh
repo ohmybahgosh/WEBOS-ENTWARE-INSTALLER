@@ -98,6 +98,12 @@ cat > "$W/bin/luna-send" << 'F'
 echo "$*" >> /tmp/luna.log
 case "$*" in
     *createToast*) echo '{"returnValue": true}' ;;
+    *appInstallService/dev/install*)
+        ipk=$(echo "$*" | sed -n 's/.*"ipkUrl":"\([^"]*\)".*/\1/p'); d=$(mktemp -d)
+        (cd "$d" && ar x "$ipk" control.tar.gz && tar xzf control.tar.gz)
+        v=$(sed -n 's/^Version: //p' "$d"/control "$d"/./control 2>/dev/null | head -n 1); rm -rf "$d"
+        sed -i "s/\"version\": *\"[^\"]*\"/\"version\": \"$v\"/" /media/developer/apps/usr/palm/applications/org.ohmybahgosh.entware/appinfo.json
+        echo '{"subscribed": true, "returnValue": true}' ;;
     *applicationManager/launch*)
         case "$*" in
             *x.not.real*) printf '{\n    "errorCode": -101,\n    "returnValue": false,\n    "errorText": "not exist"\n}\n' ;;
@@ -113,6 +119,14 @@ case "$*" in
     *applicationManager/running*) printf '{\n    "returnValue": true,\n    "running": [\n        {\n            "id": "netflix"\n        }\n    ]\n}\n' ;;
     *executeOneShot*) p=$(echo "$*" | sed -n 's/.*"path":"\([^"]*\)".*/\1/p'); echo PNG > "$p"; echo '{"returnValue": true}' ;;
 esac
+F
+cat > "$W/bin/curl" << F
+#!/bin/sh
+# Serves files from a fake GitHub release in $W/rel
+while [ \$# -gt 1 ]; do [ "\$1" = -o ] && OUT=\$2; shift; done
+f=\${1##*/}
+[ -f "$W/rel/\$f" ] || exit 22
+cp "$W/rel/\$f" "\$OUT"
 F
 chmod 755 "$W/bin/"* "$W/fake-opkg"
 export PATH="$W/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -687,12 +701,19 @@ sleep 0.3
 run install -y
 ok "if it can't move now, the repair still succeeds and Entware stays put" 'grep -q "Entware installed successfully" "$W/out" && grep -q "stays on user data for now" "$W/out" && [ /opt -ef /mnt/lg/user/opt ] && [ ! -e $APP ]'
 kill $BUSY 2>/dev/null; wait $BUSY 2>/dev/null; rm -f /opt/etc/busy-file
+notice() { bash -c '. /opt/etc/webos-entware/bashrc' < /dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'; }
+ok "an SSH login says Entware can move to app storage" 'notice | grep -q "Entware is on user data" && notice | grep -q "webos-entware move appstore"'
+run move user -y
+ok "move user on user data keeps it there for good" 'grep -q "It stays there" "$W/out" && grep -q "^location_choice=user$" /opt/etc/webos-entware/install.info'
+ok "and the login notice is gone" '! notice | grep -q "Entware is on user data"'
+sed -i 's/^location_choice=.*/location_choice=auto/' /opt/etc/webos-entware/install.info
 PKGS=$(cat /opt/lib/opkg/fake-installed)
 run install -y
 ok "the next repair moves an older install to app storage" 'grep -q "now runs from app storage" "$W/out" && [ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt ] && [ "$(cat /opt/lib/opkg/fake-installed)" = "$PKGS" ]'
 ok "with the boot script and login following" 'grep -q "^ *SRC=$APP$" /var/lib/webosbrew/init.d/S99entware && grep -q "^ENTWARE_SRC=$APP$" /home/root/.profile'
 reboot_tv
 ok "and it comes back after a reboot" '[ /opt -ef $APP ] && grep -q "started Entware services" /tmp/webos-entware-boot.log'
+ok "on app storage there's no login notice" '! notice | grep -q "Entware is on user data"'
 run move user -y
 run install -y
 ok "a repair keeps it on user data when you chose that" '[ /opt -ef /mnt/lg/user/opt ] && ! grep -q "Move Entware to app storage\|now runs from app storage" "$W/out" && grep -q "^location_choice=user$" /opt/etc/webos-entware/install.info'
@@ -706,6 +727,55 @@ run install -y
 ok "when app storage has less room, a new install goes on user data, and stays" '[ /opt -ef /mnt/lg/user/opt ] && ! grep -q "Move Entware to app storage\|now runs from" "$W/out"'
 run uninstall -y
 umount /mnt/lg/appstore
+
+echo "== [$SH] 33. the TV app updates itself from the newest release"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+mkdir -p /media/developer && mount -t tmpfs tmpfs /media/developer
+AD=/media/developer/apps/usr/palm/applications/org.ohmybahgosh.entware
+run install -y
+! run app-update -y
+ok "app-update says when the app isn't installed" 'grep -q "TV app isn.t installed" "$W/out"'
+mkdir -p $AD/assets
+printf '{\n    "id": "org.ohmybahgosh.entware",\n    "version": "2.9.1"\n}\n' > $AD/appinfo.json
+cp "$W/installer.sh" $AD/assets/webos-entware-installer.sh
+fake_release() { # version, package id
+    rm -rf "$W/rel" "$W/pk"; mkdir -p "$W/rel" "$W/pk"
+    printf 'Package: %s\nVersion: %s\nArchitecture: all\n' "$2" "$1" > "$W/pk/control"
+    echo 2.0 > "$W/pk/debian-binary"
+    (cd "$W/pk" && tar czf control.tar.gz ./control && tar czf data.tar.gz ./control && ar rc "$W/rel/org.ohmybahgosh.entware_$1_all.ipk" debian-binary control.tar.gz data.tar.gz)
+    sed "s/^VERSION=.*/VERSION=\"$1\"/" "$W/installer.sh" > "$W/rel/webos-entware-installer.sh"
+    (cd "$W/rel" && sha256sum webos-entware-installer.sh "org.ohmybahgosh.entware_$1_all.ipk" > SHA256SUMS)
+}
+app_up() { (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update -y) > "$W/out" 2>&1; }
+appv() { sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' $AD/appinfo.json; }
+fake_release 2.9.1 org.ohmybahgosh.entware
+app_up
+ok "app-update says when the app is up to date" 'grep -q "The app is up to date (v2.9.1)" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+rm -rf "$W/rel"
+! app_up
+ok "app-update says when GitHub can't be reached" 'grep -q "Couldn.t reach GitHub" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+fake_release 9.9.9 org.ohmybahgosh.entware
+echo tampered >> "$W/rel/org.ohmybahgosh.entware_9.9.9_all.ipk"
+! app_up
+ok "app-update refuses a download that doesn't match the checksum" 'grep -q "didn.t match the release.s checksum" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+fake_release 9.9.9 com.someone.else
+! app_up
+ok "app-update refuses a download that isn't this app" 'grep -q "isn.t version 9.9.9 of this app" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+fake_release 9.9.9 org.ohmybahgosh.entware
+: > /tmp/luna.log
+app_up
+ok "app-update installs the newest release" 'grep -q "The app is now v9.9.9" "$W/out" && [ "$(appv)" = 9.9.9 ]'
+ok "it checked the download first" 'grep -q "checked it against the release" "$W/out"'
+ok "the webos-entware command follows" 'grep -q "^VERSION=\"9.9.9\"" /opt/bin/webos-entware && grep -q "Updated the webos-entware command to v9.9.9" "$W/out"'
+ok "it shows a toast and reopens the app" 'grep -q "createToast.*updated to v9.9.9" /tmp/luna.log && grep -q "applicationManager/launch.*org.ohmybahgosh.entware" /tmp/luna.log'
+ok "and leaves nothing behind in /tmp" '[ -z "$(ls -d /tmp/.webos-entware-update.* /tmp/webos-entware-app-update.sh 2>/dev/null)" ] && [ ! -d /tmp/webos-entware.lock ]'
+sed -i 's/"version": "9.9.9"/"version": "2.9.1"/' $AD/appinfo.json
+rm -rf /tmp/webos-entware-job
+(cd /tmp && $SH $AD/assets/webos-entware-installer.sh job app-update) > "$W/out" 2>&1
+for _ in $(seq 1 100); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+ok "job app-update runs in the background" '[ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && [ "$(appv)" = 9.9.9 ] && grep -q "The app is now v9.9.9" /tmp/webos-entware-job/log'
+run uninstall -y
+umount /media/developer
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

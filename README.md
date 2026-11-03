@@ -92,7 +92,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check:** everything `doctor` looks at, on screen.
 - **Report a problem:** a QR code that opens a bug report on your phone with your TV, version, build and the full check already filled in.
-- **Updates:** tells you when a new version is out.  Updates come from the Homebrew Channel.
+- **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
 <p align="center">
@@ -250,6 +250,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
 | `webos-entware remove <name>` | Uninstall an add-on |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
+| `webos-entware app-update` | Update the TV app (and this command) to the newest release, checked against its checksums |
 | `webos-entware move appstore` | Move Entware to app storage, or `move user` to user data.  A repair also moves older installs to app storage.  See [Where Entware lives](#where-entware-lives) |
 | `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>` or `move <place>` in the background; `job-status` follows it |
 | `webos-entware` | Open the menu |
@@ -435,7 +436,9 @@ webos-entware move user                                   # or back to user data
 
 A move stops Entware's services and checks no other program is using Entware.  Then it copies everything into a fresh folder, checks the copy matches, switches `/opt` over and checks it's that very copy, updates the boot script and your login, and only then removes the old copy.  If anything fails before the switch, Entware stays where it was.  It took 28 seconds for 25 MB on a C2.  `doctor` and the TV app show where Entware is and the free space in each area.
 
-Choosing a place with `--location` or `move` sticks: repairs won't move it again.
+Until it moves, Entware points this out: the TV app shows a notice and a **Move to app storage** button, and SSH logins, the `webos-entware` menu and `doctor` say how to move it.  Installs from before 2.9 get these once the TV app updates from the Homebrew Channel, or with their next repair, which moves them anyway.
+
+Choosing a place with `--location` or `move` sticks: repairs won't move it again, and the notices stop.  `webos-entware move user` on an install that's already on user data keeps it there for good.
 
 Entware goes in a new root-only folder at the top of app storage, not `/media/developer` or `/media/internal`: other apps can write to those, and Entware's programs run as root.
 
@@ -542,7 +545,7 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 **How is it tested?** `tests/run_tests.sh` runs install, repair, reboots, add-ons and uninstall on a Linux PC as root, inside a private mount namespace with fake `wget` and `opkg`, under busybox sh and dash. It doesn't touch the PC or download anything. CI also builds the TV app, checks the IPK and clicks through the app in a headless browser. None of it can stand in for a real TV, so changes are tried on one (an LG C2 on webOS 25) before release.
 
-**Does the app phone home?** No. Its only network request reads the latest release number from GitHub, to say when an update is out. See [SECURITY.md](SECURITY.md).
+**Does the app phone home?** No. It only talks to GitHub: it reads the latest release number to say when an update is out, and downloads that release when you choose **Update**. See [SECURITY.md](SECURITY.md).
 
 ---
 

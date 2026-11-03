@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.9.0"
+VERSION="2.9.1"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -42,6 +42,9 @@ TV_COMMANDS="toast launch close apps applog tvshot"
 CA_FILE="/opt/etc/ssl/certs/ca-certificates.crt"
 ENTWARE_BASE="http://bin.entware.net"
 SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
+RELEASES_URL="https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases"
+APP_ID="org.ohmybahgosh.entware"
+APP_DIR="/media/developer/apps/usr/palm/applications/$APP_ID"
 MARKER="webos-entware-installer"
 BACKUP_SUFFIX=".pre-entware"
 OS_INFO="/var/run/nyx/os_info.json"
@@ -115,8 +118,9 @@ usage() {
     echo "  add <name>     Install an add-on (nano, locate, certs, git, python, htop, tmux, ...)"
     echo "  remove <name>  Uninstall an add-on"
     echo "  move <place>   Move Entware to app storage (appstore) or back to user data (user)"
-    echo "  job <task>     Run install, uninstall, locate, upgrade, add <name> or remove <name>"
-    echo "                 in the background (the TV app uses this)"
+    echo "  app-update     Update the TV app (and this command) to the newest release"
+    echo "  job <task>     Run install, uninstall, locate, upgrade, add <name>, remove <name>,"
+    echo "                 move <place> or app-update in the background (the TV app uses this)"
     echo "  job-status     Show the background task's progress"
     echo "Options:"
     echo "  -y, --yes      Don't ask; use the recommended build and answer yes"
@@ -509,10 +513,10 @@ job_state() {
 
 start_job() {
     case "$1" in
-        install|uninstall|locate|upgrade) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
+        install|uninstall|locate|upgrade|app-update) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
         add|remove) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
         move) case "${2:-}" in user|appstore) ;; *) error_exit "Move it where? Use: move appstore or move user." ;; esac ;;
-        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove or move." ;;
+        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, move or app-update." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     # Only one start at a time: two at once would share one log and exit code
@@ -1060,7 +1064,7 @@ _entwrap_complete() {
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
 _webos_entware_complete() {
-    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate --help" -- "${COMP_WORDS[1]}") )
+    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove move app-update --help" -- "${COMP_WORDS[1]}") )
 }
 complete -F _entwrap_complete entwrap ent opkg
 complete -F _webos_entware_complete webos-entware
@@ -1119,6 +1123,23 @@ alias entlist='entwrap list'
 alias entfix='entwrap repair'
 alias reboot_safe='echo "Rebooting..."; sleep 2; reboot'
 alias tr0='truncate -s0'
+
+# Entware on user data, where older versions put it: say at login that it
+# can move to app storage, unless you chose user data or app storage has
+# less room
+if grep -qs '^location=user ' /opt/etc/webos-entware/install.info &&
+    ! grep -qs '^location_choice=user$' /opt/etc/webos-entware/install.info &&
+    grep -qs ' /mnt/lg/appstore ' /proc/mounts; then
+    _ew_app=$(df -k /mnt/lg/appstore 2>/dev/null | awk 'NR==2 {print $(NF-2)}')
+    _ew_usr=$(df -k /mnt/lg/user 2>/dev/null | awk 'NR==2 {print $(NF-2)}')
+    if [ "${_ew_app:-0}" -gt "${_ew_usr:-0}" ] 2>/dev/null; then
+        printf '\033[0;36m%s\033[0m\n' \
+            "Entware is on user data, which webOS needs for itself. App storage has $((_ew_app / 1024)) MB free" \
+            "and keeps Entware through \"Reset to initial settings\". Move it: webos-entware move appstore" \
+            "(or keep it here and hide this: webos-entware move user)"
+    fi
+    unset _ew_app _ew_usr
+fi
 
 # Neon PS1
 RED="\[\033[0;31m\]"
@@ -2143,6 +2164,15 @@ move_entware() {
     [ -e "$FROM/bin/opkg" ] || error_exit "Entware isn't installed, so there's nothing to move. To install it on app storage: $(run_cmd) install --location=$1"
     if [ "$FROM" = "$TO" ]; then
         info "Entware is already on $(loc_label "$TO") ($TO)."
+        # Asked for by name, so it's a choice: repairs and notices leave it be
+        if [ -n "$LOC_CHOICE" ] && [ -f "$INFO_FILE" ]; then
+            if grep -q '^location_choice=' "$INFO_FILE"; then
+                sed -i "s/^location_choice=.*/location_choice=$LOC_CHOICE/" "$INFO_FILE"
+            else
+                echo "location_choice=$LOC_CHOICE" >> "$INFO_FILE"
+            fi
+            [ "$TO" = "$USER_SRC" ] && info "It stays there: repairs won't move it, and the login notice is off."
+        fi
         return 0
     fi
     opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first, then move it."
@@ -2250,6 +2280,83 @@ move_entware() {
         warn "Couldn't confirm $FROM is the old copy (it may have changed), so it was kept. Look at what's in it, and delete it yourself if it is."
     fi
     info "Programs already running keep using the old copy until they restart. Log in again to use the new one."
+}
+
+# === Update the TV app ===
+# Downloads the newest release of the app from GitHub, checks it against the
+# release's SHA256SUMS and that it really is this app, installs it with
+# webOS's app installer, and reopens it. The saved webos-entware command is
+# updated to the same release. Every URL is built here from the version
+# number, which must look like 1.2.3; nothing else from the download is used.
+fetch() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --max-time 300 -o "$2" "$1"
+    else
+        wget -q -O "$2" "$1"
+    fi
+}
+app_version() { sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$APP_DIR/appinfo.json" 2>/dev/null | head -n 1; }
+# True when version $1 is newer than $2
+version_gt() {
+    awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
+        exit 1 }'
+}
+app_update() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    [ -f "$APP_DIR/appinfo.json" ] || error_exit "The Entware TV app isn't installed. Install it from the Homebrew Channel (repository https://ohmybahgosh.dev/repo)."
+    # Installing replaces the app's folder, this script's copy included, so
+    # carry on from a copy in /tmp (same process, so the lock stays ours)
+    case "$SELF" in
+        "$APP_DIR"/*|/opt/*|"$BIND_SRC"/*)
+            cp "$SELF" /tmp/webos-entware-app-update.sh && exec sh /tmp/webos-entware-app-update.sh app-update -y ;;
+    esac
+    cur=$(app_version)
+    UW=$(mktemp -d /tmp/.webos-entware-update.XXXXXX) || error_exit "Couldn't make a temporary folder."
+    trap 'rm -rf "${UW:?}"; [ "$SELF" = /tmp/webos-entware-app-update.sh ] && rm -f "$SELF"; release_lock' EXIT
+    info "Checking GitHub for the newest release (the app is v${cur:-unknown})..."
+    fetch "$RELEASES_URL/latest/download/SHA256SUMS" "$UW/SHA256SUMS" ||
+        error_exit "Couldn't reach GitHub. Check the TV's internet connection, or update from the Homebrew Channel."
+    line=$(grep -E "^[0-9a-f]{64}  ${APP_ID}_[0-9]+\.[0-9]+\.[0-9]+_all\.ipk$" "$UW/SHA256SUMS" | head -n 1)
+    [ -n "$line" ] || error_exit "The newest release has no TV app in it. Try the Homebrew Channel."
+    sum=${line%% *}
+    file=${line##* }
+    v=${file#"${APP_ID}"_}
+    v=${v%_all.ipk}
+    if ! version_gt "$v" "${cur:-0}"; then
+        success "The app is up to date (v${cur:-$v})."
+        return 0
+    fi
+    info "Downloading v$v..."
+    fetch "$RELEASES_URL/download/v$v/$file" "$UW/app.ipk" || error_exit "The download failed. Nothing was changed."
+    [ "$(sha256sum "$UW/app.ipk" | awk '{print $1}')" = "$sum" ] ||
+        error_exit "The download didn't match the release's checksum, so it wasn't installed."
+    (cd "$UW" && ar x app.ipk control.tar.gz && mkdir c && tar xzf control.tar.gz -C c) >/dev/null 2>&1
+    if ! grep -qx "Package: $APP_ID" "$UW/c/control" 2>/dev/null || ! grep -qx "Version: $v" "$UW/c/control" 2>/dev/null; then
+        error_exit "The download isn't version $v of this app, so it wasn't installed."
+    fi
+    success "Downloaded v$v and checked it against the release."
+
+    # The saved webos-entware command follows the app, if it checks out too
+    sline=$(grep -E "^[0-9a-f]{64}  webos-entware-installer\.sh$" "$UW/SHA256SUMS" | head -n 1)
+    if [ -n "$sline" ] && opt_ours && [ -f "$MANAGER" ] &&
+        fetch "$RELEASES_URL/download/v$v/webos-entware-installer.sh" "$UW/installer.sh" &&
+        [ "$(sha256sum "$UW/installer.sh" | awk '{print $1}')" = "${sline%% *}" ] && grep -qs "$MARKER" "$UW/installer.sh"; then
+        cp "$UW/installer.sh" "$MANAGER.new" && chmod 755 "$MANAGER.new" && mv -f "$MANAGER.new" "$MANAGER" &&
+            success "Updated the webos-entware command to v$v."
+    fi
+
+    info "Installing v$v. The app closes for a moment, then opens again."
+    luna-send -n 1 luna://com.webos.appInstallService/dev/install \
+        "{\"id\":\"$APP_ID\",\"ipkUrl\":\"$UW/app.ipk\",\"subscribe\":true}" < /dev/null > /dev/null 2>&1
+    n=0
+    while [ "$(app_version)" != "$v" ] && [ $n -lt 60 ]; do sleep 1; n=$((n + 1)); done
+    [ "$(app_version)" = "$v" ] ||
+        error_exit "webOS didn't finish installing v$v. Try again, or update from the Homebrew Channel."
+    success "The app is now v$v."
+    luna-send -n 1 luna://com.webos.notification/createToast "{\"sourceId\":\"$APP_ID\",\"message\":\"Entware app updated to v$v\"}" < /dev/null > /dev/null 2>&1
+    luna-send -n 1 luna://com.webos.applicationManager/launch "{\"id\":\"$APP_ID\"}" < /dev/null > /dev/null 2>&1
+    return 0
 }
 
 # === Status / doctor ===
@@ -2504,7 +2611,7 @@ if [ "$1" = job-status ]; then
 fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate|upgrade|addons|doctor|clean)
+        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update)
             # add and remove take only options after the name
             [ -z "$ADDON" ] && [ -z "$MOVE_TO" ] || { usage; exit 1; }
             case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
@@ -2545,6 +2652,9 @@ if [ -z "$ACTION" ]; then
     fi
     echo
     log "$CYAN" "Minimal WebOS Entware Manager v$VERSION"
+    if [ "$BIND_SRC" = "$USER_SRC" ] && [ -e "$USER_SRC/bin/opkg" ] && [ "$(loc_choice)" != user ] && appstore_default; then
+        info "Entware is on user data, which webOS needs for itself. Option 1 (repair) moves it to app storage, which has more room and keeps it through \"Reset to initial settings\"."
+    fi
     echo "1) Install or repair Entware"
     echo "2) Uninstall Entware"
     echo "3) Check status (doctor)"
@@ -2567,7 +2677,7 @@ if [ -z "$ACTION" ]; then
 fi
 
 case "$ACTION" in
-    install|uninstall|locate|upgrade|add|remove|move)
+    install|uninstall|locate|upgrade|add|remove|move|app-update)
         take_lock
         trap 'release_lock' EXIT
         trap 'exit 1' INT TERM HUP ;;
@@ -2583,4 +2693,5 @@ case "$ACTION" in
     add) addon_add "$ADDON" ;;
     remove) addon_remove "$ADDON" ;;
     move) move_entware "$MOVE_TO" ;;
+    app-update) app_update ;;
 esac

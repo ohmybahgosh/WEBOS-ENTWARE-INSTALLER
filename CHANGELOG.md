@@ -2,6 +2,19 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.9.1] - 2026-11-02
+
+### Added
+
+- **Notices for installs on user data:** until Entware moves to app storage, the TV app shows a notice next to its **Move to app storage** button, and SSH logins and the `webos-entware` menu say how to move it.  They stop once it moves, or once you choose user data.
+- `webos-entware move user` on an install that's already on user data now keeps it there for good: repairs won't move it, and the notices stop.
+- **The app updates itself:** when a new release is out, **Update to v…** downloads it from GitHub, checks it against the release's `SHA256SUMS` and that it's this app at that version, installs it with webOS's app installer, and reopens it with a toast.  The `webos-entware` command updates to the same release.  Over SSH: `webos-entware app-update`.  It also looks for new releases every 6 hours while the app is open.
+
+### Changed
+
+- The app's status card is a little tighter, so the notice fits.
+- Tab completion for `webos-entware` knows `upgrade`, `addons`, `add`, `remove`, `move` and `app-update`.
+
 ## [2.9.0] - 2026-11-02
 
 ### Added

@@ -182,9 +182,19 @@
         html += row('Telnet recovery', yes(s.telnet, 'on', 'off', 'warn'));
         $('facts').innerHTML = html;
 
-        // Notes: the rest of the issues, then notes
-        var notes = s.issues.slice(1).concat(s.notes).slice(0, 2);
-        $('notes').innerHTML = notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('');
+        // Notes: a move notice for installs on user data, then the rest of the
+        // issues, then notes (doctor's own move note is the same thing)
+        var notes = s.issues.slice(1).concat(s.notes.filter(function (n) { return !/A repair moves it there/.test(n); }));
+        var html2 = '';
+        // Problems come first; the notice shows when there are none
+        if (canMove(s) && !s.issues.length) {
+            html2 += '<li class="tip">Entware is on user data, which webOS needs.  Move it to app storage: ' +
+                esc(s.appFreeMB + ' MB free') + ', and it survives resets.</li>';
+            notes = [];
+        } else {
+            notes = notes.slice(0, 2);
+        }
+        $('notes').innerHTML = html2 + notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('');
 
         // Buttons for this state
         show('install', true);
@@ -266,7 +276,7 @@
             return (m[1] === 'add' ? 'Add ' : 'Remove ') + (a ? a.title : m[2]);
         }
         return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate', upgrade: 'Update packages',
-            'move appstore': 'Move to app storage', 'move user': 'Move to user data' }[name] || name || 'Task';
+            'move appstore': 'Move to app storage', 'move user': 'Move to user data', 'app-update': 'Update the app' }[name] || name || 'Task';
     }
 
     function logHtml(lines) {
@@ -275,7 +285,7 @@
 
     // Start a task in the background, then follow it
     function startJob(name) {
-        if (busy || !/^(install|uninstall|locate|upgrade|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
+        if (busy || !/^(install|uninstall|locate|upgrade|app-update|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -455,7 +465,11 @@
             });
         },
         update: function () {
-            luna('luna://com.webos.applicationManager/launch', { id: 'org.webosbrew.hbchannel' }, function () {});
+            if (!state || !latest) { return; }
+            confirmThen('Update the app to v' + latest + '?',
+                'Downloads v' + latest + ' from GitHub, checks it against the release\'s checksums, and installs it.  ' +
+                'The app closes for a moment and opens again.  Entware and your packages aren\'t touched, and the webos-entware command updates too.',
+                function () { startJob('app-update'); });
         }
     };
 
@@ -498,7 +512,8 @@
 
     // ------------------------------------------------------------------ updates
 
-    // Newer release on GitHub?  Updates themselves come from the Homebrew Channel.
+    // Newer release on GitHub?  The Update button installs it (app-update);
+    // the Homebrew Channel offers it too.
     function versionParts(v) { return String(v || '').replace(/^v/, '').split('.').map(function (n) { return parseInt(n, 10) || 0; }); }
     function newer(a, b) {
         var x = versionParts(a), y = versionParts(b);
@@ -506,7 +521,10 @@
         return false;
     }
     function checkUpdate(current) {
-        if (window.ENTWARE_DEMO) { return; }
+        if (window.ENTWARE_DEMO) {
+            if (window.ENTWARE_LATEST && newer(window.ENTWARE_LATEST, current)) { latest = window.ENTWARE_LATEST; render(); }
+            return;
+        }
         var xhr = new XMLHttpRequest();
         xhr.open('GET', RELEASES_API);
         xhr.timeout = 10000;
@@ -595,6 +613,8 @@
     document.addEventListener('webOSRelaunch', refreshIfIdle);
     document.addEventListener('visibilitychange', refreshIfIdle);
     setInterval(refreshIfIdle, 30000);
+    // Left open for a long time: look for a new release every 6 hours
+    setInterval(function () { if (state) { checkUpdate(state.version); } }, 6 * 3600 * 1000);
 
     focusCurrent();
     refresh(function (s) { if (s) { checkUpdate(s.version); } });
