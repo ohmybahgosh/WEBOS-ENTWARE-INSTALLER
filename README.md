@@ -19,7 +19,7 @@
 Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`, and gives you a bash shell, handy webOS commands and one-press [add-ons](#add-ons) like git, Python and htop.  Run it from the **[TV app](#the-tv-app)** with your remote, or over SSH.  Either way it's one POSIX shell script with no dependencies.
 
 > [!IMPORTANT]
-> **This changes a rooted TV, so read what it does first.**  It installs into `/mnt/lg/user/opt`, adds one Homebrew Channel boot script and, unless you use `--no-shell`, swaps in its own shell files after backing yours up.  Everything it adds is listed in [What it changes on the TV](#what-it-changes-on-the-tv), and `webos-entware uninstall` takes it all back out.  Keep **telnet** on in the Homebrew Channel as a way back in.  Provided as-is, with no warranty.
+> **This changes a rooted TV, so read what it does first.**  It installs into the TV's app storage (`/mnt/lg/appstore/entware`), adds one Homebrew Channel boot script and, unless you use `--no-shell`, swaps in its own shell files after backing yours up.  Everything it adds is listed in [What it changes on the TV](#what-it-changes-on-the-tv), and `webos-entware uninstall` takes it all back out.  Keep **telnet** on in the Homebrew Channel as a way back in.  Provided as-is, with no warranty.
 
 > [!NOTE]
 > **How this is built.**  I, [OhMyBahGosh](https://github.com/ohmybahgosh), wrote the first versions by hand.  From v2.0 on, it's written with AI coding agents (Claude), directed, reviewed and tested by me.  I've been building software for over 17 years.  My day job is data engineering, and network security and pentesting are what I do for fun.  AI writes a lot of the code here; I decide what it does, check how it does it, and nothing ships until it's run on a real TV (an LG C2 on webOS 25).
@@ -97,10 +97,13 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
+<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, adding the Login banner and watching it install, then opening Package updates"></p>
+
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app's main screen: status of the install and the actions">
-  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux installed, then ncdu, rsync, curl, jq and the Login banner, each with Add">
+  <img src="images/app-status.png" width="49%" alt="The Entware app's main screen on an LG C2: Entware is ready, 36 packages on app storage, with Check and repair, Package updates (2 updates available), Add-ons, Full check, Report a problem and Uninstall Entware">
+  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux, ncdu, rsync, curl and jq with Add, and the Login banner installed">
 </p>
+<p align="center"><img src="images/app-updates.png" width="49%" alt="The Package updates screen: Update all 2 packages, htop 3.4.1-1 to 3.4.2-1 and curl 8.11.1-1 to 8.12.0-1, each with Update, and Check again"></p>
 
 **Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
 
@@ -337,7 +340,7 @@ Tab after `launch`, `close` or `applog` completes app IDs. `webos-tv help` lists
 
 <p align="center"><img src="images/cli-helpers.png" width="760" alt="webos-tv help, apps listing the TV's apps, and toast"></p>
 
-`doctor` also shows the free space on the data partition, which webOS shares with Entware, and flags it below 50 MB.
+`doctor` also shows the free space on user data, which webOS needs for itself, and on app storage, and flags the one Entware is on when it's below 50 MB.
 
 ---
 
@@ -528,7 +531,7 @@ webos-entware uninstall
 
 This asks first, then removes Entware, every package installed with it, the boot script and the shell files the installer wrote, links in your home folder that point into Entware, and unmounts `/opt`. Your original shell files are put back. Disconnect and SSH in again afterwards.
 
-If `/opt` can't be unmounted, or something (like a USB drive) is still mounted inside `/mnt/lg/user/opt`, the folder is kept rather than deleted. Fix that and run uninstall again.
+If `/opt` can't be unmounted, or something (like a USB drive) is still mounted inside Entware's folder, the folder is kept rather than deleted. Fix that and run uninstall again.
 
 To reinstall later, just run the install again.
 
@@ -547,7 +550,7 @@ telnet <tv-ip>               # Homebrew Channel telnet, if it's on
 
 From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `webos-entware install` to repair, or `webos-entware uninstall`.
 
-**Entware is gone after a reboot.** Run `sh /mnt/lg/user/opt/bin/webos-entware doctor` (the saved copy works even while `/opt` isn't mounted). If the boot script is missing, run install again. If it says the boot script didn't run, the Homebrew Channel skipped its boot scripts at that boot: open the Homebrew Channel app once and check again. If the problem keeps coming back, please open an issue with the `doctor` output.
+**Entware is gone after a reboot.** Run `sh /mnt/lg/appstore/entware/bin/webos-entware doctor`, or `sh /mnt/lg/user/opt/bin/webos-entware doctor` if it's on user data (the saved copy works even while `/opt` isn't mounted). If the boot script is missing, run install again. If it says the boot script didn't run, the Homebrew Channel skipped its boot scripts at that boot: open the Homebrew Channel app once and check again. If the problem keeps coming back, please open an issue with the `doctor` output.
 
 **The TV crashed during boot.** On the next boot the Homebrew Channel starts in failsafe mode, skips boot scripts and opens telnet. Connect with telnet, remove `/var/lib/webosbrew/init.d/S99entware`, then reboot.
 
