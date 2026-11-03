@@ -221,7 +221,7 @@ On a TV with a 32-bit kernel it recommends the 32-bit build, explains that this 
 | `--arch=armv7sf-k3.2` | Use the 32-bit build without asking |
 | `--no-shell` | Install Entware only. Your `.profile`, `.bashrc` and login shell are left alone |
 | `--with-locate` | Also set up locate |
-| `--location=appstore` | Put a new install on app storage instead of user data.  See [Where Entware lives](#where-entware-lives) |
+| `--location=user` | Put a new install on user data instead of app storage (the default).  See [Where Entware lives](#where-entware-lives) |
 | `--json` | With `status` or `job-status`: print JSON |
 | `-h`, `--help` | Show the commands and options |
 
@@ -250,7 +250,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
 | `webos-entware remove <name>` | Uninstall an add-on |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
-| `webos-entware move appstore` | Move Entware to app storage (`move user` moves it back).  See [Where Entware lives](#where-entware-lives) |
+| `webos-entware move appstore` | Move Entware to app storage, or `move user` to user data.  A repair also moves older installs to app storage.  See [Where Entware lives](#where-entware-lives) |
 | `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>` or `move <place>` in the background; `job-status` follows it |
 | `webos-entware` | Open the menu |
 
@@ -414,24 +414,28 @@ Any other Entware package installs with `ent install <package>` as usual.  The l
 
 LG TVs have two storage areas that Entware can use:
 
-| | User data (the default) | App storage |
+| | App storage (the default) | User data |
 |:--|:--|:--|
-| Folder | `/mnt/lg/user/opt` | `/mnt/lg/appstore/entware` |
-| Size on a C2 | about 720 MB | about 2.7 GB |
-| Shared with | webOS's own settings, caches and databases | installed apps |
+| Folder | `/mnt/lg/appstore/entware` | `/mnt/lg/user/opt` |
+| Size on a C2 | about 2.7 GB | about 720 MB |
+| Shared with | installed apps | webOS's own settings, caches and databases |
 | Firmware update | kept | kept |
-| "Reset to initial settings" | **deleted** | kept |
+| "Reset to initial settings" | kept | **deleted** |
 | Factory reset | deleted | deleted |
 
-User data is small, and webOS needs some of it for itself, so a big install there can crowd webOS.  App storage has much more room and survives "Reset to initial settings".  Install there, or move an existing install, with:
+New installs go on **app storage** when the TV has it and it has more room than user data, which is the case on every recent LG TV.  Otherwise they go on user data, where versions before 2.9 always put Entware.  User data is small, and webOS needs some of it for itself.  App storage has much more room and survives "Reset to initial settings".
+
+**Older installs move over on their next repair.**  Running install (or **Repair** in the TV app) on an Entware that's on user data moves it to app storage, with the same checked move as `webos-entware move appstore`.  Over SSH it asks first.  Say no and it stays on user data, and repairs won't ask again.  If the move can't happen right then (another program is using Entware, or there's no room), Entware stays where it is, working, the repair still succeeds, and the next repair tries again.
 
 ```sh
-sh webos-entware-installer.sh install --location=appstore    # a new install
-webos-entware move appstore                                   # an existing one
-webos-entware move user                                       # and back again
+sh webos-entware-installer.sh install --location=user    # a new install on user data instead
+webos-entware move appstore                               # move an existing install to app storage
+webos-entware move user                                   # or back to user data, and keep it there
 ```
 
-A move stops Entware's services, copies everything, checks the copy matches, switches `/opt` over, updates the boot script, and only then removes the old copy.  If anything fails before the switch, Entware stays where it was.  The TV app shows **Move to app storage** when user data is getting tight and app storage has room, and `doctor` suggests it too.  Both show the free space in each area.
+A move stops Entware's services and checks no other program is using Entware.  Then it copies everything into a fresh folder, checks the copy matches, switches `/opt` over and checks it's that very copy, updates the boot script and your login, and only then removes the old copy.  If anything fails before the switch, Entware stays where it was.  It took 28 seconds for 25 MB on a C2.  `doctor` and the TV app show where Entware is and the free space in each area.
+
+Choosing a place with `--location` or `move` sticks: repairs won't move it again.
 
 Entware goes in a new root-only folder at the top of app storage, not `/media/developer` or `/media/internal`: other apps can write to those, and Entware's programs run as root.
 
@@ -443,7 +447,7 @@ Entware goes in a new root-only folder at the top of app storage, not `/media/de
 
 | Path | What |
 |:-----|:-----|
-| `/mnt/lg/user/opt` | Entware, all packages, and the `ent` and `webos-entware` commands.  `/mnt/lg/appstore/entware` instead when it's on [app storage](#where-entware-lives) |
+| `/mnt/lg/appstore/entware` | Entware, all packages, and the `ent` and `webos-entware` commands.  `/mnt/lg/user/opt` instead when it's on [user data](#where-entware-lives) |
 | `/opt` | Bind mount of the folder above. On webOS 25 the stock `/opt` only holds LG's factory test programs (`/opt/webos/tests`), which are hidden while Entware is mounted. Nothing on the TV needs them |
 | `/var/lib/webosbrew/init.d/S99entware` | Boot script that remounts `/opt` and starts Entware services |
 | `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |
@@ -460,6 +464,7 @@ Apart from the leftovers described in [Upgrading from an older setup](#upgrading
 
 Run install. It finds an Entware folder left by an older version of this script (or by an early manual setup), keeps your packages, and repairs everything around it:
 
+- Moves Entware from user data to app storage, which has more room (see [Where Entware lives](#where-entware-lives))
 - Puts the real `opkg` back where older versions had replaced it with a wrapper
 - Replaces the old shell files. Your old `.bashrc` is saved as `.bashrc.bak`. One-line settings you added to it yourself (`alias`, `export`, `NAME=value`) are moved to the end of the new `.bashrc`, so they still work and still win over the defaults. Anything else, like lines inside a function, is listed on screen for you to copy over yourself.
 - Writes the boot script, and turns off any older boot script that also mounts Entware on `/opt`. It is renamed with an `.entware-old` suffix, so it stops running but you can still read it.

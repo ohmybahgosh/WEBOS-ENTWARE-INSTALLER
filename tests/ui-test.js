@@ -39,7 +39,7 @@ function demo(scenario) {
         version: '2.8.0', model: 'OLED55C2PUA', webos: 'webOS 25', webosRelease: '10.2.1', firmware: '33.21.30',
         kernel: 'aarch64', kernelBits: 64, ip: '192.168.1.50', root: true, homebrewChannel: true, telnet: true,
         installed: true, build: 'aarch64-k3.10', buildLabel: '64-bit (aarch64-k3.10)', recommended: 'aarch64-k3.10',
-        mounted: true, opkg: true, packages: 42, diskUsed: '61.2M', freeMB: 120, location: 'user', srcSafe: true, userFreeMB: 120, appFreeMB: 1700, bootScript: true, bootLog: 'done',
+        mounted: true, opkg: true, packages: 42, diskUsed: '61.2M', freeMB: 120, location: 'user', locationChoice: 'auto', srcSafe: true, userFreeMB: 120, appFreeMB: 1700, bootScript: true, bootLog: 'done',
         bash: true, shellFiles: true, helpers: true, tvHelpers: true, nano: 'on', certs: 'yes', locate: 'notInstalled',
         locateDb: '', job: 'none', jobName: '', issues: [], notes: []
     };

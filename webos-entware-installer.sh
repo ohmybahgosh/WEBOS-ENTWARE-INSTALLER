@@ -19,9 +19,9 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # === Paths and URLs ===
-# Where Entware lives: user data (the default, shared with webOS) or app
-# storage (bigger, and kept by "Reset to initial settings"). BIND_SRC is
-# the one in use, worked out by resolve_src.
+# Where Entware lives: app storage (the default: bigger, and kept by "Reset
+# to initial settings") or user data (shared with webOS, and where older
+# versions put it). BIND_SRC is the one in use, worked out by resolve_src.
 USER_SRC="/mnt/lg/user/opt"
 APP_PART="/mnt/lg/appstore"
 APP_SRC="$APP_PART/entware"
@@ -62,6 +62,8 @@ JOB_DIR="/tmp/webos-entware-job"
 FORCE_ARCH=""
 LOCATION=""
 MOVE_TO=""
+# A place you chose (install --location or move): repairs won't move it
+LOC_CHOICE=""
 ROLLBACK=0
 SNAPSHOT=0
 NEW_BACKUPS=""
@@ -121,8 +123,8 @@ usage() {
     echo "  --no-shell     Install Entware only, leave .profile/.bashrc and the shell alone"
     echo "  --with-locate  Also set up locate (same as running locate after install)"
     echo "  --json         With status, addons or job-status: print JSON (the TV app reads this)"
-    echo "  --location=L   Where a new install goes: user (user data, the default) or appstore"
-    echo "                 (app storage: more space, and kept by Reset to initial settings)"
+    echo "  --location=L   Where a new install goes: appstore (app storage, the default: more"
+    echo "                 space, and kept by Reset to initial settings) or user (user data)"
     echo "  --arch=ARCH    Use aarch64-k3.10 (64-bit) or armv7sf-k3.2 (32-bit) without asking"
 }
 
@@ -153,6 +155,19 @@ resolve_src() {
     fi
 }
 loc_of() { if [ "$1" = "$APP_SRC" ]; then echo appstore; else echo user; fi; }
+# user or appstore if you chose a place, auto if not
+loc_choice() {
+    c=$(sed -n 's/^location_choice=//p' "$BIND_SRC/etc/webos-entware/install.info" 2>/dev/null)
+    echo "${c:-auto}"
+}
+app_mounted() { grep -qs " $APP_PART " /proc/mounts; }
+# New installs go on app storage when it's there and has more room
+appstore_default() {
+    app_mounted || return 1
+    a=$(free_kb_of "$APP_PART"); u=$(free_kb_of /mnt/lg/user)
+    case "$a$u" in *[!0-9]*) return 1 ;; esac
+    [ -n "$a" ] && [ -n "$u" ] && [ "$a" -gt "$u" ]
+}
 loc_label() { if [ "$1" = "$APP_SRC" ]; then echo "app storage"; else echo "user data"; fi; }
 part_of() { if [ "$1" = "$APP_SRC" ]; then echo "$APP_PART"; else echo /mnt/lg/user; fi; }
 free_kb_of() { df -k "$1" 2>/dev/null | tail -n 1 | awk '{print $(NF-2)}'; }
@@ -1908,6 +1923,8 @@ verify_install() {
 write_install_info() {
     tv_info
     OLD_HOW=$(sed -n 's/^build_choice=//p' "$INFO_FILE" 2>/dev/null)
+    OLD_CHOICE=$(sed -n 's/^location_choice=//p' "$INFO_FILE" 2>/dev/null)
+    OLD_CHOICE=${OLD_CHOICE:-auto}
     mkdir -p "$(dirname "$INFO_FILE")"
     cat > "$INFO_FILE" << EOF
 installer_version=$VERSION
@@ -1919,6 +1936,7 @@ kernel=$KERNEL_ARCH $(uname -r)
 build=$(feed_build /opt/etc/opkg.conf)
 build_choice=${HOW:-${OLD_HOW:-unknown}}
 location=$(loc_of "$BIND_SRC") $BIND_SRC
+location_choice=${LOC_CHOICE:-$OLD_CHOICE}
 EOF
 }
 
@@ -1983,11 +2001,33 @@ install_entware() {
     write_install_info
 
     success "Entware installed successfully!"
+    migrate_to_appstore
     echo
     show_status
     echo
     [ "$SETUP_SHELL" = 1 ] && info "Disconnect and SSH in again to get the bash shell. Type 'helpme' for shortcuts."
     return 0
+}
+
+# Installs on user data (from older versions, or made where app storage
+# wasn't there) move to app storage on a repair, with the same checked move
+# as "move appstore", unless you chose user data. If the move can't happen
+# now, Entware stays where it is, working, and the repair still succeeds.
+migrate_to_appstore() {
+    [ "$BIND_SRC" = "$USER_SRC" ] && [ "$(loc_choice)" != user ] && appstore_default || return 0
+    echo
+    info "Entware is on user data, which webOS needs for itself. App storage has more room and keeps Entware through \"Reset to initial settings\"."
+    if [ "$ASSUME_YES" != 1 ] && ! confirm "Move Entware to app storage now?"; then
+        sed -i 's/^location_choice=.*/location_choice=user/' "$INFO_FILE"
+        info "Kept on user data, and repairs won't ask again. Move it any time: $(run_cmd) move appstore"
+        return 0
+    fi
+    if (ASSUME_YES=1; move_entware appstore); then
+        resolve_src
+    else
+        resolve_src
+        warn "Entware stays on user data for now, working as before. Repair again later to move it, or run: $(run_cmd) move appstore"
+    fi
 }
 
 # === Uninstall ===
@@ -2091,6 +2131,9 @@ opt_users() {
 }
 move_entware() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    # Not from inside /opt: this and everything it starts would count as
+    # using Entware, and /opt has to be unmounted
+    cd / || error_exit "Can't cd to /."
     case "$1" in
         appstore) TO=$APP_SRC ;;
         user) TO=$USER_SRC ;;
@@ -2340,12 +2383,8 @@ show_status() {
     if [ "$BIND_SRC" = "$APP_SRC" ] && [ -n "$APP_KB" ] && [ "$APP_KB" -lt 51200 ]; then
         issue "Only $((APP_KB / 1024)) MB is free on app storage, where Entware lives, so apps and packages may fail to install. 'ent du' shows the largest packages to remove."
     fi
-    if [ "$BIND_SRC" = "$USER_SRC" ] && [ -n "$APP_KB" ] && [ "$APP_KB" -gt 512000 ]; then
-        case "$FREE_KB" in
-            ''|*[!0-9]*) ;;
-            *) [ "$FREE_KB" -lt 153600 ] &&
-                note "User data, which webOS shares with Entware, has $((FREE_KB / 1024)) MB free, and app storage has $((APP_KB / 1024)) MB. To give Entware more room: $(run_cmd) move appstore" ;;
-        esac
+    if [ "$BIND_SRC" = "$USER_SRC" ] && [ -n "$APP_KB" ] && [ "$(loc_choice)" != user ] && appstore_default; then
+        note "Entware is on user data, which webOS needs for itself. App storage has $((APP_KB / 1024)) MB free and keeps Entware through \"Reset to initial settings\". A repair moves it there: $(fix_cmd)"
     fi
     case "$FREE_KB" in
         ''|*[!0-9]*) ;;
@@ -2419,6 +2458,7 @@ status_json() {
         "$(json_bool [ -x "$INIT_SCRIPT" ])" "$(json_str "$(tail -n 1 "$BOOT_LOG" 2>/dev/null)")" \
         "$(json_bool /opt/bin/bash -c true)" "$(json_bool is_ours "$HOME_DIR/.profile")" "$(json_bool helpers_ok)" \
         "$(json_bool tv_helpers_ok)"
+    printf '"locationChoice":%s,' "$(json_str "$(loc_choice)")"
     printf '"location":%s,"srcSafe":%s,"userFreeMB":%s,"appFreeMB":%s,' "$(json_str "$(loc_of "$BIND_SRC")")" \
         "$(json_bool entware_safe)" "$(json_num "$(mb_of "$user_kb")")" "$(json_num "$(mb_of "$app_kb")")"
     printf '"nano":%s,"certs":%s,"locate":%s,"locateDb":%s,' "$(json_str "$nano")" "$(json_str "$certs")" \
@@ -2448,6 +2488,7 @@ ADDON=""
 if [ "$1" = move ]; then
     ACTION=move
     MOVE_TO=${2:-}
+    LOC_CHOICE=$MOVE_TO
     [ -n "$MOVE_TO" ] || error_exit "Move it where? Use: webos-entware move appstore (app storage) or move user (user data)."
     shift 2
 elif [ "$1" = add ] || [ "$1" = remove ]; then
@@ -2478,9 +2519,11 @@ for arg in "$@"; do
     esac
 done
 
-# --location picks where a new install goes. An existing install stays put;
-# move it with "move".
+# Where a new install goes: --location if given, else app storage when it's
+# there and has more room, else user data. An existing install stays put
+# (a repair may move it to app storage; "move" moves it either way).
 if [ -n "$LOCATION" ]; then
+    LOC_CHOICE=$LOCATION
     if [ "$LOCATION" = appstore ]; then WANT=$APP_SRC; else WANT=$USER_SRC; fi
     if [ -e "$BIND_SRC/bin/opkg" ]; then
         if [ "$BIND_SRC" != "$WANT" ] && [ "$ACTION" = install ]; then
@@ -2489,6 +2532,8 @@ if [ -n "$LOCATION" ]; then
     else
         BIND_SRC=$WANT
     fi
+elif [ ! -e "$USER_SRC/bin/opkg" ] && [ ! -e "$APP_SRC/bin/opkg" ] && appstore_default; then
+    BIND_SRC=$APP_SRC
 fi
 
 # === Menu ===

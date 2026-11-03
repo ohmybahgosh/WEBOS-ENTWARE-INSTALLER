@@ -203,11 +203,16 @@
         if (s.job === 'running' && !jobTimer) { followJob(s.jobName); }
     }
 
-    // Offer app storage when webOS's user data is getting tight and app
-    // storage has room (the same rule doctor uses)
+    // App storage is where Entware belongs when it's there and has more
+    // room than user data (the installer's own rule). Not offered if you
+    // chose user data.
+    function appstoreBetter(s) {
+        return s.appFreeMB !== null && s.appFreeMB !== undefined && s.userFreeMB !== null && s.userFreeMB !== undefined &&
+            s.appFreeMB > s.userFreeMB;
+    }
     function canMove(s) {
-        return !!(s.installed && s.mounted && s.location === 'user' && s.srcSafe !== false &&
-            s.userFreeMB !== null && s.userFreeMB < 150 && s.appFreeMB !== null && s.appFreeMB > 500);
+        return !!(s.installed && s.mounted && s.location === 'user' && s.locationChoice !== 'user' &&
+            s.srcSafe !== false && appstoreBetter(s));
     }
 
     function show(action, on) {
@@ -402,13 +407,15 @@
             if (!state) { return; }
             if (!state.installed) {
                 confirmThen('Install Entware?',
-                    'Installs Entware into /mnt/lg/user/opt (about 25 MB), mounts it on /opt at every boot, and adds bash, nano and GNU ls with a few helpers.  ' +
+                    'Installs Entware on ' + (appstoreBetter(state) ? 'app storage (' + state.appFreeMB + ' MB free)' : 'user data') +
+                    ', about 25 MB, mounts it on /opt at every boot, and adds bash, nano and GNU ls with a few helpers.  ' +
                     'SSH logins switch to bash, and your own shell files are kept.  Uses the recommended ' + buildLabel(state.recommended) + ' build.  ' +
                     'If anything goes wrong, everything is undone.',
                     function () { startJob('install'); });
             } else {
                 confirmThen(state.issues.length ? 'Repair Entware?' : 'Check and repair Entware?',
-                    'Checks everything and fixes what it finds: the mount, the boot script, the shell setup and the helpers.  Your packages and your own settings are kept.',
+                    'Checks everything and fixes what it finds: the mount, the boot script, the shell setup and the helpers.  Your packages and your own settings are kept.' +
+                    (canMove(state) ? '  Entware also moves from user data to app storage, which has more room and keeps it through "Reset to initial settings".' : ''),
                     function () { startJob('install'); });
             }
         },
@@ -418,6 +425,7 @@
             if (!state) { return; }
             confirmThen('Move Entware to app storage?',
                 'User data, which webOS needs for itself, has ' + state.userFreeMB + ' MB free.  App storage has ' + state.appFreeMB + ' MB.  ' +
+                'Repairing does this too.  ' +
                 'Entware and all ' + (state.packages || 'its') + ' packages move there, along with your settings, and its services restart.  ' +
                 'It\'s copied and checked before anything is removed, and it also keeps Entware through "Reset to initial settings".',
                 function () { startJob('move appstore'); });

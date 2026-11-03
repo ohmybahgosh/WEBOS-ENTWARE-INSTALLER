@@ -667,5 +667,45 @@ ok "uninstall won't delete a folder that isn't root's Entware" '[ -f /mnt/lg/use
 rm -rf /mnt/lg/user/opt
 umount /mnt/lg/appstore
 
+echo "== [$SH] 32. app storage is the default, and older installs move there on a repair"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+mkdir -p /mnt/lg/appstore && mount -t tmpfs -o size=64g tmpfs /mnt/lg/appstore
+APP=/mnt/lg/appstore/entware
+run install -y
+ok "a new install goes on app storage" 'grep -q "Entware goes in $APP, on app storage" "$W/out" && [ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt ]'
+ok "and records no fixed choice" 'grep -q "^location_choice=auto$" /opt/etc/webos-entware/install.info'
+run uninstall -y
+umount /mnt/lg/appstore
+run install -y
+ok "without app storage, a new install goes on user data" '[ /opt -ef /mnt/lg/user/opt ] && grep -q "Entware installed successfully" "$W/out"'
+sed -i '/^location_choice=/d' /opt/etc/webos-entware/install.info    # as an older version left it
+mount -t tmpfs -o size=64g tmpfs /mnt/lg/appstore
+run status; sed -i 's/\x1b\[[0-9;]*m//g' "$W/out"
+ok "doctor says a repair moves it to app storage" 'grep -q "A repair moves it there" "$W/out"'
+(exec 9>> /opt/etc/busy-file; sleep 15) & BUSY=$!
+sleep 0.3
+run install -y
+ok "if it can't move now, the repair still succeeds and Entware stays put" 'grep -q "Entware installed successfully" "$W/out" && grep -q "stays on user data for now" "$W/out" && [ /opt -ef /mnt/lg/user/opt ] && [ ! -e $APP ]'
+kill $BUSY 2>/dev/null; wait $BUSY 2>/dev/null; rm -f /opt/etc/busy-file
+PKGS=$(cat /opt/lib/opkg/fake-installed)
+run install -y
+ok "the next repair moves an older install to app storage" 'grep -q "now runs from app storage" "$W/out" && [ /opt -ef $APP ] && [ ! -e /mnt/lg/user/opt ] && [ "$(cat /opt/lib/opkg/fake-installed)" = "$PKGS" ]'
+ok "with the boot script and login following" 'grep -q "^ *SRC=$APP$" /var/lib/webosbrew/init.d/S99entware && grep -q "^ENTWARE_SRC=$APP$" /home/root/.profile'
+reboot_tv
+ok "and it comes back after a reboot" '[ /opt -ef $APP ] && grep -q "started Entware services" /tmp/webos-entware-boot.log'
+run move user -y
+run install -y
+ok "a repair keeps it on user data when you chose that" '[ /opt -ef /mnt/lg/user/opt ] && ! grep -q "Move Entware to app storage\|now runs from app storage" "$W/out" && grep -q "^location_choice=user$" /opt/etc/webos-entware/install.info'
+run status
+ok "and doctor doesn't nag about it" '! grep -q "A repair moves it there" "$W/out"'
+run status --json
+ok "status --json says you chose it" 'grep -q "\"locationChoice\":\"user\"" "$W/out"'
+run uninstall -y
+umount /mnt/lg/appstore; mount -t tmpfs -o size=10m tmpfs /mnt/lg/appstore
+run install -y
+ok "when app storage has less room, a new install goes on user data, and stays" '[ /opt -ef /mnt/lg/user/opt ] && ! grep -q "Move Entware to app storage\|now runs from" "$W/out"'
+run uninstall -y
+umount /mnt/lg/appstore
+
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]
