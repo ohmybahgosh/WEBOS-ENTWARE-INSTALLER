@@ -34,7 +34,7 @@ body:
     attributes:
       label: Installer version
       description: Shown at the top of the menu, or `webos-entware --help`.
-      placeholder: "2.6.0"
+      placeholder: "2.10.0"
     validations:
       required: true
   - type: dropdown

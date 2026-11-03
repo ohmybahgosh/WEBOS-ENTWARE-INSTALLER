@@ -28,12 +28,12 @@
 
     var state = null;        // last status --json
     var latest = null;       // newest release on GitHub, if newer than this app
-    var overlayMode = null;  // null, 'busy', 'message', 'confirm'
+    var overlayMode = null;  // null, 'busy', 'message', 'confirm', 'addons', 'updates', 'report'
     var onConfirm = null;
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
     var addons = [];         // last addons --json
-    var listIndex = 0;       // focused row on the Add-ons or Package updates screen
+    var listIndex = 0;       // focused row on the Add-ons, Package updates or Report screen
     var backTo = '';         // 'addons' or 'updates': the screen to reopen after a task's result
     var upd = null;          // last updates --json
     var updRows = [];        // rows on the Package updates screen
@@ -256,7 +256,7 @@
         if (backTo) {
             var b = backTo;
             backTo = '';
-            if (b === 'updates') { openUpdates(false); } else { openAddons(); }
+            if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); } else { openAddons(); }
             return;
         }
         focusCurrent();
@@ -557,7 +557,9 @@
             busy = true;
             runScript('status', function (ok, out) {
                 busy = false;
-                showReport(plain(out).trim());
+                doctorText = plain(out).trim();
+                listIndex = 0;
+                openReportMenu();
             });
         },
         update: function () {
@@ -569,23 +571,66 @@
         }
     };
 
-    // A pre-filled bug report on GitHub, as a QR code to scan with a phone
+    // Pre-filled GitHub issues, as QR codes to scan with a phone: a compatibility
+    // report when it works, a bug report when something went wrong
+    var doctorText = '';
+    var REPORTS = [
+        { kind: 'compat', title: 'It works on my TV', sub: 'a compatibility report, so others know it works on this model', pill: 'QR code' },
+        { kind: 'bug', title: 'Something went wrong', sub: 'a bug report with this TV\'s details and the full check', pill: 'QR code' }
+    ];
+    function openReportMenu() {
+        if (listIndex >= REPORTS.length) { listIndex = 0; }
+        var html = '<div class="addons" id="addon-list">' + REPORTS.map(function (r, i) {
+            return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
+                '<div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
+                '<span class="pill pill-add">' + esc(r.pill) + '</span></div>';
+        }).join('') + '</div>';
+        overlay('report', 'Report for GitHub', html, 'OK shows a QR code for your phone.  BACK to close.');
+        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
+            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseReport(); });
+        });
+        focusAddon(listIndex);
+    }
+    function chooseReport() {
+        var r = REPORTS[listIndex];
+        if (!r) { return; }
+        backTo = 'report';
+        showReport(r.kind, doctorText);
+    }
     function q(v) {
         return encodeURIComponent(v).replace(/%20/g, '+').replace(/%3A/g, ':').replace(/%2C/g, ',').replace(/%2F/g, '/');
     }
-    function showReport(doctor) {
+    function showReport(kind, doctor) {
         var s = state || {};
         // Short enough for a QR code a phone can read off the screen
         var text = doctor.replace(/ {2,}/g, ' ');
         if (text.length > 1100) { text = text.slice(0, 1100) + '\n…'; }
         var arch = { 'aarch64-k3.10': '64-bit (aarch64-k3.10)', 'armv7sf-k3.2': '32-bit (armv7sf-k3.2)' }[s.build] || 'Not sure';
-        var form = REPO_PATH + '/issues/new?template=bug-report.yml' +
-            '&title=' + q('[Bug] ') +
-            '&tv=' + q((s.model || 'LG TV') + ', ' + (s.webos || 'webOS') + (s.webosRelease ? ' (' + s.webosRelease + ')' : '')) +
-            '&version=' + q(s.version || '') +
-            '&arch=' + q(arch) +
-            '&steps=' + q('From the Entware TV app') +
-            '&doctor=' + q(text);
+        var where = { 'appstore': 'App storage', 'user': 'User data' }[s.location] || 'Not sure';
+        var tv = (s.model || 'LG TV') + ', ' + (s.webos || 'webOS') + (s.webosRelease ? ' (' + s.webosRelease + ')' : '');
+        var form;
+        if (kind === 'compat') {
+            var works = s.installed && s.mounted && s.opkg && !(s.issues && s.issues.length);
+            form = REPO_PATH + '/issues/new?template=compatibility-report.yml' +
+                '&title=' + q('[Compat] ' + tv) +
+                '&tv=' + q(tv) +
+                '&version=' + q(s.version || '') +
+                '&result=' + q(works ? 'Works, Entware is installed and packages install' :
+                    (s.installed ? 'Works, but with problems (describe below)' : 'It didn\'t install')) +
+                '&arch=' + q(arch) +
+                '&how=' + q('The TV app') +
+                '&location=' + q(where) +
+                '&doctor=' + q(text);
+        } else {
+            form = REPO_PATH + '/issues/new?template=bug-report.yml' +
+                '&title=' + q('[Bug] ') +
+                '&tv=' + q(tv) +
+                '&version=' + q(s.version || '') +
+                '&arch=' + q(arch) +
+                '&steps=' + q('From the Entware TV app') +
+                '&doctor=' + q(text);
+        }
         // The GitHub phone app grabs github.com/<owner>/<repo> links and drops the
         // filled-in fields; /login is left to the browser, which forwards to the form
         var url = 'https://github.com/login?return_to=' + encodeURIComponent(form);
@@ -598,12 +643,14 @@
         } catch (e) {
             svg = '';
         }
-        overlay('message', 'Report a problem',
+        var what = kind === 'compat' ?
+            'Scan this with your phone to open a compatibility report on GitHub, with this TV\'s details and the full check already filled in.  Add anything you\'d like and submit.' :
+            'Scan this with your phone to open a bug report on GitHub, with this TV\'s details and the full check already filled in.  Add what went wrong and submit.';
+        overlay('message', kind === 'compat' ? 'It works on my TV' : 'Something went wrong',
             '<div class="qr">' + svg + '<div>' +
-            (svg ? 'Scan this with your phone to open a bug report on GitHub, with this TV\'s details and the full check already filled in.  Add what went wrong and submit.'
-                 : 'Open github.com' + esc(REPO_PATH) + '/issues on your phone and paste the full check from SSH (webos-entware doctor).') +
+            (svg ? what : 'Open github.com' + esc(REPO_PATH) + '/issues on your phone and paste the full check from SSH (webos-entware doctor).') +
             '<br><br><pre>' + esc(doctor.split('\n').slice(0, 10).join('\n')) + '</pre></div></div>',
-            'Press OK or BACK to close.');
+            'Press OK or BACK to go back.');
     }
 
     // ------------------------------------------------------------------ updates
@@ -664,10 +711,12 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
-        if (overlayMode === 'addons' || overlayMode === 'updates') {
+        if (overlayMode === 'addons' || overlayMode === 'updates' || overlayMode === 'report') {
             if (k === KEY.UP) { focusAddon(listIndex - 1); }
             else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
-            else if (k === KEY.ENTER) { if (overlayMode === 'updates') { chooseUpdate(); } else { chooseAddon(); } }
+            else if (k === KEY.ENTER) {
+                if (overlayMode === 'updates') { chooseUpdate(); } else if (overlayMode === 'report') { chooseReport(); } else { chooseAddon(); }
+            }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
             e.preventDefault();
             return;

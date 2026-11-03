@@ -93,7 +93,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check:** everything `doctor` looks at, on screen.
-- **Report a problem:** a QR code that opens a bug report on your phone with your TV, version, build and the full check already filled in.
+- **Report for GitHub:** a QR code that opens a report on your phone with your TV, version, build and the full check already filled in.  **It works on my TV** opens a compatibility report, and **Something went wrong** a bug report.
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
@@ -144,6 +144,8 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 - **webOS 23, 24 and 25** (webOS 8, 9 and 10 internally) are the main targets.
 - **webOS 22 and older** (webOS 4 and up) should work too. The installer tells you when your version is outside the tested range.
 - Both **64-bit and 32-bit kernels** are supported. Most recent OLEDs (C2, C3, G4, C4 and up) have a 64-bit kernel. Many budget and older models have a 32-bit one.
+
+Tried it on a TV that isn't listed?  A [compatibility report](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new?template=compatibility-report.yml) helps others with the same model, whether it worked or not.  The TV app fills one in for you: **Report for GitHub**, then **It works on my TV**.
 
 ---
 
@@ -588,7 +590,7 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 ## Contributing
 
-Bug reports and ideas are welcome: use the [issue forms](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose).  For pull requests, run the tests first (`sudo tests/run_tests.sh` and `sudo tests/run_tests.sh dash`, which need root for their private mount namespace) and test on a real TV if you can, saying which model and webOS version.
+Compatibility reports, bug reports and ideas are welcome: use the [issue forms](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose), or **Report for GitHub** in the TV app.  [CONTRIBUTING.md](CONTRIBUTING.md) has the details.  For pull requests, run the tests first (`sudo tests/run_tests.sh` and `sudo tests/run_tests.sh dash`, which need root for their private mount namespace) and test on a real TV if you can, saying which model and webOS version.
 
 AI-assisted pull requests are welcome too, held to the same standard as the rest of this project: say in the pull request that AI was used, make sure you understand and have reviewed every change, and test it on a real TV.
 

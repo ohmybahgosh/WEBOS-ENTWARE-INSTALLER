@@ -2,6 +2,13 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Report for GitHub** in the TV app (it was **Report a problem**) now asks what you want to report.  **It works on my TV** shows a QR code for a new compatibility report form, filled in with your TV, version, build, where Entware lives and the full check.  **Something went wrong** shows the bug report QR code as before.
+- A compatibility report form, `CONTRIBUTING.md` and a pull request template on GitHub.
+
 ## [2.10.0] - 2026-11-02
 
 ### Added

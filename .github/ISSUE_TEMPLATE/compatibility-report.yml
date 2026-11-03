@@ -1,0 +1,76 @@
+name: Compatibility report
+description: Tell us how Entware works on your TV, good or bad
+title: "[Compat] "
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks!  Reports from real TVs are how the list of supported TVs grows, including ones where it didn't work.
+        The TV app fills this in for you: **Report for GitHub**, then **It works on my TV**, and scan the QR code.
+  - type: input
+    id: tv
+    attributes:
+      label: TV model and webOS version
+      placeholder: OLED65C2PUA, webOS 25 (10.3.1)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Installer version
+      description: Shown at the top of the app, or `webos-entware --help`.
+      placeholder: "2.10.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works, Entware is installed and packages install
+        - Works, but with problems (describe below)
+        - It didn't install
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Entware build
+      options:
+        - 64-bit (aarch64-k3.10)
+        - 32-bit (armv7sf-k3.2)
+        - Not sure
+  - type: dropdown
+    id: how
+    attributes:
+      label: Installed from
+      options:
+        - The TV app
+        - SSH
+  - type: dropdown
+    id: location
+    attributes:
+      label: Where Entware lives
+      options:
+        - App storage
+        - User data
+        - Not sure
+  - type: input
+    id: uses
+    attributes:
+      label: What you use it for (optional)
+      description: Add-ons or packages that work for you.
+      placeholder: git, tmux, the login banner
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `webos-entware doctor`
+      description: If `/opt` isn't mounted, run `sh /mnt/lg/appstore/entware/bin/webos-entware doctor` instead, or `sh /mnt/lg/user/opt/bin/webos-entware doctor` if Entware is on user data.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

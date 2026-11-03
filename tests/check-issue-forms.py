@@ -30,23 +30,40 @@ for path in sorted(glob.glob('.github/ISSUE_TEMPLATE/*.yml')):
     if len(set(ids)) != len(ids):
         bad.append(f'{path}: ids must be unique')
 
-# The TV app's "Report a problem" QR code fills in bug-report.yml by field id.
-# Check every field it sets exists, and every build name it picks is an option.
+# The TV app's "Report for GitHub" QR codes fill in the forms by field id.
+# Check every field each link sets exists in its form, and every value the app
+# picks for a dropdown is one of its options.
 import re
 app = open('webos-app/src/app.js').read()
-form = yaml.safe_load(open('.github/ISSUE_TEMPLATE/bug-report.yml'))
-fields = {el.get('id'): el for el in form['body'] if el.get('id')}
-for f in re.findall(r"'&(\w+)=' \+ q\(", app):
-    if f not in fields and f != 'title':
-        bad.append(f'webos-app/src/app.js: fills in "{f}", which bug-report.yml does not have')
-arch = [str(o) for o in fields.get('arch', {}).get('attributes', {}).get('options', [])]
-m = re.search(r"var arch = \{([^}]*)\}\[s\.build\] \|\| '([^']*)'", app)
-if not m:
+links = re.findall(r"template=([\w-]+\.yml)'(.*?);\n", app, re.S)
+if not links:
+    bad.append('webos-app/src/app.js: could not find the report links')
+# Values the app picks from a lookup, like var arch = { ... }[s.build] || 'Not sure'
+def lookup(name):
+    m = re.search(r"var " + name + r" = \{([^}]*)\}\[s\.\w+\] \|\| '([^']*)'", app)
+    return re.findall(r": '([^']*)'", m.group(1)) + [m.group(2)] if m else None
+if not lookup('arch'):
     bad.append('webos-app/src/app.js: could not find the build names the report picks')
-else:
-    for name in re.findall(r": '([^']*)'", m.group(1)) + [m.group(2)]:
-        if name not in arch:
-            bad.append(f'webos-app/src/app.js: build "{name}" is not an option of the arch field')
+for template, chain in links:
+    form = yaml.safe_load(open('.github/ISSUE_TEMPLATE/' + template))
+    fields = {el.get('id'): el for el in form['body'] if el.get('id')}
+    for f in re.findall(r"'&(\w+)=' \+ q\(", chain):
+        if f not in fields and f != 'title':
+            bad.append(f'webos-app/src/app.js: fills in "{f}", which {template} does not have')
+    # Values given to a dropdown: literals, or a lookup table like arch
+    for f, expr in re.findall(r"'&(\w+)=' \+ q\((.*?)\) \+\s*\n", chain + ' +\n', re.S):
+        el = fields.get(f) or {}
+        if el.get('type') != 'dropdown':
+            continue
+        opts = [str(o) for o in el.get('attributes', {}).get('options', [])]
+        values = lookup(expr.strip()) if re.fullmatch(r'\s*\w+\s*', expr) else re.findall(r"'((?:[^'\\]|\\.)*)'", expr)
+        if values is None:
+            bad.append(f'webos-app/src/app.js: could not find the values the app picks for {template}\'s {f} field')
+            continue
+        for v in values:
+            v = v.replace("\\'", "'")
+            if v not in opts:
+                bad.append(f'webos-app/src/app.js: "{v}" is not an option of {template}\'s {f} field')
 
 print('\n'.join(bad) or 'Issue forms look valid.')
 sys.exit(1 if bad else 0)

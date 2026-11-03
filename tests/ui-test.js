@@ -269,6 +269,27 @@ function check(name, cond) {
     await page.waitForFunction(() => /Full check/.test(document.getElementById('overlay-title').textContent) && /Everything/.test(document.getElementById('overlay-body').textContent));
     check('Full check shows the report', true);
     await page.screenshot({ path: path.join(OUT, '7-full-check.png') });
+    await press(page, 'Escape');
+
+    console.log('== Report for GitHub');
+    await press(page, 'ArrowUp', 10);
+    await press(page, 'ArrowDown', order2.indexOf('report'));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /Report for GitHub/.test(document.getElementById('overlay-title').textContent));
+    check('offers a compatibility report and a bug report', await page.$$eval('.addon', (rs) => rs.length === 2 && /It works on my TV/.test(rs[0].textContent) && /Something went wrong/.test(rs[1].textContent)));
+    await page.screenshot({ path: path.join(OUT, '10-report-menu.png') });
+    await press(page, 'Enter');
+    check('It works on my TV shows a QR code for a compatibility report', /It works on my TV/.test(await overlayTitle(page)) && !!(await page.$('#overlay-body svg')) && /compatibility report/.test(await page.textContent('#overlay-body')));
+    await page.screenshot({ path: path.join(OUT, '11-report-compat.png') });
+    await press(page, 'Escape');
+    await page.waitForSelector('.addon.focus');
+    check('BACK returns to the choice, same row', /Report for GitHub/.test(await overlayTitle(page)) && /It works/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    check('Something went wrong shows a QR code for a bug report', /Something went wrong/.test(await overlayTitle(page)) && !!(await page.$('#overlay-body svg')) && /bug report/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Escape');
+    await press(page, 'Escape');
+    check('BACK again closes it', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
     check('no page errors', errors.length === 0);
     if (errors.length) { console.log(errors.join('\n')); }
 
