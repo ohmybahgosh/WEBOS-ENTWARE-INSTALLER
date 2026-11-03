@@ -23,6 +23,7 @@ So you can judge it yourself:
 - **Cleanup of old setups:** it removes Entware package lists from webOS's own `/var/lib/opkg` and `/var/cache/opkg` (only lists that hold Entware's packages), an old log and an empty folder from early setups, and renames old boot scripts that also mounted Entware so they stop running.
 - **Add-ons** install Entware packages from the same server into `/opt`, and nano and locate get settings files there.  Removing one only uninstalls its own packages and files.
 - **locate** gets an `mlocate` group only inside a private mount namespace while `updatedb` runs.  No system file is changed.
+- **The login banner add-on** is the one thing not from Entware: it downloads neofetch from a fixed URL for its 7.1.0 release on GitHub, and uses it only if its SHA-256 matches the checksum written in the installer.  Anything else is deleted unused.
 - **A lock** in `/tmp` keeps the app and SSH from changing things at the same time.  Background tasks log to `/tmp` (RAM).
 
 It never changes the system partitions, opens ports, or sends anything about your TV anywhere.

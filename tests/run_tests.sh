@@ -817,5 +817,49 @@ run upgrade -y
 ok "upgrade with no name updates everything" 'grep -q "Packages upgraded" "$W/out" && [ ! -s /opt/lib/opkg/fake-upgradable ]'
 run uninstall -y
 
+echo "== [$SH] 35. the login banner add-on"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run install -y
+mkdir -p "$W/rel"
+printf '#!/usr/bin/env bash\nversion=7.1.0\necho "FAKE NEOFETCH $*"\n' > "$W/rel/neofetch"
+cp "$W/installer.sh" "$W/installer.orig"
+sed -i "s/^NEOFETCH_SHA=.*/NEOFETCH_SHA=\"$(sha256sum "$W/rel/neofetch" | awk '{print $1}')\"/" "$W/installer.sh"
+BANNER=/opt/etc/webos-entware/banner
+hooks() { grep -c "Login banner add-on" /opt/etc/webos-entware/bashrc; }
+ssh_login() { (cd /home/root && HOME=/home/root /opt/bin/bash -l "$@" -c true < /dev/null 2> /dev/null); }
+run add banner -y
+ok "add banner downloads neofetch, checks it, and runs it with Entware's bash" 'grep -q "login banner is ready" "$W/out" && [ "$(head -n 1 /opt/bin/neofetch)" = "#!/opt/bin/bash" ] && grep -q "^# neofetch 7.1.0, checked" /opt/bin/neofetch && grep -q "FAKE NEOFETCH" /opt/bin/neofetch && [ -z "$(ls -d /opt/tmp/.webos-entware-neofetch.* 2>/dev/null)" ]'
+ok "it writes the wordmark, the settings and one hook" '[ -s $BANNER/wordmark.ans ] && grep -q print_info $BANNER/config.conf && [ "$(hooks)" = 1 ]'
+out=$(ssh_login -i)
+ok "an SSH login shows the wordmark, then neofetch with its settings" 'echo "$out" | grep -q "▀" && echo "$out" | grep -q "FAKE NEOFETCH --config $BANNER/config.conf"'
+out=$(ssh_login)
+ok "commands over SSH don't show it" '! echo "$out" | grep -q FAKE'
+touch /home/root/.hushlogin
+out=$(ssh_login -i)
+ok "a .hushlogin file hides it" '! echo "$out" | grep -q FAKE'
+rm -f /home/root/.hushlogin
+run addons --json
+ok "addons --json shows it installed" 'python3 -c "
+import json,sys; d={a[\"id\"]: a for a in json.load(open(sys.argv[1]))}
+assert d[\"banner\"][\"state\"] == \"installed\" and d[\"banner\"][\"packages\"] == \"neofetch\" and d[\"banner\"][\"removable\"] is True, d[\"banner\"]
+" "$W/out"'
+echo "# mine" >> $BANNER/config.conf
+run add banner -y
+ok "adding it again keeps your settings and the one hook" 'grep -q "login banner is ready" "$W/out" && grep -q "# mine" $BANNER/config.conf && [ "$(hooks)" = 1 ]'
+run install -y
+ok "a repair keeps it hooked up, once" '[ "$(hooks)" = 1 ] && [ -f $BANNER/login.sh ]'
+run remove banner -y
+ok "remove banner takes neofetch and its files, and leaves bash" 'grep -q "Removed Login banner" "$W/out" && [ ! -e /opt/bin/neofetch ] && [ ! -e $BANNER ] && [ -x /opt/bin/bash ]'
+out=$(ssh_login -i)
+ok "after that, logins are quiet again" '! echo "$out" | grep -q "FAKE\|▀"'
+printf 'not neofetch\n' > "$W/rel/neofetch"
+! run add banner -y
+ok "a download that doesn't match the checksum isn't used" 'grep -q "didn.t match neofetch 7.1.0" "$W/out" && [ ! -e /opt/bin/neofetch ] && [ -z "$(ls -d /opt/tmp/.webos-entware-neofetch.* 2>/dev/null)" ]'
+rm -f "$W/rel/neofetch"
+! run add banner -y
+ok "add banner says when GitHub can't be reached" 'grep -q "Couldn.t download neofetch" "$W/out" && [ ! -e $BANNER/login.sh ]'
+cp "$W/installer.orig" "$W/installer.sh"
+run uninstall -y
+
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

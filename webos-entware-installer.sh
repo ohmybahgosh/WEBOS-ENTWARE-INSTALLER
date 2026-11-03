@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.9.2"
+VERSION="2.10.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -40,6 +40,11 @@ NANORC="/opt/etc/nanorc"
 TV_HELPER="/opt/bin/webos-tv"
 TV_COMMANDS="toast launch close apps applog tvshot"
 CA_FILE="/opt/etc/ssl/certs/ca-certificates.crt"
+BANNER_DIR="/opt/etc/webos-entware/banner"
+NEOFETCH_BIN="/opt/bin/neofetch"
+NEOFETCH_VER="7.1.0"
+NEOFETCH_SHA="3dc33493e54029fb1528251552093a9f9a2894fcf94f9c3a6f809136a42348c7"
+NEOFETCH_URL="https://raw.githubusercontent.com/dylanaraps/neofetch/$NEOFETCH_VER/neofetch"
 ENTWARE_BASE="http://bin.entware.net"
 SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
 RELEASES_URL="https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases"
@@ -118,7 +123,7 @@ usage() {
     echo "  upgrade [name] Refresh the package list and upgrade every package, or just the one named"
     echo "  updates        List packages with updates (--refresh downloads the package list first)"
     echo "  addons         List the add-ons: packages with the setup they need on webOS"
-    echo "  add <name>     Install an add-on (nano, locate, certs, git, python, htop, tmux, ...)"
+    echo "  add <name>     Install an add-on (nano, locate, git, python, htop, banner, ...)"
     echo "  remove <name>  Uninstall an add-on"
     echo "  move <place>   Move Entware to app storage (appstore) or back to user data (user)"
     echo "  app-update     Update the TV app (and this command) to the newest release"
@@ -1216,6 +1221,12 @@ if [ -f /opt/etc/bash_completion.d/entwrap ]; then
     . /opt/etc/bash_completion.d/entwrap
 fi
 
+# Login banner add-on (webos-entware add banner): shown when you log in
+# over SSH, not for commands, scp or sftp. Hide it with: touch ~/.hushlogin
+if [ -f /opt/etc/webos-entware/banner/login.sh ] && [ ! -f "$HOME/.hushlogin" ]; then
+    case "$-" in *i*) shopt -q login_shell 2>/dev/null && . /opt/etc/webos-entware/banner/login.sh ;; esac
+fi
+
 # locate: on webOS updatedb runs through a wrapper (see webos-entware locate)
 [ -x /opt/bin/updatedb ] && [ -x /opt/bin/updatedb-webos ] && alias updatedb='updatedb-webos'
 
@@ -1777,6 +1788,7 @@ ncdu|ncdu|ncdu|yes|Find what's filling up the disk
 rsync|rsync|rsync|yes|Fast copies to and from the TV over SSH
 curl|curl|curl|yes|Fetch URLs and test APIs from the shell
 jq|jq|jq|yes|Read and filter JSON, like luna-send replies
+banner|Login banner|neofetch|yes|A webOS wordmark and your TV's specs each time you log in over SSH
 ADDONS
 }
 
@@ -1790,6 +1802,8 @@ EOL
 }
 
 addon_installed() {
+    # neofetch isn't in Entware, so the banner brings its own copy
+    [ "$AD_ID" = banner ] && { [ -x "$NEOFETCH_BIN" ] && [ -f "$BANNER_DIR/login.sh" ]; return; }
     for p in $AD_PKGS; do pkg_installed "$p" || return 1; done
 }
 
@@ -1801,6 +1815,7 @@ addon_state() {
         locate) locate_ready || { echo needsSetup; return; } ;;
         certs) ca_ok || { echo needsSetup; return; } ;;
         git|python) ca_ok || { echo needsSetup; return; } ;;
+        banner) banner_ready || { echo needsSetup; return; } ;;
     esac
     echo installed
 }
@@ -1835,6 +1850,10 @@ addon_add() {
     addon_find "$1" || error_exit "Unknown add-on: ${1:-none}. See: webos-entware addons"
     opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
     info "Adding $AD_TITLE..."
+    if [ "$AD_ID" = banner ]; then
+        setup_banner || exit 1
+        return 0
+    fi
     /opt/bin/opkg update >/dev/null 2>&1 || warn "Couldn't refresh the package list. Trying with the one already here."
     # shellcheck disable=SC2086  # a list of package names from the catalog
     /opt/bin/opkg install $AD_PKGS || error_exit "$AD_TITLE didn't install. Check the TV's internet connection and free space."
@@ -1864,6 +1883,11 @@ addon_remove() {
     [ "$AD_REMOVABLE" = yes ] || error_exit "$AD_TITLE is part of the base setup, so it stays. Remove it with ent remove if you really want to."
     addon_installed || { info "$AD_TITLE isn't installed."; return 0; }
     confirm "Remove $AD_TITLE ($AD_PKGS)?" || { info "Kept $AD_TITLE."; return 0; }
+    if [ "$AD_ID" = banner ]; then
+        remove_banner
+        success "Removed $AD_TITLE."
+        return 0
+    fi
     # Dependents first (git-http before git): opkg won't remove a package
     # another one still needs. No --autoremove, so shared libraries and
     # ca-bundle, which other packages may rely on, stay.
@@ -1876,6 +1900,184 @@ addon_remove() {
         if grep -qs "^#.*$MARKER" "$UPDATEDB_CONF"; then rm -f "$UPDATEDB_CONF"; fi
     fi
     success "Removed $AD_TITLE."
+}
+
+# === Login banner ===
+# neofetch isn't in Entware, so the banner add-on downloads the $NEOFETCH_VER
+# release from GitHub and only uses it if it matches that release's
+# checksum. Its first line is changed to Entware's bash: on webOS
+# "env bash" finds BusyBox, which can't run it. The look (a webOS wordmark
+# over boxed specs) and the webOS details neofetch can't find on its own
+# live in $BANNER_DIR. Your edits to its config.conf are kept.
+BANNER_HOOK="# Login banner add-on (webos-entware add banner)"
+banner_hooked() { grep -qsF "$BANNER_HOOK" "$ENV_FILE"; }
+neofetch_ours() { [ -x "$NEOFETCH_BIN" ] && sed -n 2p "$NEOFETCH_BIN" | grep -q "^# neofetch $NEOFETCH_VER, checked .*$MARKER"; }
+banner_ready() { neofetch_ours && [ -f "$BANNER_DIR/login.sh" ] && [ -f "$BANNER_DIR/config.conf" ] && banner_hooked; }
+banner_hook() {
+    cat << 'HOOK'
+# Login banner add-on (webos-entware add banner): shown when you log in
+# over SSH, not for commands, scp or sftp. Hide it with: touch ~/.hushlogin
+if [ -f /opt/etc/webos-entware/banner/login.sh ] && [ ! -f "$HOME/.hushlogin" ]; then
+    case "$-" in *i*) shopt -q login_shell 2>/dev/null && . /opt/etc/webos-entware/banner/login.sh ;; esac
+fi
+HOOK
+}
+
+write_banner_files() {
+    mkdir -p "$BANNER_DIR"
+    cat > "$BANNER_DIR/login.sh" << 'LOGIN'
+# Login banner (webos-entware-installer): the webOS wordmark, then neofetch
+printf '\n'
+cat /opt/etc/webos-entware/banner/wordmark.ans 2>/dev/null
+printf '\n'
+SHELL=/opt/bin/bash /opt/bin/neofetch --config /opt/etc/webos-entware/banner/config.conf
+LOGIN
+    {
+        printf '             \033[38;5;141m█     \033[38;5;69m▄\033[38;5;75m▀\033[38;5;75m▀\033[38;5;39m▀\033[38;5;39m▄ \033[38;5;38m▄\033[38;5;44m▀\033[38;5;44m▀\033[38;5;45m▀\033[0m\n'
+        printf '  \033[38;5;205m█   \033[38;5;206m█ \033[38;5;170m▄\033[38;5;171m▀\033[38;5;171m▀\033[38;5;135m▄ \033[38;5;141m█\033[38;5;141m▀\033[38;5;99m▀\033[38;5;105m▄  \033[38;5;69m█   \033[38;5;39m█ \033[38;5;38m▀\033[38;5;44m▄\033[38;5;44m▄\033[0m\n'
+        printf '  \033[38;5;205m█ \033[38;5;205m█ \033[38;5;206m█ \033[38;5;170m█\033[38;5;171m▀\033[38;5;171m▀\033[38;5;135m▀ \033[38;5;141m█  \033[38;5;105m█  \033[38;5;69m█   \033[38;5;39m█    \033[38;5;45m█\033[0m\n'
+        printf '   \033[38;5;205m▀ \033[38;5;206m▀   \033[38;5;171m▀\033[38;5;171m▀\033[38;5;135m▀ \033[38;5;141m▀\033[38;5;141m▀\033[38;5;99m▀    \033[38;5;75m▀\033[38;5;75m▀\033[38;5;39m▀  \033[38;5;38m▀\033[38;5;44m▀\033[38;5;44m▀\033[0m\n'
+    } > "$BANNER_DIR/wordmark.ans"
+    [ -f "$BANNER_DIR/config.conf" ] && return 0
+    cat > "$BANNER_DIR/config.conf" << 'CONF'
+# neofetch settings for the login banner (webos-entware-installer)
+# Written by webos-entware add banner, and kept if you edit it.
+# The webOS wordmark prints above it (login.sh).
+
+print_info() {
+    info underline
+    info title
+    info underline
+    prin "$(color 12)╭──────────── $(color 10)Software$(color 12) ────────────"
+    info "$(color 12)│ $(color 14)OS" distro
+    info "$(color 12)│ $(color 14)Kernel" kernel
+    info "$(color 12)│ $(color 14)Packages" packages
+    info "$(color 12)│ $(color 14)Shell" shell
+    info "$(color 12)│ $(color 14)Terminal" term
+    info "$(color 12)│ $(color 14)Local IP" local_ip
+    prin "$(color 12)├──────────── $(color 10)Hardware$(color 12) ────────────"
+    info "$(color 12)│ $(color 14)Host" model
+    info "$(color 12)│ $(color 14)CPU" cpu
+    info "$(color 12)│ $(color 14)GPU" gpu
+    info "$(color 12)│ $(color 14)Memory" memory
+    prin "$(color 12)│ $(color 14)Disk (/opt)" "$(tv_df /opt)"
+    prin "$(color 12)│ $(color 14)Disk (/home)" "$(tv_df /home)"
+    prin "$(color 12)├───────────── $(color 10)Uptime$(color 12) ─────────────"
+    info "$(color 12)│" uptime
+    prin "$(color 12)╰──────────────────────────────────"
+    info cols
+}
+
+# Disk use for a path, shown by where it's used (/opt is a bind mount)
+tv_df() {
+    df -h "$1" 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}'
+}
+
+# webOS details neofetch can't work out on its own
+get_distro() {
+    local r m
+    r=$(nyx-cmd OSInfo query webos_release 2>/dev/null)
+    m=${r%%.*}
+    if [[ $m =~ ^[0-9]+$ ]] && ((m >= 7)); then
+        distro="webOS $((m + 15)) ($r)"
+    else
+        distro="webOS ${r:-TV}"
+    fi
+}
+get_model() {
+    local p
+    p=$(nyx-cmd DeviceInfo query product_id 2>/dev/null)
+    model="LG ${p:-webOS TV}"
+}
+get_cpu() {
+    local soc n f
+    soc=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
+    [[ $soc =~ (LG[0-9]+) ]] && soc=${BASH_REMATCH[1]} || soc="LG SoC"
+    n=$(cut -d- -f2 /sys/devices/system/cpu/possible 2>/dev/null)
+    [[ $n =~ ^[0-9]+$ ]] && n=$((n + 1)) || n=$(grep -c ^processor /proc/cpuinfo)
+    f=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)
+    cpu="$soc ($n)"
+    [[ $f =~ ^[0-9]+$ ]] && cpu+=" @ $(awk -v f="$f" 'BEGIN{printf "%.3fGHz", f/1000000}')"
+}
+get_gpu() {
+    local g
+    read -r g _ < /sys/class/misc/mali0/device/gpuinfo 2>/dev/null
+    local c
+    c=$(awk '{print $2}' /sys/class/misc/mali0/device/gpuinfo 2>/dev/null)
+    gpu="${g:-Mali}${c:+ MC$c}"
+}
+
+title_fqdn="off"
+kernel_shorthand="on"
+distro_shorthand="on"
+os_arch="off"
+uptime_shorthand="off"
+memory_percent="off"
+memory_unit="mib"
+package_managers="on"
+shell_path="off"
+shell_version="on"
+public_ip_host="http://ident.me"
+public_ip_timeout=2
+
+# title red, underline and info white, like the mockup
+colors=(203 7 7 14 7 7)
+underline_enabled="on"
+underline_char="¨"
+separator="›"
+bold="on"
+color_blocks="on"
+block_width=3
+block_height=1
+col_offset="auto"
+
+# the wordmark is printed by login.sh, so no side image here
+image_backend="off"
+image_source="off"
+stdout="off"
+CONF
+}
+
+setup_banner() {
+    if [ ! -x /opt/bin/bash ] || ! /opt/bin/bash -c true >/dev/null 2>&1 || [ ! -f "$ENV_FILE" ]; then
+        warn "The login banner needs Entware's bash and shell setup. Run '$(fix_cmd)' first."
+        return 1
+    fi
+    if ! neofetch_ours; then
+        # A private folder: /opt/tmp can be written by anyone
+        mkdir -p /opt/tmp
+        nd=$(mktemp -d /opt/tmp/.webos-entware-neofetch.XXXXXX) || { warn "Couldn't make a temporary folder."; return 1; }
+        info "Downloading neofetch $NEOFETCH_VER from GitHub..."
+        if ! fetch "$NEOFETCH_URL" "$nd/dl"; then
+            rm -rf "$nd"
+            warn "Couldn't download neofetch. Check the TV's internet connection."
+            return 1
+        fi
+        if [ "$(sha256sum "$nd/dl" | awk '{print $1}')" != "$NEOFETCH_SHA" ]; then
+            rm -rf "$nd"
+            warn "The download didn't match neofetch $NEOFETCH_VER's checksum, so it wasn't used."
+            return 1
+        fi
+        { echo "#!/opt/bin/bash"; echo "# neofetch $NEOFETCH_VER, checked against its release checksum ($MARKER)"; tail -n +2 "$nd/dl"; } > "$nd/neofetch"
+        chmod 755 "$nd/neofetch"
+        if [ -e "$NEOFETCH_BIN" ]; then
+            b=$(backup_name "$NEOFETCH_BIN")
+            mv -f "$NEOFETCH_BIN" "$b" && info "Moved the neofetch that was there to $b."
+        fi
+        mv -f "$nd/neofetch" "$NEOFETCH_BIN"
+        rm -rf "$nd"
+    fi
+    write_banner_files
+    banner_hooked || { echo; banner_hook; } >> "$ENV_FILE"
+    success "The login banner is ready. You'll see it the next time you log in over SSH (touch ~/.hushlogin hides it)."
+}
+
+# The hook in the shell setup stays: it does nothing without login.sh
+remove_banner() {
+    neofetch_ours && rm -f "$NEOFETCH_BIN"
+    rm -f "$BANNER_DIR/login.sh" "$BANNER_DIR/wordmark.ans" "$BANNER_DIR/config.conf"
+    rmdir "$BANNER_DIR" 2>/dev/null
+    return 0
 }
 
 # === Mount Entware on every boot ===
@@ -2735,7 +2937,7 @@ if [ -z "$ACTION" ]; then
     echo "2) Uninstall Entware"
     echo "3) Check status (doctor)"
     echo "4) Set up locate (mlocate)"
-    echo "5) Add-ons (nano colors, git, python, htop, ...)"
+    echo "5) Add-ons (nano colors, git, python, htop, login banner, ...)"
     echo "6) Exit"
     echo
     read_answer "Choose an option [1-6]: " || exit 1

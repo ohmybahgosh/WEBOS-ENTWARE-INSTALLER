@@ -412,13 +412,15 @@
         // Ids are short names from the installer's fixed list; anything else is refused
         if (!a || !/^[a-z0-9]+$/.test(a.id)) { return; }
         if (a.state === 'notInstalled') {
-            confirmThen('Add ' + a.title + '?', a.about + '.  Installs ' + a.packages + ' from Entware, and needs internet.',
+            confirmThen('Add ' + a.title + '?', a.about + '.  ' + (a.id === 'banner' ?
+                'Downloads neofetch 7.1.0 from GitHub and checks it against the release\'s checksum.  Needs internet.' :
+                'Installs ' + a.packages + ' from Entware, and needs internet.'),
                 function () { startJob('add ' + a.id); });
         } else if (a.state === 'needsSetup') {
             confirmThen('Finish setting up ' + a.title + '?', 'It\'s installed, but not set up for webOS yet.  This finishes the setup.',
                 function () { startJob('add ' + a.id); });
         } else if (a.removable) {
-            confirmThen('Remove ' + a.title + '?', 'Uninstalls ' + a.packages + (a.id === 'locate' ? ', its settings and the hourly refresh' : '') + '.  You can add it again any time.',
+            confirmThen('Remove ' + a.title + '?', 'Uninstalls ' + a.packages + (a.id === 'locate' ? ', its settings and the hourly refresh' : (a.id === 'banner' ? ' and the banner' : '')) + '.  You can add it again any time.',
                 function () { startJob('remove ' + a.id); });
         } else {
             backTo = 'addons';

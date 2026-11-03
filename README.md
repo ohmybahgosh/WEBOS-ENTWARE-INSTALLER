@@ -26,7 +26,7 @@ Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of L
 >
 > Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
 >
-> - **Tests on every push:** 160+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
+> - **Tests on every push:** 250+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
 > - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
 >
 > Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
@@ -66,6 +66,7 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 - [nano](#nano)
 - [HTTPS certificates](#https-certificates)
 - [locate (mlocate)](#locate-mlocate)
+- [Login banner](#login-banner)
 - [Add-ons](#add-ons)
 - [Where Entware lives](#where-entware-lives)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
@@ -87,7 +88,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 
 - **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
-- **Add-ons:** nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl and jq, each with the setup it needs on webOS.  One press adds, finishes setting up or removes one.
+- **Add-ons:** nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl, jq and a [login banner](#login-banner), each with the setup it needs on webOS.  One press adds, finishes setting up or removes one.
 - **Package updates:** a screen listing every package with an update, its current and new version, with **Update** for one or **Update all**.  The button shows how many there are, and the app checks Entware's server for new ones once a day.
 - **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
@@ -98,7 +99,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 
 <p align="center">
   <img src="images/app-status.png" width="49%" alt="The Entware app's main screen: status of the install and the actions">
-  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen: nano, locate, certificates, git, Python and more, each with Add or Installed">
+  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux installed, then ncdu, rsync, curl, jq and the Login banner, each with Add">
 </p>
 
 **Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
@@ -106,7 +107,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 **Or install the IPK yourself:** download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.8.0_all.ipk"}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.10.0_all.ipk"}'
 ```
 
 Already installed Entware over SSH?  Open the app and it shows your install as it is.  The app and the `webos-entware` command run the same installer, and a repair from the app updates the saved command to the app's version.  Removing the app leaves Entware installed; use **Uninstall Entware** first if you want it gone too.
@@ -116,7 +117,7 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 ## Features
 
 - ✅ **A TV app** for the Homebrew Channel: install, repair, add-ons, updates and uninstall from the remote, with live progress.
-- ✅ **One-press add-ons** (nano colors, locate, git, Python, htop, tmux and more), each set up for webOS.
+- ✅ **One-press add-ons** (nano colors, locate, git, Python, htop, tmux, a login banner and more), each set up for webOS.
 - ✅ **Checks the TV before touching anything**: root, model, webOS version, kernel, Homebrew Channel, free space and the Entware download server.
 - ✅ **Picks the right Entware build**: recommends 64-bit (`aarch64`) or 32-bit (`armv7`) from your kernel, tells you why, and asks you to continue, switch or exit.
 - ✅ **Test-runs the build first**. If the 64-bit build can't run, it falls back to 32-bit.
@@ -383,6 +384,27 @@ A full refresh takes a couple of seconds. Repairing Entware sets locate up again
 
 ---
 
+## Login banner
+
+An add-on that greets you with a webOS wordmark and your TV's specs each time you log in over SSH: the webOS version, kernel, packages, shell, IP, model, chip, GPU, memory, where Entware's space goes and the uptime.
+
+```sh
+webos-entware add banner     # or Add-ons > Login banner in the TV app
+```
+
+<p align="center"><img src="images/cli-banner.png" width="760" alt="Logging in to an LG C2 over SSH: the webOS wordmark in a pink to cyan gradient, then the TV's specs in boxes for Software, Hardware and Uptime"></p>
+
+It runs [neofetch](https://github.com/dylanaraps/neofetch), which isn't in Entware, so the add-on downloads the 7.1.0 release from GitHub and only uses it if it matches that release's checksum.  Two things make it work on webOS:
+
+- **Entware's bash:** neofetch starts with `#!/usr/bin/env bash`, and on webOS that finds BusyBox, which can't run it.  The installed copy points at `/opt/bin/bash` instead.
+- **What neofetch can't work out on its own:** it calls the TV "Rockhopper" and counts the wrong number of cores.  The banner's settings read the webOS version, model, chip and GPU from the TV itself, so an LG C2 shows as webOS 25 (10.3.1), LG OLED65C2PUA, LG1213 (4) @ 1.400GHz and Mali-G52 MC3.
+
+It only shows when you log in over SSH, not for `ssh tv 'command'`, scp or sftp.  To hide it for a while without removing it, `touch ~/.hushlogin`.  To change what it shows, edit `/opt/etc/webos-entware/banner/config.conf` (a normal [neofetch config](https://github.com/dylanaraps/neofetch/wiki/Customizing-Info)).  Adding the banner again keeps your edits.  `webos-entware remove banner` takes neofetch and the banner off again.
+
+<p align="center"><img src="images/app-banner.png" width="760" alt="The TV app asking: Add Login banner? It downloads neofetch 7.1.0 from GitHub and checks it against the release's checksum"></p>
+
+---
+
 ## Add-ons
 
 Packages worth one press, with the setup each needs on webOS.  Install them from the TV app's **Add-ons** screen, or over SSH:
@@ -406,10 +428,11 @@ webos-entware remove git     # and take it off again
 | `rsync` | rsync | Fast copies to and from the TV over SSH |
 | `curl` | curl | Fetch URLs and test APIs |
 | `jq` | jq | Read and filter JSON, like `luna-send` replies |
+| `banner` | neofetch 7.1.0, from GitHub | A [login banner](#login-banner) with a webOS wordmark and your TV's specs.  The only add-on not from Entware, so it's checked against the release's checksum |
 
 Any other Entware package installs with `ent install <package>` as usual.  The list is fixed in the installer, so the app can only ever ask for one of these by name.
 
-<p align="center"><img src="images/cli-addons.png" width="760" alt="webos-entware addons listing every add-on and whether it is installed, then adding tmux"></p>
+<p align="center"><img src="images/cli-addons.png" width="760" alt="webos-entware addons listing every add-on and whether it is installed, then adding the login banner"></p>
 
 ---
 
@@ -458,6 +481,7 @@ Entware goes in a new root-only folder at the top of app storage, not `/media/de
 | `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |
 | `/home/root/.bash_profile` | Loads `.profile` and `.bashrc` in bash |
 | `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |
+| `/opt/bin/neofetch`, `/opt/etc/webos-entware/banner` | Only with the [login banner](#login-banner) add-on: neofetch, and the banner's wordmark and settings |
 
 Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. A repair keeps the installer's `.bashrc` as it is, edits included, and if it ever has to rewrite `.profile` or `.bash_profile` after you changed them, it saves your copy as `.bak` first (then `.bak.1`, `.bak.2` and so on, so an older backup is never overwritten). Uninstalling saves an edited `.bashrc` as `.bashrc.entware-saved`.
 
@@ -574,6 +598,7 @@ To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app
 - Developed and maintained by [OhMyBahGosh](https://github.com/ohmybahgosh)
 - Built on [Entware](https://github.com/Entware/Entware) and the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel)
 - The app's QR codes use [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) by Kazuhiko Arase (MIT)
+- The login banner runs [neofetch](https://github.com/dylanaraps/neofetch) by Dylan Araps (MIT), downloaded from its 7.1.0 release when you add it
 - Special thanks to the webOS homebrew and rooting community
 
 ---

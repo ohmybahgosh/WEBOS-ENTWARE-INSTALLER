@@ -33,7 +33,8 @@ function demo(scenario) {
         ['ncdu', 'ncdu', 'ncdu', true, 'notInstalled'],
         ['rsync', 'rsync', 'rsync', true, 'notInstalled'],
         ['curl', 'curl', 'curl', true, 'notInstalled'],
-        ['jq', 'jq', 'jq', true, 'notInstalled']
+        ['jq', 'jq', 'jq', true, 'notInstalled'],
+        ['banner', 'Login banner', 'neofetch', true, 'notInstalled']
     ].map(([id, title, packages, removable, state]) => ({ id, title, packages, removable, state, about: 'About ' + title }));
     let UPDATES = [{ name: 'htop', installed: '3.4.1-1', available: '3.4.2-1' }, { name: 'curl', installed: '8.11.1-1', available: '8.12.0-1' }];
     const base = {
@@ -133,20 +134,25 @@ function check(name, cond) {
     await press(page, 'ArrowDown', order.indexOf('addons'));
     await press(page, 'Enter');
     await page.waitForSelector('.addon');
-    check('opens with every add-on', (await page.$$('.addon')).length === 11);
+    check('opens with every add-on', (await page.$$('.addon')).length === 12);
     check('the first row has focus', await page.$eval('.addon', (r) => r.classList.contains('focus')));
     check('states show as Included, Finish setup and Add', await page.$eval('#addon-list', (l) => /Included/.test(l.textContent) && /Finish setup/.test(l.textContent) && /Add/.test(l.textContent)));
     await page.screenshot({ path: path.join(OUT, '3-addons.png') });
-    await press(page, 'ArrowDown', 10);
+    await press(page, 'ArrowDown', 11);
     const inView = await page.$eval('#addon-list', (l) => {
         const r = l.querySelector('.addon.focus');
         return r.offsetTop >= l.scrollTop && r.offsetTop + r.offsetHeight <= l.scrollTop + l.clientHeight + 1;
     });
-    check('the list scrolls to keep the focused row in view', inView && /jq/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    check('the list scrolls to keep the focused row in view', inView && /Login banner/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
     await page.screenshot({ path: path.join(OUT, '4-addons-scrolled.png') });
+    await press(page, 'Enter');
+    const bannerBody = await page.textContent('#overlay-body');
+    check('the login banner says it downloads neofetch from GitHub and checks it', /Add Login banner/.test(await overlayTitle(page)) && /GitHub/.test(bannerBody) && /checksum/.test(bannerBody));
+    await press(page, 'Escape');
+    await page.waitForSelector('.addon.focus');
 
     // Add htop, then cancel: back to the list
-    await press(page, 'ArrowUp', 5); // htop
+    await press(page, 'ArrowUp', 6); // htop
     check('focus lands on htop', /htop/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
     await press(page, 'Enter');
     check('asks before adding', /Add htop\?/.test(await overlayTitle(page)));

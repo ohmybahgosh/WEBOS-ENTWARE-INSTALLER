@@ -2,6 +2,16 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.10.0] - 2026-11-02
+
+### Added
+
+- **Login banner add-on:** a webOS wordmark and your TV's specs each time you log in over SSH: the webOS version, kernel, packages, shell, IP, model, chip, GPU, memory, disk use for `/opt` and `/home`, and the uptime.  Add it from the app's **Add-ons** screen or with `webos-entware add banner`.  It runs neofetch, which isn't in Entware, so it downloads the 7.1.0 release from GitHub and only uses it if it matches that release's checksum.  It runs neofetch with Entware's bash (on webOS `env bash` finds BusyBox, which can't run it), and its settings read the webOS version, model, chip and GPU from the TV, since neofetch gets those wrong.  It only shows at an SSH login, not for commands, scp or sftp, and `touch ~/.hushlogin` hides it.  Your edits to its settings are kept.  Tried on an LG C2 with webOS 25.
+
+### Also in this release
+
+- Everything from [2.9.2](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/blob/main/CHANGELOG.md#292---2026-11-02), which wasn't released on its own: the app's **Package updates** screen, with **Update** for one package or **Update all**, and `webos-entware updates` and `webos-entware upgrade <name>` over SSH.
+
 ## [2.9.2] - 2026-11-02
 
 ### Added
