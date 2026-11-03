@@ -105,7 +105,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 </p>
 <p align="center">
   <img src="images/app-updates.png" width="49%" alt="The Package updates screen: Update all 2 packages, htop 3.4.1-1 to 3.4.2-1 and curl 8.11.1-1 to 8.12.0-1, each with Update, and Check again">
-  <img src="images/app-report.png" width="49%" alt="Report for GitHub: It works on my TV for a compatibility report, or Something went wrong for a bug report, each with a QR code">
+  <img src="images/app-report.gif" width="49%" alt="Animated: Report for GitHub offers It works on my TV and Something went wrong, each showing a QR code with the TV's details filled in">
 </p>
 
 **Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
@@ -176,7 +176,7 @@ Pick **1) Install or repair Entware**. The installer shows your TV details and t
 
 When it finishes, **disconnect and SSH in again** to get the bash shell.
 
-<p align="center"><img src="images/cli-install.png" width="760" alt="An install over SSH: the TV check, the recommended 64-bit build, each step, and Everything looks right"></p>
+<p align="center"><img src="images/term-install.gif" width="760" alt="An install over SSH, animated: the TV check, the recommended 64-bit build on app storage, each step, and Everything looks right"></p>
 
 ### Skip the menu
 
@@ -301,7 +301,7 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 
 Anything else is passed straight to `opkg`, so `ent list-installed` works too.
 
-<p align="center"><img src="images/cli-ent.png" width="760" alt="ent search and ent owns in the bash shell"></p>
+<p align="center"><img src="images/term-ent.gif" width="760" alt="ent search top, animated: htop marked installed and btop, then ent owns htop"></p>
 
 **Tab completion** (in the bash shell): press Tab after `ent`, `opkg` or `webos-entware` to complete commands. After `install`, `info` or `search` it completes available package names. After `remove`, `files` or `upgrade` it completes installed ones.
 
@@ -400,7 +400,7 @@ An add-on that greets you with a webOS wordmark and your TV's specs each time yo
 webos-entware add banner     # or Add-ons > Login banner in the TV app
 ```
 
-<p align="center"><img src="images/cli-banner.png" width="760" alt="Logging in to an LG C2 over SSH: the webOS wordmark in a pink to cyan gradient, then the TV's specs in boxes for Software, Hardware and Uptime"></p>
+<p align="center"><img src="images/term-banner.gif" width="760" alt="Animated: webos-entware add banner, then logging in to an LG C2 over SSH again shows the webOS wordmark in a pink to cyan gradient and the TV's specs in boxes for Software, Hardware and Uptime"></p>
 
 It runs [neofetch](https://github.com/dylanaraps/neofetch), which isn't in Entware, so the add-on downloads the 7.1.0 release from GitHub and only uses it if it matches that release's checksum.  Two things make it work on webOS:
 
