@@ -35,7 +35,7 @@ Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of L
 
 ## Quick start
 
-**With the remote:** in the Homebrew Channel, open Settings, add the repository `https://ohmybahgosh.dev/repo`, install **Entware**, open it and choose **Install Entware**.  [More about the app](#the-tv-app).
+**With the remote (easiest):** in the Homebrew Channel, open Settings, add the repository `https://ohmybahgosh.dev/repo`, install **Entware**, open it and choose **Install Entware**.  [Step by step with screenshots](#from-the-homebrew-channel-recommended).
 
 **Over SSH:**
 
@@ -44,7 +44,7 @@ wget -O /tmp/webos-entware-installer.sh https://raw.githubusercontent.com/ohmyba
 sh /tmp/webos-entware-installer.sh install
 ```
 
-Then log in again for the bash shell, and try `ent search htop` or `webos-entware add git`.  [Full install guide](#install).
+Then log in again for the bash shell, and try `ent search htop` or `webos-entware add git`.  [More SSH options](#over-ssh).
 
 ---
 
@@ -56,6 +56,8 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 - [Supported TVs](#supported-tvs)
 - [Requirements](#requirements)
 - [Install](#install)
+  - [From the Homebrew Channel](#from-the-homebrew-channel-recommended)
+  - [Over SSH](#over-ssh)
 - [The build check (32-bit or 64-bit)](#the-build-check-32-bit-or-64-bit)
 - [Options](#options)
 - [After installing](#after-installing)
@@ -100,7 +102,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 <p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, adding the Login banner and watching it install, then opening Package updates"></p>
 
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app's main screen on an LG C2: Entware is ready, 36 packages on app storage, with Check and repair, Package updates (2 updates available), Add-ons, Full check, Report for GitHub and Uninstall Entware">
+  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2, captured from the TV: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Add-ons, Full check, Report for GitHub and Uninstall Entware">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux, ncdu, rsync, curl and jq with Add, and the Login banner installed">
 </p>
 <p align="center">
@@ -108,13 +110,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
   <img src="images/app-report.gif" width="49%" alt="Animated: Report for GitHub offers It works on my TV and Something went wrong, each showing a QR code with the TV's details filled in">
 </p>
 
-**Install it from the Homebrew Channel:** open the Homebrew Channel, go to Settings, add the repository `https://ohmybahgosh.dev/repo`, then install **Entware** from the list.  The Homebrew Channel then offers updates like for any other app.
-
-**Or install the IPK yourself:** download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
-
-```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.10.1_all.ipk"}'
-```
+**Get it:** [from the Homebrew Channel](#from-the-homebrew-channel-recommended), in four steps with screenshots.
 
 Already installed Entware over SSH?  Open the app and it shows your install as it is.  The app and the `webos-entware` command run the same installer, and a repair from the app updates the saved command to the app's version.  Removing the app leaves Entware installed; use **Uninstall Entware** first if you want it gone too.
 
@@ -155,7 +151,7 @@ Tried it on a TV that isn't listed?  A [compatibility report](https://github.com
 ## Requirements
 
 - A **rooted** LG webOS TV with the **Homebrew Channel** installed. See [webosbrew.org/rooting](https://www.webosbrew.org/pages/rooting/) and check your firmware at [cani.rootmy.tv](https://cani.rootmy.tv).
-- **SSH** turned on in Homebrew Channel settings. Keeping **telnet** on too gives you a way back in if SSH ever breaks.
+- **SSH** turned on in Homebrew Channel settings, to install over SSH or use the bash shell.  The TV app doesn't need it.  Keeping **telnet** on too gives you a way back in if SSH ever breaks.
 - An **internet connection** on the TV.
 - About **50 MB** free space.
 
@@ -164,6 +160,40 @@ Without the Homebrew Channel, Entware still installs, but there's no boot script
 ---
 
 ## Install
+
+### From the Homebrew Channel (recommended)
+
+No SSH needed.  Everything happens on the TV with the remote.
+
+**1.  Add the repository.**  Open the Homebrew Channel and select the gear icon at the top right.  Under **Repositories**, choose **Add repository**, enter `https://ohmybahgosh.dev/repo` and add it.  It then shows up in the list.
+
+<p align="center"><img src="images/hb-settings.png" width="760" alt="The Homebrew Channel's settings on the TV: Root configuration on the left, and on the right the repositories, with https://ohmybahgosh.dev/repo listed below the two webosbrew.org ones and Add repository underneath"></p>
+
+**2.  Find Entware in the app list.**  Go back to the main screen.  **Entware** is listed with the other apps, with its cube and terminal icon.
+
+<p align="center"><img src="images/hb-apps.png" width="760" alt="The Homebrew Channel's app list on the TV with Entware selected, next to LG-USB-2-ETH0 and TiviBro"></p>
+
+**3.  Install it.**  Open Entware and choose **Install**.  The page shows the version, that it needs root, and what the app does.  When a new version is out, the same page offers **Update**, and so does the app itself.
+
+<p align="center"><img src="images/hb-entware.png" width="760" alt="Entware's page in the Homebrew Channel: version 2.10.1, root required, Launch and Uninstall buttons, screenshots of the app and its description, from https://ohmybahgosh.dev/repo"></p>
+
+**4.  Open it and choose Install Entware.**  Choose **Launch**.  The app checks your TV, picks the right build and installs Entware in about two minutes, with the progress on screen.  When it's done it says **Entware is ready**.
+
+<p align="center"><img src="images/app-status.png" width="760" alt="The Entware app on an LG C2 after installing, captured from the TV: Entware is ready, 36 packages on app storage, no problems found"></p>
+
+From there, [add-ons](#add-ons) are one press away.  For the bash shell and `ent`, SSH in to the TV (turn on SSH in the Homebrew Channel's settings first).
+
+### Or install the app's IPK yourself
+
+Download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
+
+```sh
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.10.1_all.ipk"}'
+```
+
+The Homebrew Channel won't offer updates for it unless you add the repository too, but the app's own **Update to v…** still works.
+
+### Over SSH
 
 SSH into your TV as root, then download and run the installer:
 
@@ -178,7 +208,7 @@ When it finishes, **disconnect and SSH in again** to get the bash shell.
 
 <p align="center"><img src="images/term-install.gif" width="760" alt="An install over SSH, animated: the TV check, the recommended 64-bit build on app storage, each step, and Everything looks right"></p>
 
-### Skip the menu
+#### Skip the menu
 
 ```sh
 sh /tmp/webos-entware-installer.sh install      # install, or repair an existing install
@@ -186,7 +216,7 @@ sh /tmp/webos-entware-installer.sh doctor       # check the TV and the install
 sh /tmp/webos-entware-installer.sh uninstall    # remove everything
 ```
 
-### One line, piped into sh
+#### One line, piped into sh
 
 ```sh
 wget -O - https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh | sh -s -- install
