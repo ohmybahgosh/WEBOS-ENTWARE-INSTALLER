@@ -2839,21 +2839,79 @@ pkg_addon() {
     done
 }
 
+# Everything about the installed packages, as JSON, in one pass: from
+# opkg's status file and each package's control file (its section, size
+# and description), with what needs it, whether Entware needs it, and the
+# add-on it came with.  Sizes come from Installed-Size, or from the
+# package's files when that's missing.
+installed_json() {
+    cat=$(addon_catalog | awk -F'|' '$1 != "banner" { printf "%s|%s|%s;", $1, $2, $3 }')
+    set -- /opt/lib/opkg/info/*.control
+    [ -e "$1" ] || set --
+    awk -v base="$BASE_PKGS" -v cat="$cat" '
+        function js(x) { gsub(/\\/, "\\\\", x); gsub(/"/, "\\\"", x); gsub(/[\001-\037]/, " ", x); return "\"" x "\"" }
+        function flush() { if (p != "") { n++; name[n] = p; ver[p] = v; auto[p] = a; when[p] = t } p = ""; v = ""; a = 0; t = "" }
+        BEGIN {
+            k = split(cat, entries, ";")
+            for (i = 1; i <= k; i++) {
+                if (split(entries[i], f, "|") < 3) continue
+                m = split(f[3], pk, " ")
+                for (j = 1; j <= m; j++) { addon[pk[j]] = f[1]; addonTitle[pk[j]] = f[2] }
+            }
+        }
+        FILENAME ~ /\.control$/ {
+            if (/^[ \t]/) {
+                # The description goes on over indented lines: keep enough to read
+                if (indesc && length(desc[cp]) < 200) { d = $0; sub(/^[ \t.]+/, "", d); if (d != "") desc[cp] = desc[cp] " " d }
+                next
+            }
+            indesc = 0
+            if (/^Package:/) cp = $2
+            else if (/^Section:/) sect[cp] = $2
+            else if (/^Installed-Size:/) size[cp] = $2
+            else if (/^Description:/) { d = $0; sub(/^Description: */, "", d); desc[cp] = d; indesc = 1 }
+            next
+        }
+        /^Package:/ { flush(); p = $2 }
+        /^Version:/ { v = $2 }
+        /^Auto-Installed: yes/ { a = 1 }
+        /^Installed-Time:/ { t = $2 }
+        /^Depends:/ {
+            dd = $0; sub(/^Depends: */, "", dd)
+            k = split(dd, dep, ",")
+            for (i = 1; i <= k; i++) {
+                x = dep[i]; sub(/^ */, "", x); sub(/[ (].*/, "", x)
+                if (x != "") need[x] = (need[x] == "" ? p : need[x] "," p)
+            }
+        }
+        END {
+            flush()
+            printf "["
+            for (i = 1; i <= n; i++) {
+                q = name[i]
+                by = ""; m = split(need[q], b, ",")
+                for (j = 1; j <= m; j++) if (b[j] in ver && index(", " by ", ", ", " b[j] ", ") == 0) by = (by == "" ? b[j] : by ", " b[j])
+                kb = size[q] != "" ? int((size[q] + 1023) / 1024) : -1
+                if (kb < 0) {
+                    kb = 0; s = 0
+                    cmd = "tr \"\\n\" \"\\0\" < /opt/lib/opkg/info/" q ".list 2>/dev/null | xargs -0 ls -lnd 2>/dev/null"
+                    while ((cmd | getline line) > 0) { split(line, w, " "); if (w[1] !~ /^d/) s += w[5] }
+                    close(cmd)
+                    kb = int((s + 1023) / 1024)
+                }
+                printf "%s{\"name\":%s,\"version\":%s,\"sizeKB\":%d,\"auto\":%s,\"neededBy\":%s,\"base\":%s,\"addon\":%s,\"addonTitle\":%s,\"section\":%s,\"description\":%s,\"installed\":%s}",
+                    (i > 1 ? "," : ""), js(q), js(ver[q]), kb, (auto[q] ? "true" : "false"), js(by),
+                    (index(base, " " q " ") ? "true" : "false"), js(addon[q]), js(addonTitle[q]), js(sect[q]), js(desc[q]),
+                    (when[q] ~ /^[0-9]+$/ ? when[q] : "null")
+            }
+            printf "]\n"
+        }' "$OPKG_STATUS" "$@"
+}
+
 installed_list() {
     opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
     if [ "$JSON" = 1 ]; then
-        first=1
-        printf '['
-        installed_lines | while read -r n v a by; do
-            [ "$first" = 1 ] || printf ','
-            first=0
-            [ "$by" = - ] && by=""
-            printf '{"name":%s,"version":%s,"sizeKB":%s,"auto":%s,"neededBy":%s,"base":%s,"addon":%s}' \
-                "$(json_str "$n")" "$(json_str "$v")" "$(json_num "$(pkg_size_kb "$n")")" \
-                "$( [ "$a" = 1 ] && echo true || echo false)" "$(json_str "$(echo "$by" | sed 's/,/, /g')")" \
-                "$(json_bool pkg_base "$n")" "$(json_str "$(pkg_addon "$n")")"
-        done
-        printf ']\n'
+        if [ -f "$OPKG_STATUS" ]; then installed_json; else echo '[]'; fi
         return 0
     fi
     log "$CYAN" "Installed packages ($(installed_lines | wc -l | tr -d ' '))"

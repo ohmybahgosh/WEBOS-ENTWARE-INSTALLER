@@ -122,3 +122,17 @@ footer .right { margin: 0 0 0 auto; }
 .addons-short { max-height: 260px; }
 .panel-title .pill { font-size: 19px; vertical-align: middle; }
 .cred.web-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 46px; font-weight: 700; letter-spacing: 6px; color: #e8eef7; margin: 4px 0 14px; }
+
+/* Packages: what's installed, in groups */
+.list-head b { color: #e8eef7; }
+.pkg-sum { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 8px; font-size: 19px; color: #7d8ba1; }
+.pkg-sum b { color: #c9d6e8; }
+.pkg-group { display: flex; align-items: baseline; gap: 18px; padding: 18px 8px 8px; }
+.pkg-group b { font-size: 21px; text-transform: uppercase; letter-spacing: .06em; color: #4cc3ff; }
+.pkg-group span { font-size: 18px; color: #7d8ba1; }
+.addon.pkg { padding: 10px 24px; margin-bottom: 8px; }
+.addon.pkg b { font-size: 25px; }
+.addon .ver { font-size: 19px; font-weight: 500; color: #7d8ba1; margin-left: 8px; white-space: pre; }
+.addon.pkg small { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 900px; }
+.pill-addon { color: #9be7ff; background: rgba(76, 195, 255, .12); }
+.pill-dim { color: #7d8ba1; background: rgba(125, 139, 161, .12); }

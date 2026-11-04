@@ -4,6 +4,12 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 
 ## [2.13.2] - 2026-11-04
 
+### Changed
+
+- **The TV app's Packages screen shows what's installed much better**: packages are grouped into **Installed on their own**, **From add-ons**, **No longer needed**, **Part of Entware** and **Libraries and helpers**, with how many are in each group at the top and their size by each heading.  Every package shows its version, section, size, when it was added and what it is, and a tag saying what you can do: **Remove**, the add-on it came with, **Entware** or **Needed** (with what needs it).  CH+ and CH− jump between groups.
+- **Removing an add-on's package removes the add-on:** OK on a package that came with an add-on offers to remove that add-on, setup included, rather than leave it half there.
+- **Listing what's installed is much faster:** about 0.1 seconds on a C2 with 121 packages, down from about 5.
+
 ### Fixed
 
 - **"null packages" on the TV app's status** ([#3](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/3)): while another opkg held its lock (an update check, an install from SSH), the status check couldn't run opkg, so it had no package count, and the full check could say opkg doesn't run.  It now counts packages from opkg's status file and checks opkg without waiting for the lock.  The app also leaves the count out rather than show "null" if it's ever missing.

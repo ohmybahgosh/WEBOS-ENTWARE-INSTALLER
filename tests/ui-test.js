@@ -55,9 +55,11 @@ function demo(scenario) {
     if (scenario === 'fresh') { Object.assign(base, { installed: false, mounted: false, opkg: false, packages: null, diskUsed: '' }); }
     let job = null;
     const INSTALLED = [
-        { name: 'bash', version: '5.3-2', sizeKB: 1217, auto: false, neededBy: '', base: true, addon: '' },
-        { name: 'libncurses', version: '6.4-3', sizeKB: 300, auto: true, neededBy: 'bash, htop', base: false, addon: '' },
-        { name: 'tmux', version: '3.5a-1', sizeKB: 812, auto: false, neededBy: '', base: false, addon: 'tmux' }
+        { name: 'bash', version: '5.3-2', sizeKB: 1217, auto: false, neededBy: '', base: true, addon: '', section: 'shells', description: 'The GNU Bourne Again SHell', installed: 1761000000 },
+        { name: 'libncurses', version: '6.4-3', sizeKB: 300, auto: true, neededBy: 'bash, htop', base: false, addon: '', section: 'libs', description: 'Terminal handling library', installed: 1761000000 },
+        { name: 'tmux', version: '3.5a-1', sizeKB: 812, auto: false, neededBy: '', base: false, addon: 'tmux', addonTitle: 'tmux', section: 'utils', description: 'Terminal multiplexer', installed: 1762000000 },
+        { name: 'jq', version: '1.7.1-1', sizeKB: 250, auto: false, neededBy: '', base: false, addon: '', section: 'utils', description: 'Command-line JSON processor', installed: 1762100000 },
+        { name: 'libfoo', version: '1.0-1', sizeKB: 40, auto: true, neededBy: '', base: false, addon: '', section: 'libs', description: 'Leftover library', installed: 1761500000 }
     ];
     const ALL = [
         { name: 'btop', version: '1.4.5-1', description: 'Resource monitor' },
@@ -108,7 +110,7 @@ function demo(scenario) {
                 const a = /^(add|remove) (.*)$/.exec(job.name);
                 if (a) { ADDONS.find((x) => x.id === a[2]).state = a[1] === 'add' ? 'installed' : 'notInstalled'; }
                 const pk = /^pkg-(add|remove) (.*)$/.exec(job.name);
-                if (pk && pk[1] === 'add') { INSTALLED.push({ name: pk[2], version: '3.4.1-1', sizeKB: 400, auto: false, neededBy: '', base: false, addon: '' }); }
+                if (pk && pk[1] === 'add') { INSTALLED.push({ name: pk[2], version: '3.4.1-1', sizeKB: 400, auto: false, neededBy: '', base: false, addon: '', section: 'admin', description: 'Interactive processes viewer', installed: 1762200000 }); }
                 if (pk && pk[1] === 'remove') { INSTALLED.splice(INSTALLED.findIndex((x) => x.name === pk[2]), 1); }
                 if (job.name === 'move appstore') { Object.assign(base, { location: 'appstore', userFreeMB: 181, appFreeMB: 1639, freeMB: 1639 }); }
             }
@@ -409,8 +411,24 @@ function check(name, cond) {
     await press(page, 'ArrowDown', order2.indexOf('packages'));
     await press(page, 'Enter');
     await page.waitForSelector('#pkg-q');
-    check('Packages opens with a search field and what\'s installed', /3 packages installed/.test(await page.textContent('#overlay-body')) && (await page.$$('.addon')).length === 4);
-    check('a package Entware needs, or that others need, has no Remove', await page.$$eval('.addon', (rs) => !/Remove/.test(rs[1].textContent) && /part of Entware/.test(rs[1].textContent) && !/Remove/.test(rs[2].textContent) && /needed by bash, htop/.test(rs[2].textContent) && /Remove/.test(rs[3].textContent)));
+    check('Packages opens with a search field and what\'s installed', /5 packages installed/.test(await page.textContent('#overlay-body')) && (await page.$$('.addon')).length === 6);
+    check('packages are grouped: own, add-ons, no longer needed, Entware, libraries',
+        /Installed on their own.*From add-ons.*No longer needed.*Part of Entware.*Libraries and helpers/.test(await page.$$eval('.pkg-group', (gs) => gs.map((g) => g.textContent).join('|'))));
+    check('each row says what it is and what you can do', await page.$$eval('.addon', (rs) =>
+        /jq/.test(rs[1].textContent) && /Remove/.test(rs[1].textContent) && /1\.7\.1-1/.test(rs[1].textContent) && /JSON/.test(rs[1].textContent) &&
+        /tmux/.test(rs[2].textContent) && /tmux add-on/.test(rs[2].textContent) &&
+        /libfoo/.test(rs[3].textContent) && /Remove/.test(rs[3].textContent) && /nothing needs it now/.test(rs[3].textContent) &&
+        /bash/.test(rs[4].textContent) && /Entware/.test(rs[4].textContent) && !/Remove/.test(rs[4].textContent) &&
+        /libncurses/.test(rs[5].textContent) && /Needed/.test(rs[5].textContent) && /needed by bash, htop/.test(rs[5].textContent) && !/Remove/.test(rs[5].textContent)));
+    check('the summary counts each group', /1 on their own/.test(await page.$eval('.pkg-sum', (e) => e.textContent.replace(/\s+/g, ' '))));
+    await press(page, 'ArrowDown');
+    await press(page, 'PageDown');
+    check('CH+ jumps to the next group', /tmux/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'PageDown', 2);
+    check('and again', /bash/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'PageUp');
+    check('CH- jumps back', /libfoo/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'ArrowUp', 10);
     await page.screenshot({ path: path.join(OUT, '13-packages.png') });
     await press(page, 'Enter');
     check('OK on the search field puts the cursor in it', await page.evaluate(() => document.activeElement && document.activeElement.id === 'pkg-q'));
@@ -434,18 +452,22 @@ function check(name, cond) {
     await page.keyboard.press('Control+A');
     await page.keyboard.press('Backspace');
     await press(page, 'Enter');
-    await page.waitForFunction(() => /4 packages installed/.test(document.getElementById('overlay-body').textContent));
+    await page.waitForFunction(() => /6 packages installed/.test(document.getElementById('overlay-body').textContent));
     check('clearing the search goes back to what\'s installed', true);
-    await press(page, 'ArrowDown', 3);
+    await press(page, 'ArrowDown');
     await press(page, 'Enter');
-    check('asks before removing a package', /Remove tmux\?/.test(await overlayTitle(page)));
+    check('asks before removing a package', /Remove htop\?/.test(await overlayTitle(page)));
     const reads = await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length);
     await press(page, 'Escape');
     await page.waitForSelector('#pkg-q');
     check('BACK on the question shows the list again straight away, without reading it again',
-        await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length) === reads && /tmux/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
-    await press(page, 'ArrowUp', 5);
-    await press(page, 'ArrowDown');
+        await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length) === reads && /htop/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'ArrowDown', 2);
+    await press(page, 'Enter');
+    check('an add-on\'s package is removed with its add-on', /Remove the tmux add-on\?/.test(await overlayTitle(page)));
+    await press(page, 'Escape');
+    await page.waitForSelector('#pkg-q');
+    await press(page, 'ArrowDown', 2);
     await press(page, 'Enter');
     check('bash says it stays', /part of Entware/.test(await page.textContent('#overlay-body')));
     await press(page, 'Escape');

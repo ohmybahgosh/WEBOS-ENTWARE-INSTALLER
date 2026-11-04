@@ -113,7 +113,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 <p align="center"><img src="images/app-packages.gif" width="720" alt="Animated: the Packages screen lists what's installed, then a search for top finds atop, htop and iftop, and installing iftop runs in the background until it shows Installed"></p>
 
 <p align="center">
-  <img src="images/app-packages.png" width="49%" alt="The Packages screen: 37 packages installed, a search field at the top, and each package's version and size, with Remove, or why it stays">
+  <img src="images/app-packages.png" width="49%" alt="The Packages screen: 121 packages installed, counted by group (on their own, from add-ons, no longer needed, part of Entware, libraries), with each package's version, section, size, date added and description">
   <img src="images/app-logs.png" width="49%" alt="Full check and logs: the full check, this boot's log, and recent tasks like Install htop and Add banner, each with View">
 </p>
 <p align="center">

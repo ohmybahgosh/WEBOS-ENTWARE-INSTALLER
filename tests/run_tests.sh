@@ -60,9 +60,10 @@ case "$1" in
         for p in "$@"; do
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
             echo "$p" >> $DB
-            mkdir -p /opt/lib/opkg/info; touch /opt/lib/opkg/info/$p.control
+            mkdir -p /opt/lib/opkg/info
+            printf 'Package: %s\nVersion: 1.0-1\nSection: utils\nInstalled-Size: 102400\nDescription:  The %s package, "quoted"\n second line\n' "$p" "$p" > /opt/lib/opkg/info/$p.control
             { echo "Package: $p"; echo "Version: 1.0-1"; [ "$p" = git-http ] && echo "Depends: libc, git (>= 2.0)"
-              echo "Status: install user installed"; echo; } >> /opt/lib/opkg/status
+              echo "Status: install user installed"; echo "Installed-Time: 1762200000"; echo; } >> /opt/lib/opkg/status
             case "$p" in
                 entware-opt) mkdir -p /opt/etc/init.d
                     printf '#!/bin/sh\necho "$1" >> /tmp/rc.unslung.log\n' > /opt/etc/init.d/rc.unslung
@@ -973,7 +974,12 @@ run installed --json
 ok "installed --json lists packages, marking the ones Entware needs" 'python3 -c "
 import json,sys; d={p[\"name\"]: p for p in json.load(open(sys.argv[1]))}
 assert d[\"bash\"][\"base\"] is True and d[\"bash\"][\"version\"] == \"1.0-1\" and isinstance(d[\"bash\"][\"sizeKB\"], int), d[\"bash\"]
-assert d[\"nano-full\"][\"addon\"] == \"nano\", d[\"nano-full\"]
+assert d[\"nano-full\"][\"addon\"] == \"nano\" and d[\"nano-full\"][\"addonTitle\"] == \"nano with syntax colors\", d[\"nano-full\"]
+" "$W/out"'
+ok "with each one's section, size, whole description and when it was installed" 'python3 -c "
+import json,sys; d={p[\"name\"]: p for p in json.load(open(sys.argv[1]))}
+b = d[\"bash\"]
+assert b[\"section\"] == \"utils\" and b[\"sizeKB\"] == 100 and b[\"description\"] == \"The bash package, \\\"quoted\\\" second line\" and b[\"installed\"] == 1762200000, b
 " "$W/out"'
 run search top --json
 ok "search puts name matches first, then the description, and marks what's installed" 'python3 -c "

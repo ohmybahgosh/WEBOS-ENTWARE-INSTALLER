@@ -20,7 +20,7 @@
     var REPO_PATH = '/ohmybahgosh/WEBOS-ENTWARE-INSTALLER';
     var RELEASES_API = 'https://api.github.com/repos' + REPO_PATH + '/releases/latest';
     var HBC_EXEC = 'luna://org.webosbrew.hbchannel.service/exec';
-    var KEY = { UP: 38, DOWN: 40, ENTER: 13, BACK: 461, ESC: 27, BACKSPACE: 8 };
+    var KEY = { UP: 38, DOWN: 40, ENTER: 13, BACK: 461, ESC: 27, BACKSPACE: 8, CH_UP: 33, CH_DOWN: 34 };
 
     // The script ships inside the app: <app dir>/assets/webos-entware-installer.sh
     var appDir = decodeURIComponent(window.location.pathname).replace(/\/[^\/]*$/, '');
@@ -430,7 +430,9 @@
         for (var r = 0; r < rows.length; r++) { rows[r].className = 'addon' + (r === listIndex ? ' focus' : ''); }
         // Keep the focused row in view
         var box = $('addon-list'), row = rows[listIndex];
-        if (row.offsetTop < box.scrollTop) { box.scrollTop = row.offsetTop; }
+        // A group's heading comes into view with its first row
+        var prev = row.previousElementSibling, top = prev && prev.className === 'pkg-group' ? prev.offsetTop : row.offsetTop;
+        if (top < box.scrollTop) { box.scrollTop = top; }
         else if (row.offsetTop + row.offsetHeight > box.scrollTop + box.clientHeight) { box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight; }
     }
 
@@ -782,33 +784,83 @@
         });
     }
 
+    // What's installed, in groups: on their own, from add-ons, no longer
+    // needed, part of Entware, and the libraries others need
+    var PKG_GROUPS = [
+        { id: 'own', title: 'Installed on their own', short: 'on their own', note: 'Press OK on one to remove it' },
+        { id: 'addon', title: 'From add-ons', short: 'from add-ons', note: 'Remove these with their add-on' },
+        { id: 'orphan', title: 'No longer needed', short: 'no longer needed', note: 'Nothing uses these now, so they can go' },
+        { id: 'base', title: 'Part of Entware', short: 'part of Entware', note: 'Entware and its shell setup need these' },
+        { id: 'lib', title: 'Libraries and helpers', short: 'libraries and helpers', note: 'Other packages need these' }
+    ];
+    function pkgGroup(p) {
+        if (p.base) { return 'base'; }
+        if (p.addon) { return 'addon'; }
+        if (!p.auto) { return 'own'; }
+        return p.neededBy ? 'lib' : 'orphan';
+    }
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function when(t) {
+        if (!t) { return ''; }
+        var d = new Date(t * 1000);
+        return MONTHS[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '');
+    }
     function pkgRow(p) {
         var i = pkgInstalled[p.name];
         if (!pkgQuery) {
-            var why = p.base ? 'part of Entware, so it stays' :
-                (p.neededBy ? 'needed by ' + p.neededBy : (p.addon ? 'from the ' + p.addon + ' add-on' : ''));
-            return { name: p.name, title: p.name, sub: p.version + '  ·  ' + kb(p.sizeKB) + (why ? '  ·  ' + why : ''),
-                pill: p.base || p.neededBy ? '' : 'Remove', cls: 'pill-warn', installed: true };
+            var g = pkgGroup(p);
+            var meta = [p.section, kb(p.sizeKB)];
+            if (g === 'own' || g === 'orphan') { meta.push('added ' + when(p.installed)); }
+            if (g === 'lib') { meta.push('needed by ' + short(p.neededBy, 60)); }
+            if (g === 'orphan') { meta.push('nothing needs it now'); }
+            return { name: p.name, version: p.version, group: g, title: p.name, sub: short(p.description, 110),
+                meta: meta.filter(function (x) { return x && x !== 'added '; }).join('  ·  '),
+                pill: { own: 'Remove', orphan: 'Remove', addon: (p.addonTitle || p.addon) + ' add-on', base: 'Entware', lib: 'Needed' }[g],
+                cls: { own: 'pill-warn', orphan: 'pill-warn', addon: 'pill-addon', base: 'pill-dim', lib: 'pill-dim' }[g], installed: true };
         }
-        return { name: p.name, title: p.name + '  ' + p.version, sub: short(p.description, 110),
+        return { name: p.name, version: p.version, title: p.name, sub: short(p.description, 110), meta: '',
             pill: i ? 'Installed' : 'Install', cls: i ? 'pill-ok' : 'pill-add', installed: !!i };
     }
 
     function renderPackages() {
+        var counts = {}, sizes = {}, total = 0;
+        if (!pkgQuery) {
+            // Grouped, and by name in each group
+            var order = {};
+            PKG_GROUPS.forEach(function (g, n) { order[g.id] = n; counts[g.id] = 0; sizes[g.id] = 0; });
+            pkgList.sort(function (x, y) {
+                var d = order[pkgGroup(x)] - order[pkgGroup(y)];
+                return d || (x.name < y.name ? -1 : (x.name > y.name ? 1 : 0));
+            });
+            pkgList.forEach(function (p) { var g = pkgGroup(p); counts[g]++; sizes[g] += p.sizeKB || 0; total += p.sizeKB || 0; });
+        }
         pkgRows = pkgList.map(pkgRow);
         var head = pkgQuery ?
             (pkgList.length ? esc(pkgList.length + (pkgList.length === 60 ? '+' : '') + ' packages match "' + pkgQuery + '"') :
                 'Nothing matches "' + esc(pkgQuery) + '".  Try a shorter word.') +
                 '  <span class="dim">Press OK on the search to change it, or clear it to see what\'s installed.</span>' :
-            esc(pkgList.length + ' packages installed') + '  <span class="dim">Search for more, or press OK on one to remove it.</span>';
-        var html = '<div class="list-head">' + head + '</div><div class="addons" id="addon-list">' +
+            '<b>' + esc(pkgList.length + ' packages installed') + '</b>  ·  ' + esc(kb(total)) +
+                '<div class="pkg-sum">' + PKG_GROUPS.filter(function (g) { return counts[g.id]; }).map(function (g) {
+                    return '<span><b>' + counts[g.id] + '</b> ' + esc(g.short) + '</span>';
+                }).join('') + '</div>';
+        var last = '';
+        var html = '<div class="list-head">' + head + '</div><div class="addons pkg-list" id="addon-list">' +
             '<div class="addon" data-i="0"><input id="pkg-q" class="pkg-q" type="text" maxlength="40" autocomplete="off" spellcheck="false" ' +
             'placeholder="Search Entware\'s packages, like htop or python" value="' + esc(pkgQuery) + '"></div>' +
             pkgRows.map(function (r, i) {
-                return '<div class="addon" data-i="' + (i + 1) + '"><div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
+                var g = '';
+                if (!pkgQuery && r.group !== last) {
+                    last = r.group;
+                    var grp = PKG_GROUPS.filter(function (x) { return x.id === r.group; })[0];
+                    g = '<div class="pkg-group"><b>' + esc(grp.title) + '</b><span>' + counts[r.group] + ' · ' + esc(kb(sizes[r.group])) +
+                        '  ·  ' + esc(grp.note) + '</span></div>';
+                }
+                return g + '<div class="addon pkg" data-i="' + (i + 1) + '"><div><b>' + esc(r.title) + ' <span class="ver">' + esc(r.version || '') +
+                    (r.meta ? '  ·  ' + esc(r.meta) : '') + '</span></b>' + (r.sub ? '<small>' + esc(r.sub) + '</small>' : '') + '</div>' +
                     (r.pill ? '<span class="pill ' + r.cls + '">' + esc(r.pill) + '</span>' : '') + '</div>';
             }).join('') + '</div>';
-        overlay('packages', 'Packages', html, 'OK on the search field types a word.  OK on a package installs or removes it.  BACK to close.');
+        overlay('packages', 'Packages', html, pkgQuery ? 'OK on the search field types a word.  OK on a package installs it.  BACK to close.' :
+            'OK on the search field types a word.  CH+ and CH− jump between groups.  BACK to close.');
         var q = $('pkg-q');
         q.addEventListener('keydown', function (e) {
             var k = e.keyCode;
@@ -821,6 +873,18 @@
             row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); choosePackage(); });
         });
         focusAddon(Math.min(listIndex, pkgRows.length));
+    }
+
+    // CH+ and CH− (page up and down): the first package of the next or
+    // previous group
+    function jumpGroup(dir) {
+        if (pkgQuery || !pkgRows.length) { return; }
+        var starts = [];
+        pkgRows.forEach(function (r, i) { if (!i || r.group !== pkgRows[i - 1].group) { starts.push(i + 1); } });
+        var at = listIndex, to = null;
+        if (dir > 0) { starts.forEach(function (s0) { if (to === null && s0 > at) { to = s0; } }); }
+        else { starts.forEach(function (s0) { if (s0 < at) { to = s0; } }); if (to === null) { to = 0; } }
+        if (to !== null) { focusAddon(to); }
     }
 
     function runSearch(v) {
@@ -850,6 +914,12 @@
         }
         if (p && p.base) {
             overlay('message', esc(r.name), esc(r.name + ' is part of Entware or its shell setup, so it stays installed.'), 'Press OK or BACK to go back.');
+            return;
+        }
+        if (p && p.addon) {
+            confirmThen('Remove the ' + (p.addonTitle || p.addon) + ' add-on?', r.name + ' came with the ' + (p.addonTitle || p.addon) + ' add-on, so it goes with the add-on, along with its setup.' +
+                '  You can add it again from Add-ons any time.', function () { startJob('remove ' + p.addon); });
+            backTo = 'packages';
             return;
         }
         if (p && p.neededBy) {
@@ -1102,6 +1172,7 @@
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
         if (/^(addons|updates|report|packages|logs|addoninfo|web)$/.test(overlayMode || '')) {
+            if (overlayMode === 'packages' && (k === KEY.CH_UP || k === KEY.CH_DOWN)) { jumpGroup(k === KEY.CH_DOWN ? 1 : -1); e.preventDefault(); return; }
             if (k === KEY.UP) { focusAddon(listIndex - 1); }
             else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
             else if (k === KEY.ENTER) {
