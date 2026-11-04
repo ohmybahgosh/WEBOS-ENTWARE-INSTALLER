@@ -1114,7 +1114,8 @@ assert n == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\"], n
 ok "each with its version, section, sizes in KB, description, add-on and whether webOS has it" 'python3 -c "
 import json,sys; d={p[\"n\"]: p for p in json.load(open(sys.argv[1]))}
 h = d[\"htop\"]
-assert h == {\"n\": \"htop\", \"v\": \"3.4.1-1\", \"s\": \"admin\", \"z\": 130, \"i\": 290, \"d\": \"Htop is an ncursed-based process viewer similar to top, but it allows to scroll the list.\", \"a\": \"htop\", \"w\": 0}, h
+import os; sysh = int(any(os.path.exists(x + \"/htop\") for x in (\"/bin\", \"/sbin\", \"/usr/bin\", \"/usr/sbin\")))
+assert h == {\"n\": \"htop\", \"v\": \"3.4.1-1\", \"s\": \"admin\", \"z\": 130, \"i\": 290, \"d\": \"Htop is an ncursed-based process viewer similar to top, but it allows to scroll the list.\", \"a\": \"htop\", \"w\": sysh}, h
 assert d[\"rclone\"][\"a\"] == \"rclone\" and d[\"bash\"][\"w\"] == 1, d
 assert d[\"myapp\"][\"d\"].startswith(\"An app that \\\"quotes\\\" \\\\ things\"), d[\"myapp\"]
 " "$W/out"'
