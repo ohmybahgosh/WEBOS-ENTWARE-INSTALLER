@@ -1029,6 +1029,144 @@ ok "job pkg-add refuses names that aren't packages" 'grep -q "isn.t a package na
 rm -f /opt/lib/opkg/fake-list /tmp/logid
 run uninstall -y
 
+echo "== [$SH] 36c. browsing: the package list and one package's page"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run install -y
+mkdir -p /opt/var/opkg-lists
+cat > /opt/var/opkg-lists/entware << 'L'
+Package: htop
+Version: 3.4.1-1
+Depends: libc, libncurses
+Section: admin
+Architecture: aarch64-3.10
+Installed-Size: 296960
+Size: 132957
+Description:  Htop is an ncursed-based process viewer similar to top, but
+ it allows to scroll the list.
+
+Package: libncurses
+Version: 6.4-3
+Depends: libc, terminfo
+Section: libs
+Installed-Size: 300000
+Size: 150000
+Description:  Terminal handling library
+
+Package: terminfo
+Version: 6.4-3
+Section: utils
+Installed-Size: 20480
+Size: 10240
+Description:  Terminal Info Database (ncurses)
+
+Package: rclone
+Version: 1.73.2-1
+Section: net
+Installed-Size: 70983680
+Size: 23454249
+Description:  Rclone is a command line program to sync files and directories to and from:
+ Google Drive
+ Dropbox
+ .
+ And more.
+
+Package: python3-yaml
+Version: 6.0-1
+Depends: python3-light
+Section: lang
+Size: 1000
+Description:  YAML for Python
+
+Package: python3-pip
+Version: 23.3.1-1
+Depends: python3-light
+Section: lang
+Size: 2000
+Description:  The Python package installer
+
+Package: python3-light
+Version: 3.13.9-2
+Provides: python3-base
+Depends: libc
+Section: lang
+Size: 3000
+Description:  Python, light
+
+Package: myapp
+Version: 1.0
+Depends: python3-base, libc (>= 1.0), wget-ssl | wget-nossl, myapp
+Section: utils
+Installed-Size: 4096
+Size: 2048
+Description:  An app that "quotes" \ things	with a tab
+
+Package: bash
+Version: 5.3-2
+Section: utils
+Size: 700000
+Description:  The GNU Bourne Again SHell
+L
+run catalog --json
+ok "catalog --json lists what a person would pick, not libraries or modules" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1])); n=[p[\"n\"] for p in d]
+assert n == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\"], n
+" "$W/out"'
+ok "each with its version, section, sizes in KB, description, add-on and whether webOS has it" 'python3 -c "
+import json,sys; d={p[\"n\"]: p for p in json.load(open(sys.argv[1]))}
+h = d[\"htop\"]
+assert h == {\"n\": \"htop\", \"v\": \"3.4.1-1\", \"s\": \"admin\", \"z\": 130, \"i\": 290, \"d\": \"Htop is an ncursed-based process viewer similar to top, but it allows to scroll the list.\", \"a\": \"htop\", \"w\": 0}, h
+assert d[\"rclone\"][\"a\"] == \"rclone\" and d[\"bash\"][\"w\"] == 1, d
+assert d[\"myapp\"][\"d\"].startswith(\"An app that \\\"quotes\\\" \\\\ things\"), d[\"myapp\"]
+" "$W/out"'
+run catalog --json --all
+ok "catalog --all lists libraries and modules too" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1])); assert len(d) == 9 and \"libncurses\" in [p[\"n\"] for p in d], d
+" "$W/out"'
+run pkginfo htop --json
+ok "pkginfo --json: the whole description, sizes, and everything it would add, all the way down" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"name\"] == \"htop\" and d[\"installed\"] is False and d[\"sizeKB\"] == 130 and d[\"isizeKB\"] == 290, d
+assert d[\"description\"] == \"Htop is an ncursed-based process viewer similar to top, but\nit allows to scroll the list.\", d[\"description\"]
+assert [x[\"name\"] for x in d[\"needs\"]] == [\"libncurses\", \"terminfo\"] and d[\"needsKB\"] == 157 and d[\"needsIKB\"] == 313, d[\"needs\"]
+assert d[\"addon\"] == \"htop\" and d[\"addonTitle\"] == \"htop\" and d[\"addonState\"] == \"notInstalled\" and d[\"freeKB\"] > 0, d
+" "$W/out"'
+run pkginfo rclone --json
+ok "a description keeps its lines and paragraph breaks" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"description\"] == \"Rclone is a command line program to sync files and directories to and from:\nGoogle Drive\nDropbox\n\nAnd more.\", d[\"description\"]
+" "$W/out"'
+run pkginfo myapp --json
+ok "a need met by another package (Provides), a version and alternatives are understood" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert [x[\"name\"] for x in d[\"needs\"]] == [\"python3-light\"], d[\"needs\"]
+assert d[\"description\"] == \"An app that \\\"quotes\\\" \\\\ things with a tab\", d[\"description\"]
+" "$W/out"'
+run pkginfo bash --json
+ok "an installed package says so, with its version and that Entware needs it" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"installed\"] is True and d[\"installedVersion\"] == \"1.0-1\" and d[\"base\"] is True and d[\"commands\"] == [\"bash\"], d
+" "$W/out"'
+run pkg-add htop -y
+run pkginfo htop --json
+ok "after installing it, pkginfo says it's installed and adds nothing" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1])); assert d[\"installed\"] is True and d[\"version\"] == \"3.4.1-1\" and d[\"installedVersion\"] == \"1.0-1\", d
+" "$W/out"'
+run pkginfo htop
+ok "pkginfo reads well for people too" 'head -n 1 "$W/out" | grep -q "^htop  3.4.1-1" && grep -q "^it allows to scroll the list.$" "$W/out"'
+! run pkginfo nosuch --json
+ok "pkginfo says when there's no such package" 'grep -q "no package called nosuch" "$W/out"'
+! run pkginfo "../etc" --json
+ok "pkginfo refuses something that isn't a package name" 'grep -q "isn.t a package name" "$W/out"'
+gzip -n /opt/var/opkg-lists/entware && mv /opt/var/opkg-lists/entware.gz /opt/var/opkg-lists/entware
+run catalog --json
+ok "the package list works gzipped too, as opkg keeps it on the TV" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1])); assert [p[\"n\"] for p in d] == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\"], d
+" "$W/out"'
+run pkginfo rclone --json
+ok "and pkginfo reads it" 'grep -q "\"sizeKB\":22905," "$W/out" && grep -q "Google Drive" "$W/out"'
+rm -f /opt/var/opkg-lists/entware
+run uninstall -y
+
 echo "== [$SH] 36b. while another opkg holds its lock"
 rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
 run install -y

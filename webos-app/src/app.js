@@ -20,7 +20,7 @@
     var REPO_PATH = '/ohmybahgosh/WEBOS-ENTWARE-INSTALLER';
     var RELEASES_API = 'https://api.github.com/repos' + REPO_PATH + '/releases/latest';
     var HBC_EXEC = 'luna://org.webosbrew.hbchannel.service/exec';
-    var KEY = { UP: 38, DOWN: 40, ENTER: 13, BACK: 461, ESC: 27, BACKSPACE: 8, CH_UP: 33, CH_DOWN: 34 };
+    var KEY = { UP: 38, DOWN: 40, LEFT: 37, RIGHT: 39, ENTER: 13, BACK: 461, ESC: 27, BACKSPACE: 8, CH_UP: 33, CH_DOWN: 34 };
 
     // The script ships inside the app: <app dir>/assets/webos-entware-installer.sh
     var appDir = decodeURIComponent(window.location.pathname).replace(/\/[^\/]*$/, '');
@@ -28,15 +28,14 @@
 
     var state = null;        // last status --json
     var latest = null;       // newest release on GitHub, if newer than this app
-    var overlayMode = null;  // null, 'busy', 'message', 'confirm', or a list: 'addons', 'updates', 'report', 'packages', 'logs', 'addoninfo'
+    var overlayMode = null;  // null, 'busy', 'loading', 'message', 'confirm', or a list: 'addons', 'report', 'logs', 'addoninfo'
     var onConfirm = null;
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
     var addons = [];         // last addons --json
     var listIndex = 0;       // focused row on the Add-ons, Package updates or Report screen
-    var backTo = '';         // 'addons' or 'updates': the screen to reopen after a task's result
+    var backTo = '';         // the screen to reopen after a task's result: 'store', 'addons', 'logs', ...
     var upd = null;          // last updates --json
-    var updRows = [];        // rows on the Package updates screen
     var autoChecked = false; // refreshed the package list once this session
 
     function $(id) { return document.getElementById(id); }
@@ -262,8 +261,8 @@
             backTo = '';
             // A list just shown is drawn again as it was; it's read again
             // from the TV only after a task may have changed it
-            if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); }
-            else if (b === 'packages') { if (fresh.packages && pkgList) { renderPackages(); } else { openPackages(); } }
+            if (b === 'store') { if (store.open) { storeReturn(); } else { focusCurrent(); } }
+            else if (b === 'report') { openReportMenu(); }
             else if (b === 'logs') { if (fresh.logs && logData) { renderLogs(); } else { openLogs(); } }
             else if (b === 'addoninfo' && addonInfo && addonInfo.addon) { openAddonInfo(addonInfo.addon); }
             else {
@@ -273,10 +272,11 @@
             }
             return;
         }
+        if (store.open) { storeFocus(); return; }
         focusCurrent();
     }
     function confirmThen(title, text, fn) {
-        backTo = /^(addons|updates|packages|logs|addoninfo)$/.test(overlayMode || '') ? overlayMode : ''; // BACK returns to the list
+        backTo = store.open ? 'store' : (/^(addons|logs|addoninfo)$/.test(overlayMode || '') ? overlayMode : ''); // BACK returns to the list
         onConfirm = fn;
         overlay('confirm', esc(title), esc(text), 'Press OK to go ahead, or BACK to cancel.');
     }
@@ -317,7 +317,7 @@
     // Start a task in the background, then follow it
     // Lists read from the TV that are still current, until a task runs
     var fresh = { addons: false, packages: false, logs: false };
-    function stale() { fresh.addons = fresh.packages = fresh.logs = false; }
+    function stale() { fresh.addons = fresh.packages = fresh.logs = false; pkgInfo = {}; upd = null; }
 
     function startJob(name) {
         if (busy || !/^(install|uninstall|locate|upgrade|app-update|(upgrade|pkg-add|pkg-remove) [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove|password) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
@@ -360,8 +360,7 @@
                 }
                 busy = false;
                 var jn = j.name || name;
-                backTo = /^(add|remove) /.test(jn) ? 'addons' : (/^password /.test(jn) && addonInfo ? 'addoninfo' :
-                    (/^upgrade/.test(jn) ? 'updates' : (/^pkg-/.test(jn) ? 'packages' : '')));
+                backTo = store.open ? 'store' : (/^(add|remove) /.test(jn) ? 'addons' : (/^password /.test(jn) && addonInfo ? 'addoninfo' : ''));
                 var good = j.state === 'done' && j.exit === 0;
                 var heading = good ? title + ': done' : (j.state === 'lost' ? title + ' stopped before finishing' : title + ': something went wrong');
                 overlay('message', '<span class="' + (good ? 'result-ok' : 'result-bad') + '">' + esc(heading) + '</span>', logHtml(log),
@@ -591,72 +590,6 @@
     // ------------------------------------------------------------------ package updates
 
     // refreshList: download the package list from Entware's server first
-    function openUpdates(refreshList) {
-        if (busy) { return; }
-        busy = true;
-        overlay('busy', '<span class="spinner"></span>Package updates',
-            logHtml([refreshList ? 'Checking Entware\'s server for updates…' : 'Reading the package list…']), '');
-        runScript('updates --json' + (refreshList ? ' --refresh' : ''), function (ok, out) {
-            busy = false;
-            var d = parseJson(out);
-            if (!d || !d.packages) {
-                overlay('message', '<span class="result-bad">Couldn\'t check for updates</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to close.');
-                return;
-            }
-            upd = d;
-            if (state) {
-                state.updates = d.packages.length;
-                state.updatesChecked = d.checked;
-                state.updatesAgeHours = d.ageHours;
-            }
-            renderUpdates();
-        });
-    }
-
-    function renderUpdates() {
-        var p = upd.packages;
-        updRows = [];
-        if (p.length > 1) {
-            updRows.push({ kind: 'all', title: 'Update all ' + p.length + ' packages', sub: 'refreshes the package list, then updates every package', pill: 'Update all' });
-        }
-        p.forEach(function (x) {
-            updRows.push({ kind: 'pkg', name: x.name, installed: x.installed, available: x.available,
-                title: x.name, sub: x.installed + '  →  ' + x.available, pill: 'Update' });
-        });
-        updRows.push({ kind: 'check', title: 'Check again', sub: 'downloads the package list from Entware\'s server', pill: '' });
-        if (listIndex >= updRows.length) { listIndex = 0; }
-        var head = '<div class="list-head">' +
-            (p.length ? esc(p.length + (p.length === 1 ? ' package has an update.' : ' packages have updates.')) : '<span class="ok">Every package is up to date.</span>') +
-            '  <span class="dim">Package list from ' + esc(upd.checked || 'unknown') +
-            (upd.refreshFailed ? ' (Entware\'s server couldn\'t be reached)' : '') + '</span></div>';
-        var html = head + '<div class="addons" id="addon-list">' + updRows.map(function (r, i) {
-            return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
-                '<div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
-                (r.pill ? '<span class="pill pill-add">' + esc(r.pill) + '</span>' : '') + '</div>';
-        }).join('') + '</div>';
-        overlay('updates', 'Package updates', html, 'OK updates or checks again.  BACK to close.');
-        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
-            row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
-            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseUpdate(); });
-        });
-        focusAddon(listIndex);
-    }
-
-    function chooseUpdate() {
-        var r = updRows[listIndex];
-        if (!r) { return; }
-        if (r.kind === 'check') { openUpdates(true); return; }
-        if (r.kind === 'all') {
-            confirmThen('Update all ' + upd.packages.length + ' packages?',
-                'Refreshes the package list, then updates every package that has an update.  Your settings are kept.  A service restarts if its package updates.',
-                function () { startJob('upgrade'); });
-            return;
-        }
-        if (!/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(r.name)) { return; }
-        confirmThen('Update ' + r.name + '?', 'From ' + r.installed + ' to ' + r.available + '.  Its settings are kept.',
-            function () { startJob('upgrade ' + r.name); });
-    }
-
     // Once a session, if the package list is a day old, refresh it quietly so
     // the update count is current
     function autoCheckUpdates(s) {
@@ -685,9 +618,9 @@
                     function () { startJob('install'); });
             }
         },
-        upgrade: function () { listIndex = 0; openUpdates(!!(state && (state.updatesAgeHours === null || state.updatesAgeHours >= 24))); },
+        upgrade: function () { openStore('updates'); },
         addons: function () { listIndex = 0; openAddons(); },
-        packages: function () { listIndex = 0; pkgQuery = ''; pkgList = null; openPackages(); },
+        packages: function () { openStore('browse'); },
         move: function () {
             if (!state) { return; }
             confirmThen('Move Entware to app storage?',
@@ -726,72 +659,297 @@
 
     // ------------------------------------------------------------------ packages
 
-    // One screen for every Entware package: what's installed (with Remove),
-    // or, after a search, what matches (with Install).  Names and search words
-    // are checked here and again by the installer.
+    // A full screen with three tabs: Browse (every package a person would
+    // pick, in categories, with a page for each), Installed (grouped by why
+    // it's here) and Updates.  Package names are checked here and again by
+    // the installer; searching happens here, so nothing typed reaches a shell.
     var PKG_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
-    var SEARCH_WORD = /^[A-Za-z0-9._+-]{1,40}$/;
-    var pkgQuery = '';       // last search, '' for the installed list
-    var pkgList = [];        // installed --json, or search --json
-    var pkgInstalled = {};   // installed packages by name, for the search view
-    var pkgRows = [];        // rows under the search field
+    var CAT = window.ENTWARE_CATALOG || { cats: [], featured: [], blurbs: {}, tips: {} };
+    var catalog = null;      // catalog --json: what Browse lists
+    var catalogAll = null;   // catalog --json --all: libraries and modules too
+    var installedList = null;
+    var installedMap = {};
+    var pkgInfo = {};        // pkginfo --json, by name, until a task runs
+    var catNames = {}, catRules = [], catById = {};
+    CAT.cats.forEach(function (c) {
+        catById[c.id] = c;
+        (c.names || '').split(' ').forEach(function (n) { if (n && !catNames[n]) { catNames[n] = c.id; } });
+        if (c.match) { catRules.push([new RegExp(c.match), c.id]); }
+    });
+    var featuredRank = {};
+    CAT.featured.forEach(function (n, i) { featuredRank[n] = i; });
+
+    var store = {
+        open: false, tab: 'browse', zone: 'rail', idx: 0, cat: 'start', sort: 'useful', hideInst: false,
+        libs: false, query: '', qcat: 'all', group: 'all', page: null, from: null, rows: [], chips: [], rail: [], btns: [], grid: []
+    };
 
     function listJson(out) {
         var i = (out || '').indexOf('[');
         try { return i >= 0 ? JSON.parse(out.slice(i)) : null; } catch (e) { return null; }
     }
-    // A long description, cut at a word so it fits on two lines
+    // A long description, cut at a word
     function short(t, n) {
         t = String(t || '');
         if (t.length <= n) { return t; }
         t = t.slice(0, n);
         return t.slice(0, Math.max(t.lastIndexOf(' '), n - 20)).replace(/[\s,.;:(]+$/, '') + '…';
     }
-    function kb(n) { return n >= 1024 ? (Math.round(n / 102.4) / 10) + ' MB' : (n || 0) + ' KB'; }
+    function kb(n) { return n >= 1048576 ? (Math.round(n / 104857.6) / 10) + ' GB' : (n >= 1024 ? (Math.round(n / 102.4) / 10) + ' MB' : (n || 0) + ' KB'); }
+    function names(list, n) { return list.length > n ? list.slice(0, n).join(', ') + ' and ' + (list.length - n) + ' more' : list.join(', '); }
 
-    function openPackages() {
-        if (busy) { return; }
-        busy = true;
-        overlay('busy', '<span class="spinner"></span>Packages', logHtml([pkgQuery ? 'Searching for ' + pkgQuery + '…' : 'Reading what\'s installed…']), '');
-        runScript('installed --json', function (ok, out) {
-            var inst = listJson(out);
-            if (!inst) {
-                busy = false;
-                overlay('message', '<span class="result-bad">Couldn\'t list the packages</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to close.');
-                return;
-            }
-            pkgInstalled = {};
-            inst.forEach(function (p) { pkgInstalled[p.name] = p; });
-            if (!pkgQuery) {
-                busy = false;
-                pkgList = inst;
-                fresh.packages = true;
-                renderPackages();
-                return;
-            }
-            runScript('search ' + pkgQuery + ' --json', function (ok2, out2) {
-                busy = false;
-                pkgList = listJson(out2);
-                if (!pkgList) {
-                    overlay('message', '<span class="result-bad">The search didn\'t work</span>', logHtml(plain(out2).trim().split('\n')), 'Press OK or BACK to go back.');
-                    pkgQuery = '';
-                    backTo = 'packages';
-                    return;
-                }
-                fresh.packages = true;
-                renderPackages();
-            });
+    function catOf(p) {
+        if (p.lib) { return 'libs'; }
+        if (catNames[p.n]) { return catNames[p.n]; }
+        for (var i = 0; i < catRules.length; i++) { if (catRules[i][0].test(p.n)) { return catRules[i][1]; } }
+        for (var j = 0; j < CAT.cats.length; j++) {
+            var c = CAT.cats[j];
+            if (c.sections && (' ' + c.sections + ' ').indexOf(' ' + p.s + ' ') >= 0) { return c.id; }
+        }
+        return 'other';
+    }
+    function blurb(p) { return CAT.blurbs[p.n] || p.d || ''; }
+    function rank(p) { return p.n in featuredRank ? featuredRank[p.n] : (CAT.blurbs[p.n] ? 100 : 1000); }
+    function byName(x, y) { return x.n < y.n ? -1 : (x.n > y.n ? 1 : 0); }
+    function shelf() { return store.libs && catalogAll ? catalogAll : (catalog || []); }
+    function updFor(n) {
+        if (!upd || !upd.packages) { return null; }
+        for (var i = 0; i < upd.packages.length; i++) { if (upd.packages[i].name === n) { return upd.packages[i]; } }
+        return null;
+    }
+    // Marks what's installed, and files each package in a category
+    function indexCatalog(list, all) {
+        var seen = {};
+        (catalog || []).forEach(function (p) { seen[p.n] = 1; });
+        list.forEach(function (p) {
+            if (all && !seen[p.n]) { p.lib = 1; }
+            p.c = catOf(p);
         });
+    }
+
+    // What a row says about a package: installed, an update, an add-on for
+    // it, or that webOS has a command by that name
+    function pkgPill(p) {
+        if (installedMap[p.n]) { return updFor(p.n) ? ['Update', 'pill-warn'] : ['Installed', 'pill-ok']; }
+        if (p.a) { return ['Add-on sets it up', 'pill-addon']; }
+        if (p.w) { return ['webOS has one', 'pill-dim']; }
+        return null;
+    }
+    function rowHtml(r, i, z) {
+        return '<div class="srow" data-z="' + (z || 'list') + '" data-i="' + i + '"><div class="st"><b>' + esc(r.title) + '</b>' +
+            (r.ver ? '<span class="sv">' + esc(r.ver) + '</span>' : '') + (r.sub ? '<p>' + (r.subHtml || esc(r.sub)) + '</p>' : '') + '</div>' +
+            (r.size ? '<span class="ssz">' + esc(r.size) + '</span>' : '') +
+            (r.pill ? '<span class="pill ' + r.pill[1] + '">' + esc(r.pill[0]) + '</span>' : '') + '</div>';
+    }
+    function pkgRowFor(p, sub) {
+        return { kind: 'pkg', name: p.n, title: p.n, ver: p.v, sub: sub || short(blurb(p), 130), size: kb(p.z), pill: pkgPill(p) };
+    }
+    function chipHtml(c, i) {
+        return '<span class="chip' + (c.on ? ' on' : '') + '" data-z="chips" data-i="' + i + '">' + esc(c.title) + '</span>';
+    }
+
+    // ---- opening, and reading what each tab needs from the TV
+
+    function openStore(tab) {
+        if (busy) { return; }
+        store.open = true;
+        store.tab = tab || 'browse';
+        store.page = null;
+        store.zone = store.tab === 'browse' ? (store.query ? 'list' : 'rail') : (store.tab === 'updates' ? 'list' : 'chips');
+        store.idx = 0;
+        $('store').className = 'store';
+        storeLoad(false, storeRender);
+    }
+    function closeStore() {
+        store.open = false;
+        store.page = null;
+        $('store').className = 'store hidden';
+        $('store').innerHTML = '';
+        focusCurrent();
+    }
+    function hideOverlay() { overlayMode = null; onConfirm = null; $('overlay').className = 'overlay hidden'; }
+    function loadFailed(what, out) {
+        busy = false;
+        store.open = false;
+        $('store').className = 'store hidden';
+        overlay('message', '<span class="result-bad">' + esc(what) + '</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to close.');
+    }
+    // Reads what the open tab needs and hasn't got, then calls done
+    function storeLoad(refreshUpdates, done) {
+        var steps = [];
+        if (!fresh.packages || !installedList) {
+            steps.push(['installed --json', 'Reading what\'s installed…', function (out) {
+                var l = listJson(out);
+                if (!l) { return 'Couldn\'t list the packages'; }
+                installedList = l;
+                installedMap = {};
+                l.forEach(function (p) { installedMap[p.name] = p; });
+                fresh.packages = true;
+            }]);
+        }
+        if (store.tab === 'browse' && !catalog) {
+            steps.push(['catalog --json', 'Reading Entware\'s package list…', function (out) {
+                var l = listJson(out);
+                if (!l) { return 'Couldn\'t read Entware\'s package list'; }
+                catalog = l;
+                catalogAll = null;
+                indexCatalog(catalog, false);
+            }]);
+        }
+        if (store.tab === 'browse' && store.libs && !catalogAll) {
+            steps.push(['catalog --json --all', 'Reading every package, libraries too…', function (out) {
+                var l = listJson(out);
+                if (!l) { return 'Couldn\'t read Entware\'s package list'; }
+                catalogAll = l;
+                indexCatalog(catalogAll, true);
+            }]);
+        }
+        if (store.tab === 'updates' && (!upd || refreshUpdates)) {
+            var refresh = refreshUpdates || !!(state && (state.updatesAgeHours === null || state.updatesAgeHours >= 24));
+            steps.push(['updates --json' + (refresh ? ' --refresh' : ''), refresh ? 'Checking Entware\'s server for updates…' : 'Reading the package list…', function (out) {
+                var d = parseJson(out);
+                if (!d || !d.packages) { return 'Couldn\'t check for updates'; }
+                upd = d;
+                if (state) { state.updates = d.packages.length; state.updatesChecked = d.checked; state.updatesAgeHours = d.ageHours; }
+            }]);
+        }
+        if (!steps.length) { done(); return; }
+        busy = true;
+        (function next() {
+            var s = steps.shift();
+            if (!s) { busy = false; hideOverlay(); if (store.open) { done(); } return; }
+            overlay('loading', '<span class="spinner"></span>Packages', logHtml([s[1]]), 'BACK to close.');
+            runScript(s[0], function (ok, out) {
+                if (!store.open) { busy = false; return; }
+                var err = s[2](out);
+                if (err) { loadFailed(err, out); return; }
+                next();
+            });
+        }());
+    }
+
+    // ---- drawing
+
+    function storeRender() {
+        if (!store.open) { return; }
+        var n = { browse: (catalog ? catalog.length : 0), installed: installedList ? installedList.length : 0,
+            updates: upd ? upd.packages.length : (state && state.updates) || 0 };
+        var tabs = [['browse', 'Browse'], ['installed', 'Installed'], ['updates', 'Updates']];
+        var html = '<div class="s-top"><h1>Packages</h1><div class="s-tabs">' + tabs.map(function (t, i) {
+            return '<span class="tab' + (store.tab === t[0] ? ' on' : '') + '" data-z="tabs" data-i="' + i + '">' + esc(t[1]) +
+                '<span class="n' + (t[0] === 'updates' && n.updates ? ' hot' : '') + '">' + (t[0] === 'browse' && !catalog ? '' : n[t[0]].toLocaleString('en-US')) + '</span></span>';
+        }).join('') + '</div><div class="s-search" data-z="tabs" data-i="3"><input id="store-q" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Search ' +
+            (catalog ? catalog.length.toLocaleString('en-US') + ' ' : '') + 'apps and tools…" value="' + esc(store.query) + '"></div></div>';
+        store.rows = []; store.chips = []; store.rail = []; store.grid = []; store.btns = [];
+        if (store.page) { html += pageHtml(); }
+        else if (store.tab === 'browse') { html += store.query ? searchHtml() : browseHtml(); }
+        else if (store.tab === 'installed') { html += installedHtml(); }
+        else { html += updatesHtml(); }
+        html += '<div class="s-foot" id="store-hint"></div>';
+        $('store').innerHTML = html;
+        storeWire();
+        storeFocus();
+    }
+
+    function browseHtml() {
+        var list = shelf(), counts = {};
+        list.forEach(function (p) { counts[p.c] = (counts[p.c] || 0) + 1; });
+        var featured = CAT.featured.map(function (n) { return findPkg(n); }).filter(function (p) { return p; });
+        store.rail = [{ id: 'start', title: 'Start here', icon: '★', count: featured.length }];
+        CAT.cats.forEach(function (c) { if (counts[c.id]) { store.rail.push({ id: c.id, title: c.title, icon: c.icon, count: counts[c.id] }); } });
+        store.rail.push({ id: 'libs-toggle', title: 'Show libraries too', icon: '⚙', count: store.libs ? 'On' : 'Off' });
+        var rail = '<div class="s-rail">' + store.rail.map(function (r, i) {
+            return (i === 1 || r.id === 'libs-toggle' ? '<hr>' : '') + '<div class="rc' + (r.id === store.cat ? ' on' : '') + '" data-z="rail" data-i="' + i + '"><span><i>' +
+                esc(r.icon) + '</i>' + esc(r.title) + '</span><span class="cnt">' + esc(String(r.count)) + '</span></div>';
+        }).join('') + '</div>';
+        var main;
+        if (store.cat === 'start') {
+            store.grid = featured;
+            main = '<h2>Start here</h2><p class="lead">Handy tools that work well on a TV.  Press OK on one to read about it and install it.</p>' +
+                '<div class="s-scroll" id="store-scroll"><div class="s-grid">' + featured.map(function (p, i) {
+                    var pill = pkgPill(p);
+                    return '<div class="tile" data-z="grid" data-i="' + i + '"><b>' + esc(p.n) + '</b><span class="k">' + esc((catById[p.c] || {}).title || '') + '</span>' +
+                        (pill ? '<span class="pill ' + pill[1] + '">' + esc(pill[0]) + '</span>' : '') + '<p>' + esc(short(blurb(p), 110)) + '</p></div>';
+                }).join('') + '</div></div>';
+        } else {
+            var c = catById[store.cat] || catById.other;
+            var rows = list.filter(function (p) { return p.c === c.id && !(store.hideInst && installedMap[p.n]); });
+            rows.sort(store.sort === 'az' ? byName : (store.sort === 'small' ? function (x, y) { return (x.z - y.z) || byName(x, y); } :
+                function (x, y) { return (rank(x) - rank(y)) || byName(x, y); }));
+            store.chips = [{ id: 'useful', title: 'Most useful', on: store.sort === 'useful' }, { id: 'az', title: 'A to Z', on: store.sort === 'az' },
+                { id: 'small', title: 'Smallest', on: store.sort === 'small' }, { id: 'hide', title: 'Hide installed', on: store.hideInst }];
+            store.rows = rows.map(function (p) { return pkgRowFor(p); });
+            main = '<h2>' + esc(c.title) + '</h2><p class="lead">' + esc(c.lead) + '</p>' +
+                '<div class="s-chips">' + store.chips.map(chipHtml).join('') + '<span class="sp">' + rows.length + ' packages</span></div>' +
+                '<div class="s-scroll" id="store-scroll">' + (store.rows.length ? store.rows.map(function (r, i) { return rowHtml(r, i); }).join('') :
+                    '<p class="lead">Everything here is installed.</p>') + '</div>';
+        }
+        return '<div class="s-body">' + rail + '<div class="s-main">' + main + '</div></div>';
+    }
+    function findPkg(n) {
+        var l = shelf();
+        for (var i = 0; i < l.length; i++) { if (l[i].n === n) { return l[i]; } }
+        return null;
+    }
+
+    function searchHtml() {
+        var q = store.query.toLowerCase(), byCat = {}, hits = [];
+        shelf().forEach(function (p) {
+            var n = p.n.toLowerCase(), at = n.indexOf(q), s;
+            if (at >= 0) { s = n === q ? 0 : (at === 0 ? 1 : 2); }
+            else if ((blurb(p) + ' ' + p.d).toLowerCase().indexOf(q) >= 0) { s = 3; }
+            else { return; }
+            hits.push({ p: p, s: s });
+            byCat[p.c] = (byCat[p.c] || 0) + 1;
+        });
+        if (store.qcat !== 'all' && !byCat[store.qcat]) { store.qcat = 'all'; }
+        store.chips = [{ id: 'all', title: 'All ' + hits.length, on: store.qcat === 'all' }];
+        CAT.cats.forEach(function (c) { if (byCat[c.id]) { store.chips.push({ id: c.id, title: c.title + ' ' + byCat[c.id], on: store.qcat === c.id }); } });
+        hits = hits.filter(function (h) { return store.qcat === 'all' || h.p.c === store.qcat; });
+        hits.sort(function (x, y) {
+            var a = x.s === 3 ? 1 : 0, b = y.s === 3 ? 1 : 0;
+            return (a - b) || (a ? rank(x.p) - rank(y.p) : (x.s - y.s) || (x.p.n.length - y.p.n.length)) || byName(x.p, y.p);
+        });
+        var named = hits.filter(function (h) { return h.s < 3; }), described = hits.filter(function (h) { return h.s === 3; });
+        var html = '<div class="s-chips">' + store.chips.map(chipHtml).join('') + '<span class="sp">' + (store.libs ? 'Libraries included' : 'Libraries hidden') + '</span></div>' +
+            '<div class="s-scroll s-wide" id="store-scroll">';
+        function mark(t) {
+            var i = t.toLowerCase().indexOf(q);
+            return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<span class="mark">' + esc(t.slice(i, i + q.length)) + '</span>' + esc(t.slice(i + q.length));
+        }
+        function group(title, list) {
+            if (!list.length) { return; }
+            html += '<div class="ghead">' + esc(title) + '<span>' + list.length + (list.length > 150 ? ', showing 150' : '') + '</span></div>';
+            list.slice(0, 150).forEach(function (h) {
+                var r = pkgRowFor(h.p), b = blurb(h.p), i = b.toLowerCase().indexOf(q);
+                if (i < 0) { b = h.p.d; i = b.toLowerCase().indexOf(q); }
+                // Keep the word that matched in view
+                if (i > 90) { b = '…' + b.slice(Math.max(0, i - 40)); }
+                r.sub = short(b, 130);
+                r.subHtml = mark(r.sub);
+                html += rowHtml(r, store.rows.length);
+                store.rows.push(r);
+            });
+        }
+        group('Name matches', named);
+        group('Mentioned in the description', described);
+        if (!hits.length) { html += '<p class="lead">Nothing matches "' + esc(store.query) + '".</p>'; }
+        if (!store.libs) {
+            var r = { kind: 'libs', title: 'Search every package, libraries too', sub: 'Libraries, plugins and modules are hidden unless you ask for them' };
+            html += rowHtml(r, store.rows.length);
+            store.rows.push(r);
+        }
+        return html + '</div>';
     }
 
     // What's installed, in groups: on their own, from add-ons, no longer
     // needed, part of Entware, and the libraries others need
     var PKG_GROUPS = [
-        { id: 'own', title: 'Installed on their own', short: 'on their own', note: 'Press OK on one to remove it' },
-        { id: 'addon', title: 'From add-ons', short: 'from add-ons', note: 'Remove these with their add-on' },
-        { id: 'orphan', title: 'No longer needed', short: 'no longer needed', note: 'Nothing uses these now, so they can go' },
-        { id: 'base', title: 'Part of Entware', short: 'part of Entware', note: 'Entware and its shell setup need these' },
-        { id: 'lib', title: 'Libraries and helpers', short: 'libraries and helpers', note: 'Other packages need these' }
+        { id: 'own', title: 'Installed on their own', short: 'On their own', note: 'press OK on one to remove it' },
+        { id: 'addon', title: 'From add-ons', short: 'From add-ons', note: 'remove these with their add-on' },
+        { id: 'orphan', title: 'No longer needed', short: 'No longer needed', note: 'nothing uses these now, so they can go' },
+        { id: 'base', title: 'Part of Entware', short: 'Entware', note: 'Entware and its shell setup need these' },
+        { id: 'lib', title: 'Libraries and helpers', short: 'Libraries', note: 'other packages need these' }
     ];
     function pkgGroup(p) {
         if (p.base) { return 'base'; }
@@ -805,131 +963,438 @@
         var d = new Date(t * 1000);
         return MONTHS[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '');
     }
-    function pkgRow(p) {
-        var i = pkgInstalled[p.name];
-        if (!pkgQuery) {
+    function installedHtml() {
+        var order = {}, counts = {}, sizes = {}, total = 0;
+        PKG_GROUPS.forEach(function (g, i) { order[g.id] = i; counts[g.id] = 0; sizes[g.id] = 0; });
+        var list = installedList.slice().sort(function (x, y) {
+            return (order[pkgGroup(x)] - order[pkgGroup(y)]) || (x.name < y.name ? -1 : (x.name > y.name ? 1 : 0));
+        });
+        list.forEach(function (p) { var g = pkgGroup(p); counts[g]++; sizes[g] += p.sizeKB || 0; total += p.sizeKB || 0; });
+        if (store.group !== 'all' && !counts[store.group]) { store.group = 'all'; }
+        store.chips = [{ id: 'all', title: 'All ' + list.length + '  ·  ' + kb(total), on: store.group === 'all' }];
+        PKG_GROUPS.forEach(function (g) { if (counts[g.id]) { store.chips.push({ id: g.id, title: g.short + ' ' + counts[g.id], on: store.group === g.id }); } });
+        var html = '<div class="s-chips">' + store.chips.map(chipHtml).join('') + '</div><div class="s-scroll s-wide" id="store-scroll">', last = '';
+        list.forEach(function (p) {
             var g = pkgGroup(p);
-            var meta = [p.section, kb(p.sizeKB)];
-            if (g === 'own' || g === 'orphan') { meta.push('added ' + when(p.installed)); }
-            if (g === 'lib') { meta.push('needed by ' + short(p.neededBy, 60)); }
-            if (g === 'orphan') { meta.push('nothing needs it now'); }
-            return { name: p.name, version: p.version, group: g, title: p.name, sub: short(p.description, 110),
-                meta: meta.filter(function (x) { return x && x !== 'added '; }).join('  ·  '),
-                pill: { own: 'Remove', orphan: 'Remove', addon: (p.addonTitle || p.addon) + ' add-on', base: 'Entware', lib: 'Needed' }[g],
-                cls: { own: 'pill-warn', orphan: 'pill-warn', addon: 'pill-addon', base: 'pill-dim', lib: 'pill-dim' }[g], installed: true };
-        }
-        return { name: p.name, version: p.version, title: p.name, sub: short(p.description, 110), meta: '',
-            pill: i ? 'Installed' : 'Install', cls: i ? 'pill-ok' : 'pill-add', installed: !!i };
+            if (store.group !== 'all' && g !== store.group) { return; }
+            if (g !== last) {
+                last = g;
+                var grp = PKG_GROUPS[order[g]];
+                html += '<div class="ghead">' + esc(grp.title) + '<span>' + counts[g] + '  ·  ' + esc(kb(sizes[g])) + '  ·  ' + esc(grp.note) + '</span></div>';
+            }
+            var meta = [];
+            if ((g === 'own' || g === 'orphan') && p.installed) { meta.push('Added ' + when(p.installed) + '.'); }
+            if (g === 'lib') { meta.push('Needed by ' + short(p.neededBy, 60) + '.'); }
+            if (g === 'orphan') { meta.push('Nothing needs it now.'); }
+            var u = updFor(p.name);
+            var r = { kind: 'inst', name: p.name, group: g, title: p.name, ver: p.version + (p.section ? '  ·  ' + p.section : ''),
+                sub: short((CAT.blurbs[p.name] || p.description || '').replace(/([^.!?])$/, '$1.') + (meta.length ? '  ' + meta.join('  ') : ''), 140),
+                size: kb(p.sizeKB),
+                pill: u ? ['Update', 'pill-warn'] : { own: ['Remove', 'pill-warn'], orphan: ['Remove', 'pill-warn'], addon: [(p.addonTitle || p.addon) + ' add-on', 'pill-addon'],
+                    base: ['Entware', 'pill-dim'], lib: ['Needed', 'pill-dim'] }[g] };
+            html += rowHtml(r, store.rows.length);
+            store.rows.push(r);
+        });
+        return html + '</div>';
     }
 
-    function renderPackages() {
-        var counts = {}, sizes = {}, total = 0;
-        if (!pkgQuery) {
-            // Grouped, and by name in each group
-            var order = {};
-            PKG_GROUPS.forEach(function (g, n) { order[g.id] = n; counts[g.id] = 0; sizes[g.id] = 0; });
-            pkgList.sort(function (x, y) {
-                var d = order[pkgGroup(x)] - order[pkgGroup(y)];
-                return d || (x.name < y.name ? -1 : (x.name > y.name ? 1 : 0));
-            });
-            pkgList.forEach(function (p) { var g = pkgGroup(p); counts[g]++; sizes[g] += p.sizeKB || 0; total += p.sizeKB || 0; });
+    function updatesHtml() {
+        var p = upd ? upd.packages : [];
+        if (p.length > 1) {
+            store.rows.push({ kind: 'all', title: 'Update all ' + p.length + ' packages', sub: 'Refreshes the package list, then updates every package.', pill: ['Update all', 'pill-add'] });
         }
-        pkgRows = pkgList.map(pkgRow);
-        var head = pkgQuery ?
-            (pkgList.length ? esc(pkgList.length + (pkgList.length === 60 ? '+' : '') + ' packages match "' + pkgQuery + '"') :
-                'Nothing matches "' + esc(pkgQuery) + '".  Try a shorter word.') +
-                '  <span class="dim">Press OK on the search to change it, or clear it to see what\'s installed.</span>' :
-            '<b>' + esc(pkgList.length + ' packages installed') + '</b>  ·  ' + esc(kb(total)) +
-                '<div class="pkg-sum">' + PKG_GROUPS.filter(function (g) { return counts[g.id]; }).map(function (g) {
-                    return '<span><b>' + counts[g.id] + '</b> ' + esc(g.short) + '</span>';
-                }).join('') + '</div>';
-        var last = '';
-        var html = '<div class="list-head">' + head + '</div><div class="addons pkg-list" id="addon-list">' +
-            '<div class="addon" data-i="0"><input id="pkg-q" class="pkg-q" type="text" maxlength="40" autocomplete="off" spellcheck="false" ' +
-            'placeholder="Search Entware\'s packages, like htop or python" value="' + esc(pkgQuery) + '"></div>' +
-            pkgRows.map(function (r, i) {
-                var g = '';
-                if (!pkgQuery && r.group !== last) {
-                    last = r.group;
-                    var grp = PKG_GROUPS.filter(function (x) { return x.id === r.group; })[0];
-                    g = '<div class="pkg-group"><b>' + esc(grp.title) + '</b><span>' + counts[r.group] + ' · ' + esc(kb(sizes[r.group])) +
-                        '  ·  ' + esc(grp.note) + '</span></div>';
-                }
-                return g + '<div class="addon pkg" data-i="' + (i + 1) + '"><div><b>' + esc(r.title) + ' <span class="ver">' + esc(r.version || '') +
-                    (r.meta ? '  ·  ' + esc(r.meta) : '') + '</span></b>' + (r.sub ? '<small>' + esc(r.sub) + '</small>' : '') + '</div>' +
-                    (r.pill ? '<span class="pill ' + r.cls + '">' + esc(r.pill) + '</span>' : '') + '</div>';
-            }).join('') + '</div>';
-        overlay('packages', 'Packages', html, pkgQuery ? 'OK on the search field types a word.  OK on a package installs it.  BACK to close.' :
-            'OK on the search field types a word.  CH+ and CH− jump between groups.  BACK to close.');
-        var q = $('pkg-q');
+        p.forEach(function (x) {
+            store.rows.push({ kind: 'upd', name: x.name, installed: x.installed, available: x.available, title: x.name, sub: x.installed + '  →  ' + x.available, pill: ['Update', 'pill-add'] });
+        });
+        store.rows.push({ kind: 'check', title: 'Check again', sub: 'Downloads the package list from Entware\'s server.' });
+        var head = '<p class="lead">' + (p.length ? esc(p.length + (p.length === 1 ? ' package has an update.' : ' packages have updates.')) :
+            '<span class="ok">Every package is up to date.</span>') + '  Package list from ' + esc((upd && upd.checked) || 'unknown') +
+            (upd && upd.refreshFailed ? ' (Entware\'s server couldn\'t be reached)' : '') + '.</p>';
+        return head + '<div class="s-scroll s-wide" id="store-scroll">' + store.rows.map(function (r, i) { return rowHtml(r, i); }).join('') + '</div>';
+    }
+
+    // ---- a package's page
+
+    // Entware's descriptions are wrapped by hand, with lists as short lines:
+    // join the wrapped lines into paragraphs, and keep the lists as lists
+    function descHtml(t) {
+        var out = '', para = [], items = [], listy = false;
+        function endPara() { if (para.length) { out += '<p>' + esc(para.join(' ')) + '</p>'; para = []; } }
+        function endList() {
+            if (items.length) { out += '<ul' + (items.length > 4 ? ' class="two"' : '') + '>' + items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'; }
+            items = []; listy = false;
+        }
+        String(t || '').split('\n').forEach(function (l) {
+            l = l.replace(/^\s+|\s+$/g, '');
+            if (!l) { endPara(); endList(); return; }
+            var bullet = /^[-*•]\s+/.test(l);
+            if (bullet || (listy && l.length <= 60 && !/[.;]$/.test(l))) { endPara(); listy = true; items.push(l.replace(/^[-*•]\s+/, '')); return; }
+            endList();
+            para.push(l);
+            if (/:$/.test(l)) { endPara(); listy = true; }
+        });
+        endPara(); endList();
+        return out;
+    }
+    function storeOpenPage(name) {
+        if (busy || !PKG_NAME.test(name)) { return; }
+        store.from = { tab: store.tab, zone: store.zone, idx: store.idx, scroll: ($('store-scroll') || {}).scrollTop || 0 };
+        if (pkgInfo[name]) { store.page = pkgInfo[name]; store.zone = 'btns'; store.idx = 0; storeRender(); return; }
+        busy = true;
+        overlay('loading', '<span class="spinner"></span>' + esc(name), logHtml(['Reading about ' + name + '…']), 'BACK to close.');
+        runScript('pkginfo ' + name + ' --json', function (ok, out) {
+            busy = false;
+            if (!store.open) { return; }
+            var d = parseJson(out);
+            if (!d || !d.name) {
+                hideOverlay();
+                backTo = 'store';
+                overlay('message', '<span class="result-bad">Couldn\'t read about ' + esc(name) + '</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to go back.');
+                return;
+            }
+            hideOverlay();
+            pkgInfo[name] = d;
+            store.page = d;
+            store.zone = 'btns';
+            store.idx = 0;
+            storeRender();
+        });
+    }
+    function closePage() {
+        var f = store.from || {};
+        store.page = null;
+        store.tab = f.tab || store.tab;
+        store.zone = f.zone || 'list';
+        store.idx = f.idx || 0;
+        storeRender();
+        if ($('store-scroll')) { $('store-scroll').scrollTop = f.scroll || 0; storeFocus(); }
+    }
+    function pageHtml() {
+        var d = store.page, inst = installedMap[d.name], c = catalogEntry(d.name), cat = catById[c ? c.c : catOf({ n: d.name, s: d.section })] || catById.other;
+        var u = updFor(d.name), tips = (CAT.tips[d.name] || []).slice(), facts = [];
+        var addonOff = d.addon && d.addonState !== 'installed';
+        if (!d.installed) {
+            var dl = d.sizeKB + d.needsKB, use = d.isizeKB + d.needsIKB;
+            facts.push(['Download', kb(dl) + (d.needs.length ? '  (with ' + d.needs.length + (d.needs.length === 1 ? ' more package)' : ' more packages)') : '')]);
+            facts.push(['Uses once installed', kb(use)]);
+            facts.push(['Free on your TV', '<span class="' + (d.freeKB > use * 3 ? 'ok' : (d.freeKB > use ? 'warn' : 'bad')) + '">' + esc(kb(d.freeKB)) + '</span>']);
+            if (d.needs.length) { facts.push(['Also installs', esc(names(d.needs.map(function (x) { return x.name; }), 4))]); }
+            // What it needs that's here already, apart from what every package needs
+            var have = d.have.filter(function (x) { return !(installedMap[x] && installedMap[x].base); });
+            if (have.length) { facts.push(['Already have', esc(names(have, 4))]); }
+            if (d.freeKB && d.freeKB < use) { tips.unshift('There isn\'t enough free space for it.  Free some up, or move Entware to app storage.'); }
+            else if (use > 51200) { tips.push('It\'s big: about ' + kb(use) + ' once installed, with what it needs.'); }
+            if (d.system) { tips.push('webOS already has its own ' + d.system + '.  Once this is installed, SSH logins use Entware\'s, which comes first on the PATH.'); }
+            if (addonOff) { tips.unshift('The ' + d.addonTitle + ' add-on installs this and sets it up for the TV.'); }
+        } else {
+            facts.push(['Installed', esc(d.installedVersion) + (u ? '  <span class="warn">(' + esc(u.available) + ' available)</span>' : '')]);
+            facts.push(['Uses', kb(inst ? inst.sizeKB : d.isizeKB)]);
+            if (d.commands.length) { facts.push(['Commands', esc(names(d.commands, 6))]); }
+            if (d.neededBy) { facts.push(['Needed by', esc(short(d.neededBy, 80))]); }
+            facts.push(['Free on your TV', esc(kb(d.freeKB))]);
+        }
+        // What OK can do here
+        if (!d.installed) {
+            if (addonOff) {
+                store.btns.push({ act: 'addon', title: 'Add the ' + d.addonTitle + ' add-on', sub: 'Installs it and sets it up for the TV.  Recommended.', pri: true });
+                store.btns.push({ act: 'install', title: 'Install just the package', sub: 'The plain Entware package.  You set it up yourself.' });
+            } else {
+                store.btns.push({ act: 'install', title: 'Install ' + d.name, sub: 'Downloads ' + kb(d.sizeKB + d.needsKB) + ' and installs it' + (d.needs.length ? ' with what it needs.' : '.'), pri: true });
+            }
+        } else {
+            if (u) { store.btns.push({ act: 'update', title: 'Update to ' + u.available, sub: 'From ' + u.installed + '.  Its settings are kept.', pri: true }); }
+            if (d.base) { store.btns.push({ act: 'none', title: 'Part of Entware', sub: 'Entware or its shell setup needs it, so it stays.', off: true }); }
+            else if (inst && inst.addon) {
+                store.btns.push({ act: 'removeAddon', title: 'Remove the ' + (inst.addonTitle || inst.addon) + ' add-on', sub: d.name + ' came with it, so it goes with the add-on and its setup.' });
+            } else if (d.neededBy) {
+                store.btns.push({ act: 'none', title: 'Needed by ' + short(d.neededBy, 40), sub: 'Remove ' + (d.neededBy.indexOf(',') >= 0 ? 'those' : 'that') + ' first to remove this.', off: true });
+            } else {
+                store.btns.push({ act: 'remove', title: 'Remove ' + d.name, sub: 'Packages it needed stay, since others may use them.' });
+            }
+        }
+        if (cat.id !== 'libs') { store.btns.push({ act: 'more', cat: cat.id, title: 'More in ' + cat.title, sub: cat.lead }); }
+        var lead = CAT.blurbs[d.name];
+        return '<div class="s-page"><div class="pl"><h2>' + esc(d.name) + '</h2><div class="psub">' + esc(cat.title) + '  ·  version ' + esc(d.version) +
+            (d.installed ? '  ·  installed' : '  ·  from Entware') + '</div>' +
+            '<div class="pdesc" id="page-desc">' + (lead ? '<p class="plead">' + esc(lead) + '</p>' : '') + descHtml(d.description) + '</div>' +
+            (tips.length ? '<div class="pbox"><h4>Good to know on your TV</h4><ul>' + tips.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></div>' : '') +
+            '</div><div class="pr"><table class="facts">' + facts.map(function (f) { return '<tr><td>' + esc(f[0]) + '</td><td>' + f[1] + '</td></tr>'; }).join('') +
+            '</table>' + store.btns.map(function (b, i) {
+                return '<div class="sbtn' + (b.pri ? ' pri' : '') + (b.off ? ' off' : '') + '" data-z="btns" data-i="' + i + '"><b>' + esc(b.title) + '</b><small>' + esc(b.sub) + '</small></div>';
+            }).join('') + '</div></div>';
+    }
+    function catalogEntry(n) {
+        var l = catalogAll || catalog || [];
+        for (var i = 0; i < l.length; i++) { if (l[i].n === n) { return l[i]; } }
+        return null;
+    }
+
+    // ---- focus, keys and the pointer
+
+    function zoneEls(z) { return Array.prototype.slice.call(document.querySelectorAll('#store [data-z="' + z + '"]')); }
+    function storeFocus() {
+        var all = document.querySelectorAll('#store [data-z]');
+        for (var i = 0; i < all.length; i++) { all[i].classList.remove('focus'); }
+        var els = zoneEls(store.zone);
+        if (!els.length) { return; }
+        store.idx = Math.max(0, Math.min(store.idx, els.length - 1));
+        var el = els[store.idx];
+        el.classList.add('focus');
+        var box = $('store-scroll');
+        if (box && box.contains(el)) {
+            var prev = el.previousElementSibling, top = prev && prev.className === 'ghead' ? prev.offsetTop : el.offsetTop;
+            if (store.zone === 'list' && store.idx === 0) { top = 0; }
+            if (top < box.scrollTop) { box.scrollTop = top; }
+            else if (el.offsetTop + el.offsetHeight > box.scrollTop + box.clientHeight) { box.scrollTop = el.offsetTop + el.offsetHeight - box.clientHeight; }
+        }
+        $('store-hint').innerHTML = storeHint();
+    }
+    function hint(list) { return list.map(function (h) { return '<span><span class="k">' + esc(h[0]) + '</span>' + esc(h[1]) + '</span>'; }).join(''); }
+    function storeHint() {
+        var z = store.zone;
+        if (store.page) { return hint([['OK', 'Choose'], ['▲ ▼', 'Move'], ['CH+ / CH−', 'Scroll the description'], ['BACK', 'Back']]); }
+        if (z === 'tabs') { return hint([['◀ ▶', 'Switch tabs'], ['OK', store.idx === 3 ? 'Type a search' : 'Open'], ['▼', 'Down to the list'], ['BACK', 'Close']]); }
+        if (store.tab === 'browse' && store.query) { return hint([['OK', z === 'chips' ? 'Filter' : 'Read about it'], ['▲ ▼', 'Move'], ['◀ ▶', 'Filters'], ['BACK', 'Clear the search']]); }
+        if (store.tab === 'browse') {
+            return hint([['OK', z === 'rail' ? 'Open' : (z === 'chips' ? 'Sort or filter' : 'Read about it')], [z === 'grid' ? '◀ ▶ ▲ ▼' : '▲ ▼', 'Move'],
+                ['◀', 'Categories'], ['CH+ / CH−', 'Next category'], ['BACK', 'Close']]);
+        }
+        if (store.tab === 'installed') { return hint([['OK', z === 'chips' ? 'Filter' : 'Details or remove'], ['▲ ▼', 'Move'], ['CH+ / CH−', 'Next group'], ['BACK', 'Close']]); }
+        return hint([['OK', 'Update or check'], ['▲ ▼', 'Move'], ['BACK', 'Close']]);
+    }
+    function setZone(z, i) { store.zone = z; store.idx = i || 0; storeFocus(); }
+    function contentZone() {
+        if (store.page) { return 'btns'; }
+        if (store.tab === 'browse' && !store.query) { return 'rail'; }
+        return store.chips.length ? 'chips' : 'list';
+    }
+    // Shows a tab, then puts the focus on the tabs, or in the tab with down
+    function storeTab(i, down) {
+        var t = ['browse', 'installed', 'updates'][i];
+        if (!t) { return; }
+        if (t === store.tab && !store.page) { if (down) { setZone(contentZone(), firstIndex()); } return; }
+        store.tab = t;
+        store.page = null;
+        store.group = 'all';
+        storeLoad(false, function () {
+            storeRender();
+            if (down) { setZone(contentZone(), firstIndex()); } else { setZone('tabs', i); }
+        });
+    }
+    function firstIndex() { return store.tab === 'browse' && !store.query && !store.page ? railIndex(store.cat) : 0; }
+    function storeCat(id, keepZone) {
+        store.cat = id;
+        store.sort = 'useful';
+        storeRender();
+        if (!keepZone) { setZone('rail', railIndex(id)); }
+    }
+    function railIndex(id) { for (var i = 0; i < store.rail.length; i++) { if (store.rail[i].id === id) { return i; } } return 0; }
+    function nextCat(dir) {
+        var ids = store.rail.filter(function (r) { return r.id !== 'libs-toggle'; }).map(function (r) { return r.id; });
+        var i = ids.indexOf(store.cat) + dir;
+        if (i < 0 || i >= ids.length) { return; }
+        var z = store.zone;
+        storeCat(ids[i], true);
+        setZone(z === 'rail' ? 'rail' : (store.cat === 'start' ? 'grid' : 'list'), z === 'rail' ? railIndex(ids[i]) : 0);
+    }
+    function jumpGroup(dir) {
+        var starts = [];
+        store.rows.forEach(function (r, i) { if (!i || r.group !== store.rows[i - 1].group) { starts.push(i); } });
+        var at = store.zone === 'list' ? store.idx : -1, to = null;
+        if (dir > 0) { starts.forEach(function (s) { if (to === null && s > at) { to = s; } }); }
+        else { starts.forEach(function (s) { if (s < at) { to = s; } }); }
+        if (to !== null) { setZone('list', to); }
+    }
+    function toggleLibs() {
+        store.libs = !store.libs;
+        storeLoad(false, function () { storeRender(); setZone('rail', store.rail.length - 1); });
+    }
+    function runStoreSearch(v) {
+        store.query = String(v || '').replace(/^\s+|\s+$/g, '').slice(0, 40);
+        store.qcat = 'all';
+        store.page = null;
+        store.tab = 'browse';
+        storeLoad(false, afterSearch);
+    }
+    function afterSearch() {
+        storeRender();
+        if (store.query) { setZone(store.rows.length ? 'list' : 'tabs', store.rows.length ? 0 : 3); }
+        else { setZone('rail', railIndex(store.cat)); }
+    }
+
+    function storeEnter() {
+        var z = store.zone, i = store.idx;
+        if (z === 'tabs') {
+            if (i === 3) { $('store-q').focus(); return; }
+            storeTab(i, true);
+            return;
+        }
+        if (z === 'rail') {
+            var r = store.rail[i];
+            if (!r) { return; }
+            if (r.id === 'libs-toggle') { toggleLibs(); return; }
+            if (r.id !== store.cat) { storeCat(r.id); }
+            setZone(store.cat === 'start' ? 'grid' : (store.rows.length ? 'list' : 'chips'), 0);
+            return;
+        }
+        if (z === 'chips') {
+            var c = store.chips[i];
+            if (!c) { return; }
+            if (store.tab === 'installed') { store.group = c.id; }
+            else if (store.query) { store.qcat = c.id; }
+            else if (c.id === 'hide') { store.hideInst = !store.hideInst; }
+            else { store.sort = c.id; }
+            storeRender();
+            setZone('chips', i);
+            return;
+        }
+        if (z === 'grid') { if (store.grid[i]) { storeOpenPage(store.grid[i].n); } return; }
+        if (z === 'btns') { pageAction(store.btns[i]); return; }
+        var row = store.rows[i];
+        if (!row) { return; }
+        if (row.kind === 'pkg' || row.kind === 'inst') { storeOpenPage(row.name); }
+        else if (row.kind === 'libs') { store.libs = true; storeLoad(false, afterSearch); }
+        else if (row.kind === 'check') { storeLoad(true, function () { storeRender(); setZone('list', 0); }); }
+        else if (row.kind === 'all') {
+            confirmThen('Update all ' + upd.packages.length + ' packages?',
+                'Refreshes the package list, then updates every package that has an update.  Your settings are kept.  A service restarts if its package updates.',
+                function () { startJob('upgrade'); });
+        } else if (row.kind === 'upd' && PKG_NAME.test(row.name)) {
+            confirmThen('Update ' + row.name + '?', 'From ' + row.installed + ' to ' + row.available + '.  Its settings are kept.',
+                function () { startJob('upgrade ' + row.name); });
+        }
+    }
+    function pageAction(b) {
+        var d = store.page;
+        if (!b || !d || b.off || !PKG_NAME.test(d.name)) { return; }
+        var inst = installedMap[d.name];
+        if (b.act === 'more') {
+            store.page = null; store.tab = 'browse'; store.query = ''; store.cat = b.cat; store.sort = 'useful';
+            storeLoad(false, function () { storeRender(); setZone(store.rows.length ? 'list' : 'rail', store.rows.length ? 0 : railIndex(b.cat)); });
+            return;
+        }
+        if (b.act === 'addon') {
+            confirmThen('Add the ' + d.addonTitle + ' add-on?', 'Installs ' + d.name + ' and anything it needs, and sets it up for the TV.  Needs internet.',
+                function () { startJob('add ' + d.addon); });
+        } else if (b.act === 'install') {
+            confirmThen('Install ' + d.name + '?', 'Downloads ' + kb(d.sizeKB + d.needsKB) + (d.needs.length ? ', with ' + d.needs.length + (d.needs.length === 1 ? ' package' : ' packages') + ' it needs,' : '') +
+                ' and uses about ' + kb(d.isizeKB + d.needsIKB) + '.  Entware sets it up for webOS where that\'s needed.  Needs internet.',
+                function () { startJob('pkg-add ' + d.name); });
+        } else if (b.act === 'update') {
+            var u = updFor(d.name);
+            confirmThen('Update ' + d.name + '?', 'From ' + u.installed + ' to ' + u.available + '.  Its settings are kept.', function () { startJob('upgrade ' + d.name); });
+        } else if (b.act === 'removeAddon' && inst) {
+            confirmThen('Remove the ' + (inst.addonTitle || inst.addon) + ' add-on?', d.name + ' came with the ' + (inst.addonTitle || inst.addon) +
+                ' add-on, so it goes with the add-on, along with its setup.  You can add it again from Add-ons any time.', function () { startJob('remove ' + inst.addon); });
+        } else if (b.act === 'remove') {
+            confirmThen('Remove ' + d.name + '?', 'Uninstalls ' + d.name + (inst ? ' (' + kb(inst.sizeKB) + ')' : '') +
+                '.  Packages it needed stay, since others may use them.  You can install it again any time.', function () { startJob('pkg-remove ' + d.name); });
+        }
+    }
+
+    function storeBack() {
+        if (store.page) { closePage(); return; }
+        if (store.tab === 'browse' && store.query) { store.query = ''; afterSearch(); return; }
+        closeStore();
+    }
+    // After a task, or BACK on a question: the same view, read again if a
+    // task may have changed what's installed
+    function storeReturn() {
+        var page = store.page && store.page.name;
+        storeLoad(false, function () {
+            if (page) {
+                var keep = store.from;
+                store.page = null;
+                storeOpenPage(page);
+                store.from = keep;
+                return;
+            }
+            var z = store.zone, i = store.idx;
+            storeRender();
+            setZone(z, i);
+        });
+    }
+
+    function storeKey(e) {
+        var k = e.keyCode, z = store.zone, i = store.idx, cols = 3;
+        e.preventDefault();
+        if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { storeBack(); return; }
+        if (k === KEY.ENTER) { storeEnter(); return; }
+        if (k === KEY.CH_UP || k === KEY.CH_DOWN) {
+            var dir = k === KEY.CH_DOWN ? 1 : -1;
+            if (store.page) { $('page-desc').scrollTop += dir * 200; }
+            else if (store.tab === 'browse' && !store.query) { nextCat(dir); }
+            else if (store.tab === 'installed') { jumpGroup(dir); }
+            else { setZone('list', (z === 'list' ? i : 0) + dir * 6); }
+            return;
+        }
+        var L = k === KEY.LEFT, R = k === KEY.RIGHT, U = k === KEY.UP, D = k === KEY.DOWN;
+        if (z === 'tabs') {
+            if ((L && i > 0) || (R && i < 3)) {
+                var to = i + (L ? -1 : 1);
+                if (to < 3) { storeTab(to); }
+                setZone('tabs', to);
+            } else if (D) { setZone(contentZone(), firstIndex()); }
+            return;
+        }
+        if (z === 'rail') {
+            if (U && i === 0) { setZone('tabs', 0); }
+            else if (U || D) {
+                var to2 = i + (U ? -1 : 1);
+                if (to2 >= store.rail.length) { return; }
+                if (store.rail[to2].id !== 'libs-toggle') { storeCat(store.rail[to2].id); } else { setZone('rail', to2); }
+            } else if (R) { storeEnter(); }
+            return;
+        }
+        if (z === 'grid') {
+            var n = store.grid.length;
+            if (L && i % cols === 0) { setZone('rail', railIndex(store.cat)); }
+            else if (L) { setZone('grid', i - 1); }
+            else if (R && i + 1 < n && (i + 1) % cols) { setZone('grid', i + 1); }
+            else if (U && i < cols) { setZone('tabs', 0); }
+            else if (U) { setZone('grid', i - cols); }
+            else if (D && i + cols < n) { setZone('grid', i + cols); }
+            return;
+        }
+        if (z === 'chips') {
+            if (L && i === 0 && store.tab === 'browse' && !store.query) { setZone('rail', railIndex(store.cat)); }
+            else if (L && i > 0) { setZone('chips', i - 1); }
+            else if (R && i < store.chips.length - 1) { setZone('chips', i + 1); }
+            else if (U) { setZone('tabs', store.tab === 'browse' ? (store.query ? 3 : 0) : (store.tab === 'installed' ? 1 : 2)); }
+            else if (D && store.rows.length) { setZone('list', 0); }
+            return;
+        }
+        if (z === 'list') {
+            if (U && i === 0) { if (store.chips.length) { setZone('chips', 0); } else { setZone('tabs', store.tab === 'updates' ? 2 : 0); } }
+            else if (U) { setZone('list', i - 1); }
+            else if (D) { setZone('list', i + 1); }
+            else if (L && store.tab === 'browse' && !store.query) { setZone('rail', railIndex(store.cat)); }
+            return;
+        }
+        if (z === 'btns') {
+            if (U && i === 0) { setZone('tabs', ['browse', 'installed', 'updates'].indexOf(store.tab)); }
+            else if (U) { setZone('btns', i - 1); }
+            else if (D) { setZone('btns', i + 1); }
+        }
+    }
+
+    function storeWire() {
+        var q = $('store-q');
         q.addEventListener('keydown', function (e) {
             var k = e.keyCode;
-            if (k === KEY.ENTER) { e.preventDefault(); e.stopPropagation(); q.blur(); runSearch(q.value); }
-            else if (k === KEY.DOWN || k === KEY.BACK || k === KEY.ESC) { e.preventDefault(); e.stopPropagation(); q.blur(); if (k === KEY.DOWN) { focusAddon(1); } }
-            else { e.stopPropagation(); }
+            e.stopPropagation();
+            if (k === KEY.ENTER) { e.preventDefault(); q.blur(); runStoreSearch(q.value); }
+            else if (k === KEY.DOWN || k === KEY.BACK || k === KEY.ESC) {
+                e.preventDefault();
+                q.blur();
+                if (k === KEY.DOWN) { setZone(contentZone(), 0); }
+            }
         });
-        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
-            row.addEventListener('mouseover', function () { if (document.activeElement !== q) { focusAddon(parseInt(row.getAttribute('data-i'), 10)); } });
-            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); choosePackage(); });
+        Array.prototype.slice.call(document.querySelectorAll('#store [data-z]')).forEach(function (el) {
+            var z = el.getAttribute('data-z'), i = parseInt(el.getAttribute('data-i'), 10);
+            el.addEventListener('mouseover', function () { if (document.activeElement !== q && (store.zone !== z || store.idx !== i)) { setZone(z, i); } });
+            el.addEventListener('click', function (e) { e.stopPropagation(); setZone(z, i); storeEnter(); });
         });
-        focusAddon(Math.min(listIndex, pkgRows.length));
-    }
-
-    // CH+ and CH− (page up and down): the first package of the next or
-    // previous group
-    function jumpGroup(dir) {
-        if (pkgQuery || !pkgRows.length) { return; }
-        var starts = [];
-        pkgRows.forEach(function (r, i) { if (!i || r.group !== pkgRows[i - 1].group) { starts.push(i + 1); } });
-        var at = listIndex, to = null;
-        if (dir > 0) { starts.forEach(function (s0) { if (to === null && s0 > at) { to = s0; } }); }
-        else { starts.forEach(function (s0) { if (s0 < at) { to = s0; } }); if (to === null) { to = 0; } }
-        if (to !== null) { focusAddon(to); }
-    }
-
-    function runSearch(v) {
-        v = String(v || '').replace(/^\s+|\s+$/g, '');
-        if (v && !SEARCH_WORD.test(v)) {
-            $('overlay-hint').textContent = 'Search for one word: letters, numbers, dots, dashes, underscores or plus signs.';
-            return;
-        }
-        pkgQuery = v;
-        listIndex = v ? 1 : 0;
-        openPackages();
-    }
-
-    function choosePackage() {
-        if (listIndex === 0) { $('pkg-q').focus(); return; }
-        var r = pkgRows[listIndex - 1];
-        if (!r || !PKG_NAME.test(r.name)) { return; }
-        var p = pkgInstalled[r.name];
-        backTo = 'packages';
-        if (!r.installed) {
-            var found = pkgList[listIndex - 1] || {};
-            confirmThen('Install ' + r.name + '?', (found.description ? found.description + '  ' : '') +
-                'Installs version ' + (found.version || '') + ' and anything it needs from Entware, and sets it up for webOS where that\'s needed.  Needs internet.',
-                function () { startJob('pkg-add ' + r.name); });
-            backTo = 'packages';
-            return;
-        }
-        if (p && p.base) {
-            overlay('message', esc(r.name), esc(r.name + ' is part of Entware or its shell setup, so it stays installed.'), 'Press OK or BACK to go back.');
-            return;
-        }
-        if (p && p.addon) {
-            confirmThen('Remove the ' + (p.addonTitle || p.addon) + ' add-on?', r.name + ' came with the ' + (p.addonTitle || p.addon) + ' add-on, so it goes with the add-on, along with its setup.' +
-                '  You can add it again from Add-ons any time.', function () { startJob('remove ' + p.addon); });
-            backTo = 'packages';
-            return;
-        }
-        if (p && p.neededBy) {
-            overlay('message', esc(r.name), esc(r.name + ' is needed by ' + p.neededBy + ', so remove ' + (p.neededBy.indexOf(',') >= 0 ? 'those' : 'that') + ' first.'), 'Press OK or BACK to go back.');
-            return;
-        }
-        confirmThen('Remove ' + r.name + '?', 'Uninstalls ' + r.name + (p ? ' (' + kb(p.sizeKB) + ')' : '') +
-            '.  Packages it needed stay, since others may use them.  You can install it again any time.',
-            function () { startJob('pkg-remove ' + r.name); });
-        backTo = 'packages';
     }
 
     // ------------------------------------------------------------------ logs
@@ -1004,7 +1469,7 @@
 
     // After the app updates, its changelog shows once.  The notes are built
     // into the app (whatsnew.js) from CHANGELOG.md.
-    function store(k, v) {
+    function remember(k, v) {
         try {
             if (v === undefined) { return window.localStorage.getItem(k); }
             window.localStorage.setItem(k, v);
@@ -1014,8 +1479,8 @@
     function maybeWhatsNew() {
         var n = window.ENTWARE_NOTES;
         if (!n || !n.version) { return; }
-        var seen = store('entware.seenVersion');
-        store('entware.seenVersion', n.version);
+        var seen = remember('entware.seenVersion');
+        remember('entware.seenVersion', n.version);
         if (!seen || seen === n.version || !n.notes || !n.notes.length || overlayMode || busy) { return; }
         overlay('message', 'What\'s new in v' + esc(n.version),
             '<ul class="whatsnew">' + n.notes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>',
@@ -1171,12 +1636,11 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
-        if (/^(addons|updates|report|packages|logs|addoninfo|web)$/.test(overlayMode || '')) {
-            if (overlayMode === 'packages' && (k === KEY.CH_UP || k === KEY.CH_DOWN)) { jumpGroup(k === KEY.CH_DOWN ? 1 : -1); e.preventDefault(); return; }
+        if (/^(addons|report|logs|addoninfo|web)$/.test(overlayMode || '')) {
             if (k === KEY.UP) { focusAddon(listIndex - 1); }
             else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
             else if (k === KEY.ENTER) {
-                ({ updates: chooseUpdate, report: chooseReport, packages: choosePackage, logs: chooseLog, addoninfo: chooseAddonInfo, web: chooseWeb }[overlayMode] || chooseAddon)();
+                ({ report: chooseReport, logs: chooseLog, addoninfo: chooseAddonInfo, web: chooseWeb }[overlayMode] || chooseAddon)();
             }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
             e.preventDefault();
@@ -1185,7 +1649,10 @@
         if (overlayMode) {
             if (k === KEY.UP) { scrollPanel(-140); }
             else if (k === KEY.DOWN) { scrollPanel(140); }
-            else if (overlayMode === 'busy') {
+            else if (overlayMode === 'loading') {
+                // Reading for the Packages screen: BACK gives up on it
+                if (k === KEY.BACK || k === KEY.ESC) { hideOverlay(); closeStore(); }
+            } else if (overlayMode === 'busy') {
                 // A task keeps running in the background; BACK just closes the app
                 if (k === KEY.BACK || k === KEY.ESC) { exitApp(); }
             } else if (k === KEY.ENTER && overlayMode === 'confirm' && onConfirm) {
@@ -1196,6 +1663,7 @@
             e.preventDefault();
             return;
         }
+        if (store.open) { storeKey(e); return; }
         var list = buttons();
         if (k === KEY.DOWN) { current = Math.min(current + 1, list.length - 1); focusCurrent(); e.preventDefault(); }
         else if (k === KEY.UP) { current = Math.max(current - 1, 0); focusCurrent(); e.preventDefault(); }
@@ -1215,7 +1683,7 @@
     $('overlay').addEventListener('wheel', function (e) { scrollPanel(e.deltaY > 0 ? 140 : -140); });
 
     // Refresh when the app comes back to the foreground, unless a task is showing
-    function refreshIfIdle() { if (!document.hidden && !busy && !overlayMode) { refresh(); } }
+    function refreshIfIdle() { if (!document.hidden && !busy && !overlayMode && !store.open) { refresh(); } }
     document.addEventListener('webOSRelaunch', refreshIfIdle);
     document.addEventListener('visibilitychange', refreshIfIdle);
     setInterval(refreshIfIdle, 30000);

@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.13.2"
+VERSION="2.14.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -78,6 +78,7 @@ PKG=""
 TERM_ARG=""
 LOG_ID=""
 REFRESH=0
+ALL=0
 ROLLBACK=0
 SNAPSHOT=0
 NEW_BACKUPS=""
@@ -135,6 +136,8 @@ usage() {
     echo "  web [start|stop|status]  The phone dashboard: add-ons and passwords from a phone"
     echo "  installed      List installed packages, their size and what needs them"
     echo "  search <word>  Search Entware's packages (name matches first)"
+    echo "  pkginfo <name> All about one package: description, sizes, what else it installs"
+    echo "  catalog        Every package a person would pick (--all for libraries too), as JSON"
     echo "  pkg-add <name> Install one Entware package, with its webOS setup"
     echo "  pkg-remove <name>  Uninstall one package (not ones Entware needs)"
     echo "  logs           The boot log and the TV app's recent tasks; log <name> shows one"
@@ -601,6 +604,10 @@ job_status() {
 pkg_name_ok() { case "$1" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._+-]*) return 1 ;; esac; return 0; }
 # The package list's age: when it was last refreshed from Entware's server
 lists_file() { ls -t /opt/var/opkg-lists/* 2>/dev/null | head -n 1; }
+# The package list as text: opkg keeps it gzipped on the TV (src/gz)
+lists_text() {
+    if [ "$(head -c 2 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 1f8b ]; then gzip -dc "$1" 2>/dev/null; else cat "$1"; fi
+}
 lists_date() { f=$(lists_file); [ -n "$f" ] && date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null; }
 lists_age_hours() { f=$(lists_file); [ -n "$f" ] && echo $(( $(age_of "$f") / 3600 )); }
 # "name installed available" for each package with an update, from the
@@ -2974,6 +2981,146 @@ EOL
     fi
 }
 
+# === Browse: Entware's whole package list, for the TV app ===
+# Packages a person would pick, from the package list on the TV (no
+# download unless it's a day old): not libraries, plugin modules,
+# documentation or the single commands split out of a bigger package.
+# --all lists those too.  Each has its name, version, section, download
+# and installed size in KB, the start of its description, the add-on it
+# belongs to and whether webOS has a command with its name.
+CATALOG_KEEP=" python3-pip php8-cli php8-fpm mariadb-server mariadb-client node-npm nut-server nut-upsc collectd-mod-cpu git-http perl coreutils "
+catalog_json() {
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    fresh_lists
+    f=$(lists_file)
+    [ -n "$f" ] || error_exit "There's no package list yet. Check the TV's internet connection."
+    cat=$(addon_catalog | awk -F'|' '$1 != "banner" { printf "%s|%s;", $1, $3 }')
+    sys=" $(ls /bin /sbin /usr/bin /usr/sbin 2>/dev/null | tr '\n' ' ') "
+    lists_text "$f" | awk -v all="${ALL:-0}" -v cat="$cat" -v sys="$sys" -v keep="$CATALOG_KEEP" '
+        function js(x) { gsub(/\\/, "\\\\", x); gsub(/"/, "\\\"", x); gsub(/[\001-\037]/, " ", x); return "\"" x "\"" }
+        function hidden(n, s) {
+            if (index(keep, " " n " ")) return 0
+            if (s ~ /^(libs|lib|base|fonts|kernel)$/) return 1
+            if (n ~ /^(lib|kmod-|zoneinfo-|terminfo)/ || n ~ /-(dev|doc|src)$/ || n ~ /-(mod|plugin|plugins)-/) return 1
+            return n ~ /^(perl|perlbase|python3|ruby|node|php8|asterisk|collectd|freeradius3|nut|znc|rutorrent|erlang|boost|dejavu|strongswan|olsrd|siproxd|mariadb|gst1|golang|lua|luci|apache|qt5|icu|shadow|coreutils|procps-ng)-/
+        }
+        function kb(b) { return b ~ /^[0-9]+$/ ? int((b + 1023) / 1024) : 0 }
+        function flush() {
+            if (p != "" && (all == 1 || !hidden(p, sec))) {
+                gsub(/[ \t]+/, " ", d); sub(/^ /, "", d); sub(/ $/, "", d)
+                if (length(d) > 220) d = substr(d, 1, 220)
+                printf "%s{\"n\":%s,\"v\":%s,\"s\":%s,\"z\":%d,\"i\":%d,\"d\":%s,\"a\":%s,\"w\":%d}",
+                    (c++ ? "," : ""), js(p), js(v), js(sec), kb(z), kb(is), js(d), js(addon[p]), (index(sys, " " p " ") ? 1 : 0)
+            }
+            p = ""; v = ""; sec = ""; z = ""; is = ""; d = ""; indesc = 0
+        }
+        BEGIN {
+            k = split(cat, e, ";")
+            for (i = 1; i <= k; i++) { if (split(e[i], f, "|") < 2) continue; m = split(f[2], pk, " "); for (j = 1; j <= m; j++) addon[pk[j]] = f[1] }
+            printf "["
+        }
+        /^[ \t]/ { if (indesc && length(d) < 240) { x = $0; sub(/^[ \t.]+/, "", x); if (x != "") d = d " " x } next }
+        { indesc = 0 }
+        /^Package:/ { flush(); p = $2; next }
+        /^Version:/ { v = $2; next }
+        /^Section:/ { sec = $2; next }
+        /^Size:/ { z = $2; next }
+        /^Installed-Size:/ { is = $2; next }
+        /^Description:/ { d = $0; sub(/^Description: */, "", d); indesc = 1; next }
+        END { flush(); printf "]\n" }' -
+}
+
+# One package in full, for its page in the TV app: the whole description,
+# its sizes, what else it would install (and how much that adds), what it
+# needs that's already here, free space, the add-on it belongs to, the
+# webOS command with its name, and its commands once it's installed.
+pkg_info_json() {
+    pkg_name_ok "$PKG" || error_exit "That isn't a package name: $PKG"
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    fresh_lists
+    f=$(lists_file)
+    ctl=/opt/lib/opkg/info/$PKG.control
+    [ -n "$f" ] || f=/dev/null
+    [ -f "$ctl" ] || ctl=/dev/null
+    a=$(pkg_addon "$PKG"); at=""; as=""
+    if [ -n "$a" ] && addon_find "$a"; then at=$AD_TITLE; as=$(addon_state); fi
+    sysp=""
+    for d in /usr/bin /bin /usr/sbin /sbin; do [ -x "$d/$PKG" ] && { sysp="$d/$PKG"; break; }; done
+    cmds=""
+    [ -f "/opt/lib/opkg/info/$PKG.list" ] && cmds=$(grep -E '^/opt/(s?bin|usr/s?bin)/[^/]+$' "/opt/lib/opkg/info/$PKG.list" | sed 's|.*/||' | sort -u | head -n 20 | tr '\n' ' ')
+    free=$(df -kP /opt 2>/dev/null | awk 'NR == 2 { print $4 }')
+    pkg_base "$PKG" && base=1 || base=0
+    out=$(lists_text "$f" | awk -v want="$PKG" -v at="$at" -v a="$a" -v as="$as" -v sysp="$sysp" -v cmds="$cmds" -v free="${free:-0}" -v base="$base" '
+        function js(x) { gsub(/\\/, "\\\\", x); gsub(/"/, "\\\"", x); gsub(/\n/, "\\n", x); gsub(/[\001-\037]/, " ", x); return "\"" x "\"" }
+        function kb(b) { return b ~ /^[0-9]+$/ ? int((b + 1023) / 1024) : 0 }
+        function first(x) { sub(/^ */, "", x); sub(/[ (|].*/, "", x); return x }
+        function have(x,   alt, k, i, y) {
+            k = split(x, alt, "|")
+            for (i = 1; i <= k; i++) { y = first(alt[i]); if (y in inst || y in iprov) return 1 }
+            return 0
+        }
+        function sflush(   k, q, i) {
+            if (sp != "" && st ~ / installed/) {
+                inst[sp] = sv; k = split(pv, q, ","); for (i = 1; i <= k; i++) iprov[first(q[i])] = sp
+                k = split(sd, q, ","); for (i = 1; i <= k; i++) if (first(q[i]) == want) by = (by == "" ? sp : by ", " sp)
+            }
+            sp = ""; sv = ""; pv = ""; sd = ""; st = ""
+        }
+        # Status file: what is installed, what it provides and what needs this one
+        FILENAME != ARGV[1] && !sdone { sflush(); sdone = 1 }
+        FILENAME == ARGV[1] {
+            if (/^Package:/) sp = $2
+            else if (/^Version:/) sv = $2
+            else if (/^Provides:/) { pv = $0; sub(/^Provides: */, "", pv) }
+            else if (/^Depends:/) { sd = $0; sub(/^Depends: */, "", sd) }
+            else if (/^Status:/) st = $0
+            else if (/^$/) sflush()
+            next
+        }
+        # The package list and, if it is installed, its control file
+        /^[ \t]/ { if (indesc) { x = $0; sub(/^[ \t]+/, "", x); if (x == ".") x = ""; desc[p] = desc[p] "\n" x } next }
+        { indesc = 0 }
+        /^Package:/ { p = $2; next }
+        /^Version:/ { if (!(p in ver)) ver[p] = $2; next }
+        /^Section:/ { sec[p] = $2; next }
+        /^Size:/ { sz[p] = $2; next }
+        /^Installed-Size:/ { isz[p] = $2; next }
+        /^Depends:/ { x = $0; sub(/^Depends: */, "", x); dep[p] = x; next }
+        /^Provides:/ { x = $0; sub(/^Provides: */, "", x); k = split(x, q, ","); for (i = 1; i <= k; i++) if (!(first(q[i]) in prov)) prov[first(q[i])] = p; next }
+        /^Description:/ { x = $0; sub(/^Description: */, "", x); if (!(p in desc) || desc[p] == "") { desc[p] = x; indesc = 1 } next }
+        END {
+            if (!(want in ver) && !(want in inst)) { print "NOTFOUND"; exit 2 }
+            # Everything it needs that is not here yet, all the way down
+            n = 0; qn = 0
+            k = split(dep[want], q, ",")
+            for (i = 1; i <= k; i++) { x = q[i]; if (first(x) == "") continue; if (have(x)) { hv = hv (hv == "" ? "" : ",") js(first(x)) } else queue[++qn] = first(x) }
+            for (h = 1; h <= qn; h++) {
+                x = queue[h]
+                if (!(x in ver) && (x in prov)) x = prov[x]
+                if (x in seen || x == want || x in inst || x in iprov || !(x in ver)) continue
+                seen[x] = 1; need[++n] = x; tz += kb(sz[x]); ti += kb(isz[x])
+                m = split(dep[x], r, ",")
+                for (j = 1; j <= m; j++) if (first(r[j]) != "" && !have(r[j])) queue[++qn] = first(r[j])
+            }
+            d = desc[want]; sub(/^[ \t\n]+/, "", d); sub(/[ \t\n]+$/, "", d)
+            printf "{\"name\":%s,\"version\":%s,\"installed\":%s,\"installedVersion\":%s,\"section\":%s,\"sizeKB\":%d,\"isizeKB\":%d,\"description\":%s,",
+                js(want), js(ver[want] != "" ? ver[want] : inst[want]), (want in inst ? "true" : "false"), js(inst[want]), js(sec[want]),
+                kb(sz[want]), kb(isz[want]), js(d)
+            printf "\"addon\":%s,\"addonTitle\":%s,\"addonState\":%s,\"base\":%s,\"neededBy\":%s,\"system\":%s,\"freeKB\":%d,\"have\":[%s],\"needs\":[",
+                js(a), js(at), js(as), (base == 1 ? "true" : "false"), js(by), js(sysp), free, hv
+            for (i = 1; i <= n; i++) printf "%s{\"name\":%s,\"sizeKB\":%d,\"isizeKB\":%d}", (i > 1 ? "," : ""), js(need[i]), kb(sz[need[i]]), kb(isz[need[i]])
+            printf "],\"needsKB\":%d,\"needsIKB\":%d,\"commands\":[", tz, ti
+            k = split(cmds, q, " "); for (i = 1; i <= k; i++) printf "%s%s", (i > 1 ? "," : ""), js(q[i])
+            printf "]}\n"
+        }' "$OPKG_STATUS" - "$ctl" 2>/dev/null)
+    r=$?
+    [ "$r" = 0 ] || error_exit "There's no package called $PKG in Entware's list."
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; return 0; fi
+    printf '%s\n' "$out" | awk '
+        function val(k,   r) { r = $0; if (!match(r, "\"" k "\":\"[^\"]*\"")) return ""; r = substr(r, RSTART + length(k) + 4, RLENGTH - length(k) - 5); return r }
+        { printf "%s  %s\n%s\n", val("name"), val("version"), val("section"); d = val("description"); gsub(/\\n/, "\n", d); print d }'
+}
+
 pkg_add() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     pkg_name_ok "$PKG" || error_exit "That isn't a package name: $PKG"
@@ -3917,7 +4064,7 @@ elif [ "$1" = add ] || [ "$1" = remove ] || [ "$1" = info ] || [ "$1" = password
     shift 2
 fi
 case "$1" in
-    search|pkg-add|pkg-remove|log)
+    search|pkg-add|pkg-remove|pkginfo|log)
         [ -n "${2:-}" ] || error_exit "$1 needs a name, e.g. webos-entware $1 htop"
         case "$1" in search) TERM_ARG=$2 ;; log) LOG_ID=$2 ;; *) PKG=$2 ;; esac
         ACTION=$1
@@ -3940,7 +4087,7 @@ if [ "$1" = web ]; then
 fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates|installed|logs)
+        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates|installed|logs|catalog)
             # add and remove take only options after the name
             [ -z "$ADDON" ] && [ -z "$MOVE_TO" ] || { usage; exit 1; }
             case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
@@ -3949,6 +4096,7 @@ for arg in "$@"; do
         --with-locate) WITH_LOCATE=1 ;;
         --json) JSON=1 ;;
         --refresh) REFRESH=1 ;;
+        --all) ALL=1 ;;
         --check) CHECK_ONLY=1 ;;
         --stdin) PW_FROM=stdin ;;
         --ask) PW_FROM=ask ;;
@@ -4035,6 +4183,8 @@ case "$ACTION" in
     app-update) app_update ;;
     installed) installed_list ;;
     search) search_list ;;
+    catalog) catalog_json ;;
+    pkginfo) pkg_info_json ;;
     pkg-add) pkg_add ;;
     pkg-remove) pkg_remove ;;
     logs) logs_list ;;

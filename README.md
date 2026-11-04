@@ -94,8 +94,12 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
 - **Add-ons:** 25 of them, each with the setup it needs on webOS.  Tools like git, Python, htop, tmux, Vim and a [login banner](#login-banner), and [network services](#network-services) like Tailscale, Samba, File Browser, a DLNA media server, Transmission and Syncthing.  One press adds, finishes setting up or removes one.  A service opens to its address and password, with a QR code for your phone.
 - **Manage from your phone:** a QR code that opens a [dashboard](#manage-from-your-phone) on your phone, signed in, for add-ons and passwords.
-- **Packages:** every package that's installed, with its version and size and **Remove**, and a search field that opens the TV's keyboard.  Type a word like htop or python, and **Install** any of the 2,900+ Entware packages that match, with the same webOS setup `ent install` does.  Packages Entware needs, and ones other packages need, say why they stay.
-- **Package updates:** a screen listing every package with an update, its current and new version, with **Update** for one or **Update all**.  The button shows how many there are, and the app checks Entware's server for new ones once a day.
+- **Packages:** a full screen with three tabs.
+  - **Browse** opens on **Start here**, hand-picked tools that work well on a TV, and lists the 1,100+ Entware packages a person would pick in plain categories: Shell & terminal, Editors, Files & backup, Downloads & torrents, Media & audio, Network tools, VPN & security, Servers & web, Programming, System & monitoring, and Fun & games.  Libraries and plugin modules stay out of the way unless you turn on **Show libraries too**.
+  - **Every package has a page:** its whole description, how much it downloads and how much room it takes with everything it needs, your free space, what else it installs, and tips for using it on a TV.  When an [add-on](#add-ons) covers it, adding the add-on is offered first.  **Install** uses the same webOS setup `ent install` does.
+  - **Search** from any tab, with the TV's keyboard.  Name matches come first, then matches in the description, with a filter for each category.
+  - **Installed** groups what's here: installed on their own, from add-ons, no longer needed, part of Entware, and libraries.  A package's page has **Remove**, or says why it stays.
+  - **Updates** lists every package with an update, with **Update** for one or **Update all**.  The main screen's **Package updates** button shows how many there are and opens this tab, and the app checks Entware's server for new ones once a day.
 - **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check and logs:** everything `doctor` looks at, on screen, plus this boot's log from the boot script and the logs of the last 10 tasks the app ran.
@@ -110,16 +114,19 @@ The easiest way in.  It runs the same installer underneath, as root through the 
   <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, Full check and logs, Report for GitHub and Uninstall Entware">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen at the network services: Tailscale asking you to sign in, and Samba, File Browser, the DLNA media server, Transmission and Syncthing running">
 </p>
-<p align="center"><img src="images/app-packages.gif" width="720" alt="Animated: the Packages screen lists what's installed, then a search for top finds atop, htop and iftop, and installing iftop runs in the background until it shows Installed"></p>
-
 <p align="center">
-  <img src="images/app-packages.png" width="49%" alt="The Packages screen: 121 packages installed, counted by group (on their own, from add-ons, no longer needed, part of Entware, libraries), with each package's version, section, size, date added and description">
+  <img src="images/app-packages.png" width="49%" alt="Packages, Browse tab: 1,113 packages in categories down the left, and Start here showing htop, mc, rclone, ncdu, tmux, aria2, fzf, zsh, ffmpeg, yt-dlp, micro and nmap, each with a one-line description and Installed or Add-on sets it up">
+  <img src="images/app-package-page.png" width="49%" alt="The yt-dlp page: its description, a tip to save videos where the TV's media player can find them, a 13.1 MB download with 15 more packages, 32.5 MB once installed, 1.3 GB free, what else it installs, and Install yt-dlp">
+</p>
+<p align="center">
+  <img src="images/app-packages-search.png" width="49%" alt="A search for video: 18 matches with the word marked, ffmpeg, yt-dlp, ffprobe, mediainfo, minidlna (Installed) and mkvtoolnix, with a filter chip for each category">
+  <img src="images/app-packages-installed.png" width="49%" alt="The Installed tab: 121 packages, 336 MB, with chips for On their own, From add-ons, No longer needed, Entware and Libraries, and each package's version, size and Remove">
+</p>
+<p align="center">
+  <img src="images/app-updates.png" width="49%" alt="The Updates tab: Update all 2 packages, curl and nmap with their current and new versions, each with Update, and Check again">
   <img src="images/app-logs.png" width="49%" alt="Full check and logs: the full check, this boot's log, and recent tasks like Install htop and Add banner, each with View">
 </p>
-<p align="center">
-  <img src="images/app-updates.png" width="49%" alt="The Package updates screen: Update all 2 packages, htop 3.4.1-1 to 3.4.2-1 and curl 8.11.1-1 to 8.12.0-1, each with Update, and Check again">
-  <img src="images/app-report.gif" width="49%" alt="Animated: Report for GitHub offers It works on my TV and Something went wrong, each showing a QR code with the TV's details filled in">
-</p>
+<p align="center"><img src="images/app-report.gif" width="49%" alt="Animated: Report for GitHub offers It works on my TV and Something went wrong, each showing a QR code with the TV's details filled in"></p>
 
 **Get it:** [from the Homebrew Channel](#from-the-homebrew-channel-recommended), in four steps with screenshots.
 
@@ -307,6 +314,8 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware web start` | The [phone dashboard](#manage-from-your-phone): prints its address and sign-in code.  `web stop` stops it |
 | `webos-entware installed` | List installed packages with their version, size and what needs them (`--json` for scripts) |
 | `webos-entware search <word>` | Search Entware's packages, names first, marking what's installed |
+| `webos-entware pkginfo <name>` | All about one package: its whole description, sizes, and what else it would install (`--json` for scripts) |
+| `webos-entware catalog --json` | The packages the app's Browse tab lists, with their category data; `--all` for libraries and modules too |
 | `webos-entware pkg-add <name>` | Install one package with its webOS setup, like `ent install` |
 | `webos-entware pkg-remove <name>` | Uninstall one package.  Packages Entware needs, and ones other packages need, are kept |
 | `webos-entware logs` | This boot's boot script log and the TV app's last 10 tasks.  `log <name>` shows one |

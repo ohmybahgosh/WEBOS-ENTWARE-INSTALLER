@@ -66,6 +66,36 @@ function demo(scenario) {
         { name: 'htop', version: '3.4.1-1', description: 'Interactive processes viewer' },
         { name: 'tmux', version: '3.5a-1', description: 'Terminal multiplexer' }
     ];
+    // catalog --json: what Browse lists (libfoo and libncurses only with --all)
+    const CATALOG = [
+        { n: 'aria2', v: '1.37.0-4', s: 'net', z: 840, i: 1940, d: 'aria2 is a lightweight multi-protocol download utility', a: '', w: 0 },
+        { n: 'bash', v: '5.3-2', s: 'utils', z: 700, i: 1217, d: 'The GNU Bourne Again SHell', a: '', w: 0 },
+        { n: 'curl', v: '8.12.0-1', s: 'net', z: 90, i: 200, d: 'A client-side URL transfer utility', a: 'curl', w: 1 },
+        { n: 'ffmpeg', v: '6.1.4-1', s: 'multimedia', z: 109, i: 250, d: 'FFmpeg can record, convert and stream digital audio and video', a: '', w: 0 },
+        { n: 'htop', v: '3.4.1-1', s: 'admin', z: 130, i: 290, d: 'Htop is an ncursed-based process viewer', a: 'htop', w: 0 },
+        { n: 'jq', v: '1.7.1-1', s: 'utils', z: 120, i: 250, d: 'Command-line JSON processor', a: 'jq', w: 0 },
+        { n: 'nethack', v: '3.6.7-1', s: 'games', z: 900, i: 2100, d: 'The classic dungeon game', a: '', w: 0 },
+        { n: 'rclone', v: '1.73.2-1', s: 'net', z: 22905, i: 69320, d: 'Rclone is a command line program to sync files and directories to and from: Google Drive', a: 'rclone', w: 0 },
+        { n: 'tmux', v: '3.5a-1', s: 'utils', z: 414, i: 812, d: 'Terminal multiplexer', a: 'tmux', w: 0 },
+        { n: 'unzip', v: '6.0-9', s: 'utils', z: 112, i: 260, d: 'InfoZIP unzip program', a: '', w: 1 }
+    ];
+    const LIBS = [
+        { n: 'libfoo', v: '1.0-1', s: 'libs', z: 20, i: 40, d: 'Leftover library, foo', a: '', w: 0 },
+        { n: 'libncurses', v: '6.4-3', s: 'libs', z: 150, i: 300, d: 'Terminal handling library', a: '', w: 0 }
+    ];
+    const DESCS = { rclone: 'Rclone is a command line program to sync files and directories to and from:\nGoogle Drive\nDropbox\nMicrosoft OneDrive\nAmazon S3\nBackblaze B2\nThe local filesystem',
+        aria2: 'aria2 is a lightweight multi-protocol & multi-source command-line download\nutility' };
+    const NEEDS = { aria2: [{ name: 'libssh2', sizeKB: 100, isizeKB: 300 }] };
+    function pkgInfo(n) {
+        const c = CATALOG.concat(LIBS).find((x) => x.n === n), i = INSTALLED.find((x) => x.name === n);
+        if (!c && !i) { return 'There\'s no package called ' + n + ' in Entware\'s list.'; }
+        const ad = c && c.a ? ADDONS.find((x) => x.id === c.a) : null, needs = i ? [] : (NEEDS[n] || []);
+        return JSON.stringify({ name: n, version: c ? c.v : i.version, installed: !!i, installedVersion: i ? i.version : '', section: c ? c.s : i.section,
+            sizeKB: c ? c.z : 0, isizeKB: c ? c.i : i.sizeKB, description: DESCS[n] || (c ? c.d : i.description),
+            addon: c ? c.a : '', addonTitle: c && c.a ? (ad ? ad.title : c.a) : '', addonState: c && c.a ? (ad ? ad.state : (i ? 'installed' : 'notInstalled')) : '',
+            base: !!(i && i.base), neededBy: i ? i.neededBy : '', system: c && c.w ? '/usr/bin/' + n : '', freeKB: 1700000, have: ['libc', 'libncurses'],
+            needs, needsKB: needs.reduce((t, x) => t + x.sizeKB, 0), needsIKB: needs.reduce((t, x) => t + x.isizeKB, 0), commands: i ? [n] : [] });
+    }
     const TASKS = [{ id: '1762200000-0-install', name: 'install', when: '2026-11-03 20:00', exit: 0 }];
     window.ENTWARE_CALLS = [];
     window.ENTWARE_DEMO = function (args, cb) {
@@ -89,6 +119,10 @@ function demo(scenario) {
         }
         if (args === 'status') { return reply('Entware status\n  Everything looks right.\n'); }
         if (args === 'installed --json') { return reply(JSON.stringify(INSTALLED)); }
+        if (args === 'catalog --json') { return reply(JSON.stringify(CATALOG)); }
+        if (args === 'catalog --json --all') { return reply(JSON.stringify(CATALOG.concat(LIBS))); }
+        const pi = /^pkginfo ([A-Za-z0-9._+-]+) --json$/.exec(args);
+        if (pi) { return reply(pkgInfo(pi[1])); }
         let s = /^search ([A-Za-z0-9._+-]+) --json$/.exec(args);
         if (s) { return reply(JSON.stringify(ALL.filter((x) => x.name.indexOf(s[1]) >= 0 || x.description.toLowerCase().indexOf(s[1]) >= 0).map((x) => Object.assign({ installed: !!INSTALLED.find((i) => i.name === x.name) }, x)))); }
         if (args === 'logs --json') { return reply(JSON.stringify({ boot: ['20:00:01 boot script started', '20:00:02 mounted /opt'], current: 'none', tasks: TASKS })); }
@@ -108,9 +142,11 @@ function demo(scenario) {
                 const up = /^upgrade ?(.*)$/.exec(job.name);
                 if (up) { UPDATES = up[1] ? UPDATES.filter((x) => x.name !== up[1]) : []; }
                 const a = /^(add|remove) (.*)$/.exec(job.name);
-                if (a) { ADDONS.find((x) => x.id === a[2]).state = a[1] === 'add' ? 'installed' : 'notInstalled'; }
+                const ad = a && ADDONS.find((x) => x.id === a[2]);
+                if (ad) { ad.state = a[1] === 'add' ? 'installed' : 'notInstalled'; }
+                if (a && !ad && a[1] === 'add') { INSTALLED.push({ name: a[2], version: '1.0-1', sizeKB: 69320, auto: false, neededBy: '', base: false, addon: a[2], addonTitle: a[2], section: 'net', description: 'From its add-on', installed: 1762200000 }); }
                 const pk = /^pkg-(add|remove) (.*)$/.exec(job.name);
-                if (pk && pk[1] === 'add') { INSTALLED.push({ name: pk[2], version: '3.4.1-1', sizeKB: 400, auto: false, neededBy: '', base: false, addon: '', section: 'admin', description: 'Interactive processes viewer', installed: 1762200000 }); }
+                if (pk && pk[1] === 'add') { INSTALLED.push({ name: pk[2], version: (CATALOG.find((x) => x.n === pk[2]) || { v: '3.4.1-1' }).v, sizeKB: 400, auto: false, neededBy: '', base: false, addon: '', section: 'admin', description: 'Interactive processes viewer', installed: 1762200000 }); }
                 if (pk && pk[1] === 'remove') { INSTALLED.splice(INSTALLED.findIndex((x) => x.name === pk[2]), 1); }
                 if (job.name === 'move appstore') { Object.assign(base, { location: 'appstore', userFreeMB: 181, appFreeMB: 1639, freeMB: 1639 }); }
             }
@@ -290,11 +326,12 @@ function check(name, cond) {
     await press(page, 'ArrowUp', 10);
     await press(page, 'ArrowDown', order4.indexOf('upgrade'));
     await press(page, 'Enter');
-    await page.waitForFunction(() => document.getElementById('overlay-title').textContent === 'Package updates' && document.querySelector('.addon'));
-    let rows = await page.$$eval('.addon b', (bs) => bs.map((b) => b.textContent));
-    check('it lists Update all, each package and Check again', rows.join('|') === 'Update all 2 packages|htop|curl|Check again');
-    check('each package shows its versions', await page.$eval('#addon-list', (l) => /3\.4\.1-1\s+→\s+3\.4\.2-1/.test(l.textContent)));
-    check('and when the list is from', /Package list from 2026-11-02 20:58/.test(await page.textContent('#overlay-body')));
+    await page.waitForFunction(() => document.querySelector('#store .tab.on') && /Updates/.test(document.querySelector('#store .tab.on').textContent) && document.querySelector('#store .srow'));
+    let rows = await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent));
+    check('Package updates opens Packages on its Updates tab: Update all, each package and Check again', rows.join('|') === 'Update all 2 packages|htop|curl|Check again');
+    check('each package shows its versions', /3\.4\.1-1\s+→\s+3\.4\.2-1/.test(await page.textContent('#store-scroll')));
+    check('and when the list is from', /Package list from 2026-11-02 20:58/.test(await page.textContent('#store')));
+    check('the tab shows the count', /Updates\s*2/.test(await page.$eval('#store .tab.on', (t) => t.textContent)));
     await page.screenshot({ path: path.join(OUT, '10-package-updates.png') });
     await press(page, 'ArrowDown');
     await press(page, 'Enter');
@@ -303,15 +340,15 @@ function check(name, cond) {
     await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
     check('updates just that package in the background', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job upgrade htop') && /Update htop: done/.test(await overlayTitle(page)));
     await press(page, 'Enter');
-    await page.waitForFunction(() => document.getElementById('overlay-title').textContent === 'Package updates' && document.querySelector('.addon'));
-    rows = await page.$$eval('.addon b', (bs) => bs.map((b) => b.textContent));
+    await page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden') && document.querySelectorAll('#store .srow').length === 2);
+    rows = await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent));
     check('then returns to the list, without htop', rows.join('|') === 'curl|Check again');
-    await press(page, 'ArrowDown');
+    await press(page, 'ArrowDown', 5);
     await press(page, 'Enter');
-    await page.waitForFunction(() => document.getElementById('overlay-title').textContent === 'Package updates' && document.querySelector('.addon'));
-    check('Check again downloads the package list', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('updates --json --refresh'));
+    await page.waitForFunction(() => window.ENTWARE_CALLS.includes('updates --json --refresh') && document.getElementById('overlay').classList.contains('hidden'));
+    check('Check again downloads the package list', true);
     await press(page, 'Escape');
-    check('BACK closes it', await page.$eval('#overlay', (o) => o.classList.contains('hidden')));
+    check('BACK closes it', await page.$eval('#store', (s) => s.classList.contains('hidden')));
     await page.waitForFunction(() => /1 update available/.test(document.getElementById('upgrade-hint').textContent));
     check('and the button now says 1 update', true);
 
@@ -407,73 +444,143 @@ function check(name, cond) {
     check('BACK again closes it', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
 
     console.log('== Packages');
+    const shown = () => page.evaluate(() => document.getElementById('overlay').classList.contains('hidden') && !document.getElementById('store').classList.contains('hidden'));
+    const focused = () => page.$eval('#store .focus', (e) => e.textContent);
+    const settle = () => page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden') && document.querySelector('#store .focus'));
     await press(page, 'ArrowUp', 10);
     await press(page, 'ArrowDown', order2.indexOf('packages'));
     await press(page, 'Enter');
-    await page.waitForSelector('#pkg-q');
-    check('Packages opens with a search field and what\'s installed', /5 packages installed/.test(await page.textContent('#overlay-body')) && (await page.$$('.addon')).length === 6);
-    check('packages are grouped: own, add-ons, no longer needed, Entware, libraries',
-        /Installed on their own.*From add-ons.*No longer needed.*Part of Entware.*Libraries and helpers/.test(await page.$$eval('.pkg-group', (gs) => gs.map((g) => g.textContent).join('|'))));
-    check('each row says what it is and what you can do', await page.$$eval('.addon', (rs) =>
-        /jq/.test(rs[1].textContent) && /Remove/.test(rs[1].textContent) && /1\.7\.1-1/.test(rs[1].textContent) && /JSON/.test(rs[1].textContent) &&
-        /tmux/.test(rs[2].textContent) && /tmux add-on/.test(rs[2].textContent) &&
-        /libfoo/.test(rs[3].textContent) && /Remove/.test(rs[3].textContent) && /nothing needs it now/.test(rs[3].textContent) &&
-        /bash/.test(rs[4].textContent) && /Entware/.test(rs[4].textContent) && !/Remove/.test(rs[4].textContent) &&
-        /libncurses/.test(rs[5].textContent) && /Needed/.test(rs[5].textContent) && /needed by bash, htop/.test(rs[5].textContent) && !/Remove/.test(rs[5].textContent)));
-    check('the summary counts each group', /1 on their own/.test(await page.$eval('.pkg-sum', (e) => e.textContent.replace(/\s+/g, ' '))));
-    await press(page, 'ArrowDown');
-    await press(page, 'PageDown');
-    check('CH+ jumps to the next group', /tmux/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
-    await press(page, 'PageDown', 2);
-    check('and again', /bash/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
-    await press(page, 'PageUp');
-    check('CH- jumps back', /libfoo/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
-    await press(page, 'ArrowUp', 10);
+    await page.waitForFunction(() => document.querySelector('#store .tile'));
+    check('Packages opens full screen on Browse, at Start here', await shown() && /Browse\s*10/.test(await page.$eval('#store .tab.on', (t) => t.textContent)) &&
+        /Start here/.test(await page.$eval('#store .rc.on', (r) => r.textContent)));
+    let tiles = await page.$$eval('#store .tile', (ts) => ts.map((t) => t.textContent));
+    check('Start here shows the picks that are in Entware, in order', tiles.map((t) => t.split(/\s/)[0].replace(/(System|Files|Shell|Downloads|Media|Fun).*/, '')).join(' ') === 'htop rclone tmux aria2 ffmpeg jq curl nethack');
+    check('with a plain one-liner, and what is installed or has an add-on', /Google Drive, Dropbox/.test(tiles[1]) && /Add-on sets it up/.test(tiles[0]) && /Installed/.test(tiles[2]) && !/Installed|Add-on/.test(tiles[3]));
+    let rail = await page.$$eval('#store .rc', (rs) => rs.map((r) => r.textContent));
+    check('the categories list what is in each, and libraries are off', rail.join('|') === '★Start here8|>_Shell & terminal3|▤Files & backup2|↓Downloads & torrents2|▶Media & audio1|▥System & monitoring1|♞Fun & games1|⚙Show libraries tooOff');
+    check('the catalog and what is installed are read once', (await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'catalog --json').length)) === 1);
     await page.screenshot({ path: path.join(OUT, '13-packages.png') });
-    await press(page, 'Enter');
-    check('OK on the search field puts the cursor in it', await page.evaluate(() => document.activeElement && document.activeElement.id === 'pkg-q'));
-    await page.keyboard.type('top');
-    await press(page, 'Enter');
-    await page.waitForFunction(() => /match "top"/.test(document.getElementById('overlay-body').textContent));
-    check('searching lists what matches, marking what\'s installed', await page.$$eval('.addon', (rs) => rs.length === 3 && /btop/.test(rs[1].textContent) && /Install/.test(rs[1].textContent) && /htop/.test(rs[2].textContent)));
-    check('and the first result has focus', /btop/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
-    await page.screenshot({ path: path.join(OUT, '14-packages-search.png') });
     await press(page, 'ArrowDown');
+    await settle();
+    check('▼ on the categories shows the next one straight away', /Shell & terminal/.test(await page.textContent('#store h2')) &&
+        (await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent))).join(' ') === 'tmux jq bash');
+    check('picks first, each marked installed', (await page.$$eval('#store .srow .pill', (ps) => ps.map((p) => p.textContent))).join('|') === 'Installed|Installed|Installed');
+    await press(page, 'PageDown');
+    await settle();
+    check('CH+ goes to the next category', /Files & backup/.test(await page.textContent('#store h2')) && /webOS has one/.test(await page.$$eval('#store .srow', (rs) => rs[1].textContent)));
+    await press(page, 'PageDown');
+    await settle();
+    await press(page, 'ArrowRight');
+    check('▶ goes into the list', /^aria2/.test(await focused()));
+    await page.screenshot({ path: path.join(OUT, '13b-packages-category.png') });
     await press(page, 'Enter');
-    check('asks before installing', /Install htop\?/.test(await overlayTitle(page)) && /Interactive processes viewer/.test(await page.textContent('#overlay-body')));
+    await page.waitForSelector('#store .s-page');
+    let pg = await page.textContent('#store .s-page');
+    pg = pg.replace(/\s+/g, ' ');
+    check('OK opens its page: the whole description, sizes and what else it installs', /multi-source command-line download utility/.test(pg) &&
+        pg.indexOf('Download940 KB (with 1 more package)') >= 0 && /Also installslibssh2/.test(pg) && /Free on your TV1\.6 GB/.test(pg));
+    check('with Install as the first choice', /^Install aria2/.test(await focused()));
+    await page.screenshot({ path: path.join(OUT, '15-package-page.png') });
+    await press(page, 'Enter');
+    check('asks before installing, with what it downloads', /Install aria2\?/.test(await overlayTitle(page)) && /Downloads 940 KB, with 1 package it needs/.test(await page.textContent('#overlay-body')));
     await press(page, 'Enter');
     await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
-    check('installs it as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job pkg-add htop') && /Install htop: done/.test(await overlayTitle(page)));
+    check('installs it as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job pkg-add aria2'));
     await press(page, 'Enter');
-    await page.waitForFunction(() => /match "top"/.test(document.getElementById('overlay-body').textContent));
-    check('closing the result returns to the search, with htop installed', await page.$$eval('.addon', (rs) => /htop/.test(rs[2].textContent) && /Installed/.test(rs[2].textContent)));
-    await press(page, 'ArrowUp', 5);
+    await page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden') && /Remove aria2/.test((document.querySelector('#store .s-page') || {}).textContent || ''));
+    check('closing the result shows its page again, now installed, with Remove', /installed/.test(await page.textContent('#store .psub')));
+    await press(page, 'Escape');
+    await settle();
+    check('BACK goes back to the list, on the same package, now Installed', /^aria2.*Installed/.test(await focused()));
+    check('without reading the whole catalog again', (await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'catalog --json').length)) === 1);
+    await press(page, 'PageUp');
+    await settle();
     await press(page, 'Enter');
+    await page.waitForSelector('#store .s-page');
+    check('rclone\'s list of clouds shows as a list', (await page.$$eval('#store .pdesc li', (ls) => ls.map((l) => l.textContent))).slice(0, 2).join('|') === 'Google Drive|Dropbox');
+    check('its add-on comes first, then the plain package', (await page.$$eval('#store .sbtn b', (bs) => bs.map((b) => b.textContent))).join('|') === 'Add the rclone add-on|Install just the package|More in Files & backup');
+    check('with tips for the TV', /sets it up for the TV/.test(await page.textContent('#store .pbox')) && /Use web browser/.test(await page.textContent('#store .pbox')));
+    await press(page, 'Enter');
+    check('asks before adding the add-on', /Add the rclone add-on\?/.test(await overlayTitle(page)));
+    await press(page, 'Escape');
+    await settle();
+    check('BACK on the question shows the page again', /^Add the rclone add-on/.test(await focused()));
+    await press(page, 'Escape');
+    await settle();
+
+    console.log('== Packages: search');
+    await press(page, 'ArrowUp', 2);
+    check('▲ from the list goes up to the sort chips, then the tabs', /^Browse/.test(await focused()));
+    await page.focus('#store-q');
+    await page.keyboard.type('top');
+    await press(page, 'Enter');
+    await page.waitForFunction(() => document.querySelector('#store .ghead'));
+    await settle();
+    check('a search lists name matches, with the word marked', /Name matches/.test(await page.textContent('#store')) && /^htop/.test(await focused()) && (await page.$eval('#store .srow .mark', (m) => m.textContent)) === 'top');
+    check('and offers to search libraries too', /Search every package, libraries too/.test(await page.textContent('#store-scroll')));
+    await page.screenshot({ path: path.join(OUT, '14-packages-search.png') });
+    await page.focus('#store-q');
     await page.keyboard.press('Control+A');
-    await page.keyboard.press('Backspace');
+    await page.keyboard.type('foo');
     await press(page, 'Enter');
-    await page.waitForFunction(() => /6 packages installed/.test(document.getElementById('overlay-body').textContent));
-    check('clearing the search goes back to what\'s installed', true);
+    await settle();
+    check('nothing in what Browse lists', /Nothing matches "foo"/.test(await page.textContent('#store')) && /^Search every package/.test(await focused()));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => window.ENTWARE_CALLS.includes('catalog --json --all') && /libfoo/.test(document.getElementById('store').textContent));
+    await settle();
+    check('searching libraries too finds it, in its own category', /^libfoo/.test(await focused()) && /Libraries & modules 1/.test(await page.textContent('#store .s-chips')) && /Libraries included/.test(await page.textContent('#store')));
+    await press(page, 'Escape');
+    await settle();
+    rail = await page.$$eval('#store .rc', (rs) => rs.map((r) => r.textContent));
+    check('BACK clears the search, and the libraries now have a category', !(await page.$eval('#store-q', (q) => q.value)) && rail.indexOf('⚙Libraries & modules2') >= 0 && rail.indexOf('⚙Show libraries tooOn') >= 0);
+
+    console.log('== Packages: installed');
+    await press(page, 'ArrowUp', 15);
+    await press(page, 'ArrowRight');
+    await page.waitForFunction(() => /Installed/.test(document.querySelector('#store .tab.on').textContent) && document.querySelector('#store .srow'));
+    await settle();
+    await press(page, 'ArrowDown');
+    let chips = await page.$$eval('#store .chip', (cs) => cs.map((c) => c.textContent));
+    check('Installed groups what\'s here, with a chip for each group', chips.join('|') === 'All 6  ·  2.9 MB|On their own 2|From add-ons 1|No longer needed 1|Entware 1|Libraries 1');
+    check('in order: on their own, add-ons, no longer needed, Entware, libraries', (await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent))).join(' ') === 'aria2 jq tmux libfoo bash libncurses');
+    check('each says what OK does', (await page.$$eval('#store .srow .pill', (ps) => ps.map((p) => p.textContent))).join('|') === 'Remove|Remove|tmux add-on|Remove|Entware|Needed' &&
+        /Needed by bash, htop/.test(await page.$$eval('#store .srow', (rs) => rs[5].textContent)));
+    await page.screenshot({ path: path.join(OUT, '16-packages-installed.png') });
+    await press(page, 'ArrowDown');
+    await press(page, 'PageDown');
+    check('CH+ jumps to the next group', /^tmux/.test(await focused()));
+    await press(page, 'Enter');
+    await page.waitForSelector('#store .s-page');
+    check('an add-on\'s package is removed with its add-on', /^Remove the tmux add-on/.test(await focused()));
+    await press(page, 'Enter');
+    check('and asks first', /Remove the tmux add-on\?/.test(await overlayTitle(page)));
+    await press(page, 'Escape');
+    await settle();
+    await press(page, 'Escape');
+    await settle();
+    await press(page, 'PageDown', 2);
+    check('to Part of Entware', /^bash/.test(await focused()));
+    await press(page, 'Enter');
+    await page.waitForSelector('#store .s-page');
+    check('bash says it stays, and OK on that does nothing', /^Part of Entware/.test(await focused()));
+    await press(page, 'Enter');
+    check('(it stays on the page)', await shown() && !!(await page.$('#store .s-page')));
+    await press(page, 'Escape');
+    await settle();
     await press(page, 'ArrowDown');
     await press(page, 'Enter');
-    check('asks before removing a package', /Remove htop\?/.test(await overlayTitle(page)));
-    const reads = await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length);
+    await page.waitForSelector('#store .s-page');
+    check('a library says what needs it', /^Needed by bash, htop/.test(await focused()));
     await press(page, 'Escape');
-    await page.waitForSelector('#pkg-q');
-    check('BACK on the question shows the list again straight away, without reading it again',
-        await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length) === reads && /htop/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
-    await press(page, 'ArrowDown', 2);
+    await settle();
+    await press(page, 'ArrowUp', 6);
+    check('▲ from the top of the list goes to the group chips', /^All 6/.test(await focused()));
+    await press(page, 'ArrowRight');
     await press(page, 'Enter');
-    check('an add-on\'s package is removed with its add-on', /Remove the tmux add-on\?/.test(await overlayTitle(page)));
+    await settle();
+    check('a group chip shows just that group', (await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent))).join(' ') === 'aria2 jq');
     await press(page, 'Escape');
-    await page.waitForSelector('#pkg-q');
-    await press(page, 'ArrowDown', 2);
-    await press(page, 'Enter');
-    check('bash says it stays', /part of Entware/.test(await page.textContent('#overlay-body')));
-    await press(page, 'Escape');
-    await page.waitForSelector('#pkg-q');
-    await press(page, 'Escape');
-    check('BACK closes Packages', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
+    check('BACK closes Packages', await page.$eval('#store', (s) => s.classList.contains('hidden')) && /Packages/.test(await page.evaluate(() => document.activeElement.textContent)));
     check('no page errors', errors.length === 0);
     if (errors.length) { console.log(errors.join('\n')); }
     await page.close();

@@ -28,7 +28,7 @@
       <div class="btn btn-update" tabindex="0" data-action="update" style="display:none"><span><span id="update-title">Update available</span><small id="update-hint">downloads, checks and installs it</small></span></div>
       <div class="btn btn-primary" tabindex="0" data-action="install"><span><span id="install-title">Install Entware</span><small id="install-hint">about two minutes, needs internet</small></span></div>
       <div class="btn" tabindex="0" data-action="upgrade" style="display:none"><span>Package updates<small id="upgrade-hint">see what can be updated</small></span></div>
-      <div class="btn" tabindex="0" data-action="packages" style="display:none"><span>Packages<small>search, install and remove any package</small></span></div>
+      <div class="btn" tabindex="0" data-action="packages" style="display:none"><span>Packages<small>browse 1,100+ apps and tools, or see what's installed</small></span></div>
       <div class="btn" tabindex="0" data-action="addons" style="display:none"><span>Add-ons<small>Tailscale, file sharing, git, Python and more</small></span></div>
       <div class="btn" tabindex="0" data-action="move" style="display:none"><span>Move to app storage<small>more room, and kept through resets</small></span></div>
       <div class="btn" tabindex="0" data-action="doctor"><span>Full check and logs<small>everything doctor looks at, and recent tasks</small></span></div>
@@ -46,6 +46,8 @@
   </footer>
 </div>
 
+<div id="store" class="store hidden"></div>
+
 <div id="overlay" class="overlay hidden">
   <div class="panel">
     <div id="overlay-title" class="panel-title"></div>
@@ -56,6 +58,7 @@
 
 <script src="vendor/qrcode.js"></script>
 <script src="whatsnew.js"></script>
+<script src="catalog.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

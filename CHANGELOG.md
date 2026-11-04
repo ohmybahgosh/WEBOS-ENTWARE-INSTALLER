@@ -2,6 +2,19 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.14.0] - 2026-11-04
+
+### Added
+
+- **Browse Entware's packages from the TV app:** Packages is now a full screen with three tabs: **Browse**, **Installed** and **Updates**.  Browse opens on **Start here**, a hand-picked set of tools that work well on a TV, and lists the 1,100+ packages a person would pick in plain categories (Shell & terminal, Files & backup, Downloads & torrents, Media & audio, Network tools and more).  Libraries and plugin modules are hidden unless you turn on **Show libraries too**.
+- **A page for every package:** its whole description, how much it downloads and how much space it takes with everything it needs, your free space, what else it installs and what you already have, and tips for using it on a TV.  When an add-on covers a package, adding the add-on is offered first.
+- **Search from any tab:** name matches come first, then matches in the description, with the word marked and a filter for each category.  If nothing matches, one more press searches libraries too.
+- **webos-entware pkginfo NAME** shows everything about one package, and **webos-entware catalog** lists the packages Browse shows, as JSON (`--all` for libraries too).
+
+### Changed
+
+- **Installed and Updates are tabs of Packages:** Installed has a chip for each group, and OK on a package opens its page, with Remove (or why it stays).  **Package updates** on the main screen opens the Updates tab.
+
 ## [2.13.2] - 2026-11-04
 
 ### Changed
