@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.14.1] - 2026-11-04
+
+### Fixed
+
+- **Another build of an installed program now counts as installed in Browse:** with nano-full installed, nano and nano-plus showed as not installed, and **Hide installed** kept them.  Builds of one program (like nano, nano-full and nano-plus, vim and vim-full, or wget-ssl and wget-nossl) now say **Have nano-full**, hide with what's installed, and their page says you don't need both.
+
 ## [2.14.0] - 2026-11-04
 
 ### Added

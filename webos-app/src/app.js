@@ -708,6 +708,19 @@
         }
         return 'other';
     }
+    // Builds of one program, like nano, nano-full and nano-plus, or wget-ssl
+    // and wget-nossl: with one installed, the others count as installed too
+    var VARIANT = /-(full|fuller|plus|tiny|mini|ssl|nossl|openssl|gnutls|mbedtls|wolfssl|nts)$/;
+    var FAMILY = { luajit2: 'luajit' };
+    var installedFamily = {};
+    function family(n) { return FAMILY[n] || n.replace(VARIANT, ''); }
+    // The other build of n that's installed, if n itself isn't
+    function haveVariant(n) {
+        if (installedMap[n]) { return null; }
+        var v = installedFamily[family(n)];
+        return v && v !== n ? v : null;
+    }
+    function isInstalled(n) { return !!(installedMap[n] || haveVariant(n)); }
     function blurb(p) { return CAT.blurbs[p.n] || p.d || ''; }
     function rank(p) { return p.n in featuredRank ? featuredRank[p.n] : (CAT.blurbs[p.n] ? 100 : 1000); }
     function byName(x, y) { return x.n < y.n ? -1 : (x.n > y.n ? 1 : 0); }
@@ -731,6 +744,7 @@
     // it, or that webOS has a command by that name
     function pkgPill(p) {
         if (installedMap[p.n]) { return updFor(p.n) ? ['Update', 'pill-warn'] : ['Installed', 'pill-ok']; }
+        if (haveVariant(p.n)) { return ['Have ' + haveVariant(p.n), 'pill-ok']; }
         if (p.a) { return ['Add-on sets it up', 'pill-addon']; }
         if (p.w) { return ['webOS has one', 'pill-dim']; }
         return null;
@@ -783,7 +797,9 @@
                 if (!l) { return 'Couldn\'t list the packages'; }
                 installedList = l;
                 installedMap = {};
+                installedFamily = {};
                 l.forEach(function (p) { installedMap[p.name] = p; });
+                l.forEach(function (p) { var f = family(p.name); if (!installedFamily[f] || p.name === f) { installedFamily[f] = p.name; } });
                 fresh.packages = true;
             }]);
         }
@@ -873,7 +889,7 @@
                 }).join('') + '</div></div>';
         } else {
             var c = catById[store.cat] || catById.other;
-            var rows = list.filter(function (p) { return p.c === c.id && !(store.hideInst && installedMap[p.n]); });
+            var rows = list.filter(function (p) { return p.c === c.id && !(store.hideInst && isInstalled(p.n)); });
             rows.sort(store.sort === 'az' ? byName : (store.sort === 'small' ? function (x, y) { return (x.z - y.z) || byName(x, y); } :
                 function (x, y) { return (rank(x) - rank(y)) || byName(x, y); }));
             store.chips = [{ id: 'useful', title: 'Most useful', on: store.sort === 'useful' }, { id: 'az', title: 'A to Z', on: store.sort === 'az' },
@@ -1084,6 +1100,7 @@
             if (have.length) { facts.push(['Already have', esc(names(have, 4))]); }
             if (d.freeKB && d.freeKB < use) { tips.unshift('There isn\'t enough free space for it.  Free some up, or move Entware to app storage.'); }
             else if (use > 51200) { tips.push('It\'s big: about ' + kb(use) + ' once installed, with what it needs.'); }
+            if (haveVariant(d.name)) { tips.unshift('You already have ' + haveVariant(d.name) + ', another build of the same program, so you don\'t need this one too.'); }
             if (d.system) { tips.push('webOS already has its own ' + d.system + '.  Once this is installed, SSH logins use Entware\'s, which comes first on the PATH.'); }
             if (addonOff) { tips.unshift('The ' + d.addonTitle + ' add-on installs this and sets it up for the TV.'); }
         } else {

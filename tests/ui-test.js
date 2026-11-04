@@ -74,6 +74,7 @@ function demo(scenario) {
         { n: 'ffmpeg', v: '6.1.4-1', s: 'multimedia', z: 109, i: 250, d: 'FFmpeg can record, convert and stream digital audio and video', a: '', w: 0 },
         { n: 'htop', v: '3.4.1-1', s: 'admin', z: 130, i: 290, d: 'Htop is an ncursed-based process viewer', a: 'htop', w: 0 },
         { n: 'jq', v: '1.7.1-1', s: 'utils', z: 120, i: 250, d: 'Command-line JSON processor', a: 'jq', w: 0 },
+        { n: 'jq-full', v: '1.7.1-1', s: 'utils', z: 300, i: 700, d: 'Command-line JSON processor, with all its options', a: '', w: 0 },
         { n: 'nethack', v: '3.6.7-1', s: 'games', z: 900, i: 2100, d: 'The classic dungeon game', a: '', w: 0 },
         { n: 'rclone', v: '1.73.2-1', s: 'net', z: 22905, i: 69320, d: 'Rclone is a command line program to sync files and directories to and from: Google Drive', a: 'rclone', w: 0 },
         { n: 'tmux', v: '3.5a-1', s: 'utils', z: 414, i: 812, d: 'Terminal multiplexer', a: 'tmux', w: 0 },
@@ -451,20 +452,32 @@ function check(name, cond) {
     await press(page, 'ArrowDown', order2.indexOf('packages'));
     await press(page, 'Enter');
     await page.waitForFunction(() => document.querySelector('#store .tile'));
-    check('Packages opens full screen on Browse, at Start here', await shown() && /Browse\s*10/.test(await page.$eval('#store .tab.on', (t) => t.textContent)) &&
+    check('Packages opens full screen on Browse, at Start here', await shown() && /Browse\s*11/.test(await page.$eval('#store .tab.on', (t) => t.textContent)) &&
         /Start here/.test(await page.$eval('#store .rc.on', (r) => r.textContent)));
     let tiles = await page.$$eval('#store .tile', (ts) => ts.map((t) => t.textContent));
     check('Start here shows the picks that are in Entware, in order', tiles.map((t) => t.split(/\s/)[0].replace(/(System|Files|Shell|Downloads|Media|Fun).*/, '')).join(' ') === 'htop rclone tmux aria2 ffmpeg jq curl nethack');
     check('with a plain one-liner, and what is installed or has an add-on', /Google Drive, Dropbox/.test(tiles[1]) && /Add-on sets it up/.test(tiles[0]) && /Installed/.test(tiles[2]) && !/Installed|Add-on/.test(tiles[3]));
     let rail = await page.$$eval('#store .rc', (rs) => rs.map((r) => r.textContent));
-    check('the categories list what is in each, and libraries are off', rail.join('|') === '★Start here8|>_Shell & terminal3|▤Files & backup2|↓Downloads & torrents2|▶Media & audio1|▥System & monitoring1|♞Fun & games1|⚙Show libraries tooOff');
+    check('the categories list what is in each, and libraries are off', rail.join('|') === '★Start here8|>_Shell & terminal4|▤Files & backup2|↓Downloads & torrents2|▶Media & audio1|▥System & monitoring1|♞Fun & games1|⚙Show libraries tooOff');
     check('the catalog and what is installed are read once', (await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'catalog --json').length)) === 1);
     await page.screenshot({ path: path.join(OUT, '13-packages.png') });
     await press(page, 'ArrowDown');
     await settle();
     check('▼ on the categories shows the next one straight away', /Shell & terminal/.test(await page.textContent('#store h2')) &&
-        (await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent))).join(' ') === 'tmux jq bash');
-    check('picks first, each marked installed', (await page.$$eval('#store .srow .pill', (ps) => ps.map((p) => p.textContent))).join('|') === 'Installed|Installed|Installed');
+        (await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent))).join(' ') === 'tmux jq bash jq-full');
+    check('picks first, each marked installed, and another build of one that\'s installed says so', (await page.$$eval('#store .srow .pill', (ps) => ps.map((p) => p.textContent))).join('|') === 'Installed|Installed|Installed|Have jq');
+    await press(page, 'ArrowRight');
+    await press(page, 'ArrowUp');
+    await press(page, 'ArrowRight', 3);
+    check('the sort and filter chips are above the list', /^Hide installed/.test(await focused()));
+    await press(page, 'Enter');
+    await settle();
+    check('Hide installed hides other builds of what\'s installed too', !(await page.$('#store .srow')) && /Everything here is installed/.test(await page.textContent('#store .s-main')));
+    await press(page, 'Enter');
+    await settle();
+    check('and shows them again', (await page.$$('#store .srow')).length === 4);
+    await press(page, 'ArrowLeft', 4);
+    check('◀ from the chips goes back to the categories', /Shell & terminal/.test(await focused()));
     await press(page, 'PageDown');
     await settle();
     check('CH+ goes to the next category', /Files & backup/.test(await page.textContent('#store h2')) && /webOS has one/.test(await page.$$eval('#store .srow', (rs) => rs[1].textContent)));
