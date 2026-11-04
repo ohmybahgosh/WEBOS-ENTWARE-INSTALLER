@@ -61,3 +61,23 @@ body.has-task main { padding-bottom: 200px; }
 .task pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; color: #9fb0c8; max-height: 120px; overflow: auto; }
 footer { color: var(--dim); font-size: 13px; padding: 30px 0 24px; text-align: center; }
 footer a { color: var(--dim); }
+
+/* Messages float under the bar at the top, so they can't be missed */
+.toast { position: fixed; z-index: 4; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); max-width: 736px; margin: 0 auto;
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 16px; border-radius: 12px;
+  background: #2a1316; border: 1px solid var(--red); color: #fecaca; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
+.toast.ok { background: #0f2a22; border-color: var(--green); color: #bbf7d0; }
+.toast span { flex: 1; }
+.toast button { color: inherit; padding: 0 4px; font-size: 18px; }
+/* Changing a password */
+.pwform h4 { margin: 0 0 4px; font-size: 16px; }
+.or { color: var(--dim); font-size: 13px; text-align: center; margin: 14px 0 10px; text-transform: uppercase; letter-spacing: .06em; }
+.pwfield { position: relative; }
+.pwfield input { padding-right: 70px; }
+.pwfield .eye { position: absolute; right: 6px; top: 6px; color: var(--blue); }
+.rules { list-style: none; padding: 0; margin: 2px 0 6px; font-size: 13px; color: var(--dim); }
+.rules li::before { content: "○ "; }
+.rules li.ok { color: var(--green); }
+.rules li.ok::before { content: "✓ "; }
+.rules li.bad { color: var(--red); }
+.rules li.bad::before { content: "✕ "; }

@@ -249,10 +249,10 @@ function check(name, cond) {
     await press(page, 'Enter');
     await page.waitForFunction(() => /File Browser/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.cred'));
     check('a running service shows its address, login and a QR code', /Xk4mP9qL2vR7nT3w/.test(await page.textContent('.cred')) && /admin/.test(await page.textContent('.cred')) && !!(await page.$('.qr svg')) && (await page.evaluate(() => window.ENTWARE_CALLS)).includes('info filebrowser --json'));
-    check('with New password, Manage from your phone and Remove', await page.$$eval('.addon', (rs) => rs.length === 3 && /New password/.test(rs[0].textContent) && /Manage from your phone/.test(rs[1].textContent) && /Remove File Browser/.test(rs[2].textContent)));
+    check('with New random password, Manage from your phone and Remove', await page.$$eval('.addon', (rs) => rs.length === 3 && /New random password/.test(rs[0].textContent) && /Manage from your phone/.test(rs[1].textContent) && /Remove File Browser/.test(rs[2].textContent)));
     await page.screenshot({ path: path.join(OUT, '16-addon-info.png') });
     await press(page, 'Enter');
-    check('asks before making a new password, and says how to pick your own', /New password for File Browser\?/.test(await overlayTitle(page)) && /password filebrowser --ask/.test(await page.textContent('#overlay-body')));
+    check('asks before making a new password, and says how to pick your own', /New random password for File Browser\?/.test(await overlayTitle(page)) && /password filebrowser --ask/.test(await page.textContent('#overlay-body')));
     await press(page, 'Enter');
     await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
     check('which runs as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job password filebrowser') && /New password for File Browser: done/.test(await overlayTitle(page)));

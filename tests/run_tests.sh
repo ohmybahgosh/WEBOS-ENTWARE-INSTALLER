@@ -1059,7 +1059,17 @@ ok "password makes a new one, sets it in the service and saves it" 'p=$(pw_of fi
 printf 'Mine_pass#2026x\n' | run password transmission --stdin -y
 ok "password --stdin takes your own, off the command line" '[ "$(pw_of transmission)" = "Mine_pass#2026x" ] && grep -q "\"rpc-password\": \"Mine_pass#2026x\"," /opt/etc/transmission/settings.json && pidof transmission-daemon > /dev/null'
 ! printf 'mine with spaces 1\n' | run password transmission --stdin -y
-ok "a password outside the safe characters is refused, and nothing changes" 'grep -q "Use 12 to 64 letters" "$W/out" && [ "$(pw_of transmission)" = "Mine_pass#2026x" ]'
+ok "a password with a space is refused, and nothing changes" 'grep -q "Use 12 to 64 characters" "$W/out" && [ "$(pw_of transmission)" = "Mine_pass#2026x" ]'
+! printf -- '-starts-with-a-dash\n' | run password transmission --stdin -y
+ok "and so is one starting with -" 'grep -q "not starting with -" "$W/out" && [ "$(pw_of transmission)" = "Mine_pass#2026x" ]'
+cat > /tmp/pwx << 'P'
+My$own&pass|"2026"\!
+P
+run password transmission --stdin -y < /tmp/pwx
+ok "symbols are fine, even ones JSON and sed treat specially" 'python3 -c "import json,sys; d=json.load(open(\"/opt/etc/transmission/settings.json\")); sys.exit(0 if d[\"rpc-password\"] == open(\"/tmp/pwx\").read().strip() else 1)" && [ "$(pw_of transmission)" = "$(cat /tmp/pwx)" ]'
+run password samba --stdin -y < /tmp/pwx
+ok "Samba takes them too" 'grep -qF -- "-s -a root $(cat /tmp/pwx)" /tmp/smbpasswd.log'
+rm -f /tmp/pwx
 ! printf 'short-1\n' | run password samba --stdin -y
 ok "and so is a short one" 'grep -q "Use 12 to 64" "$W/out"'
 ! run password minidlna -y

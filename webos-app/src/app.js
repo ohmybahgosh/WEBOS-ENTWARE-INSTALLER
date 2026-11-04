@@ -476,9 +476,9 @@
                     { act: 'setup', title: 'Finish setup', sub: 'sets it up again and starts it, with the same password' });
             }
             if (d.hasPassword && d.state === 'installed') {
-                rows.push({ act: 'password', title: 'New password', sub: 'makes a new random one and shows it here.  The old one stops working.' });
+                rows.push({ act: 'password', title: 'New random password', sub: 'the TV makes one and shows it here.  To type your own, use Manage from your phone.' });
             }
-            rows.push({ act: 'web', title: 'Manage from your phone', sub: d.hasPassword ? 'see it, or set your own password, from your phone' : 'all your add-ons, from your phone' });
+            rows.push({ act: 'web', title: 'Manage from your phone', sub: d.hasPassword ? 'see the password, or type your own, on your phone' : 'all your add-ons, from your phone' });
             rows.push({ act: 'remove', title: 'Remove ' + a.title, sub: a.id === 'tailscale' ? 'signs the TV out of your tailnet and uninstalls tailscale' :
                 'stops it and uninstalls ' + a.packages + '.  Your files in /opt/files stay.' });
             addonInfo = { addon: a, index: addonInfo && addonInfo.addon && addonInfo.addon.id === a.id ? addonInfo.index : 0, info: d, rows: rows };
@@ -520,7 +520,7 @@
             backTo = '';
             startJob('add ' + a.id);
         } else if (r.act === 'password') {
-            confirmThen('New password for ' + a.title + '?', 'The old one stops working, and ' + a.title + ' restarts for a moment.  ' +
+            confirmThen('New random password for ' + a.title + '?', 'The old one stops working, and ' + a.title + ' restarts for a moment.  ' +
                 'To choose your own, use Manage from your phone, or over SSH: webos-entware password ' + a.id + ' --ask',
                 function () { startJob('password ' + a.id); });
         } else if (r.act === 'web') {

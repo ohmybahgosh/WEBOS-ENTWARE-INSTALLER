@@ -37,8 +37,8 @@ if (!/^[A-Z0-9]{6,16}$/.test(CODE)) { console.error('No code in ' + DIR); proces
 
 var NAME = /^[a-z0-9]{1,20}$/;
 var PASSWORDS = ['samba', 'filebrowser', 'transmission', 'syncthing'];
-// The same characters the installer allows
-var PASSWORD = /^[A-Za-z0-9._@#%+=:,?~!^-]{12,64}$/;
+// What the installer takes: 12 to 64 characters you can type, no spaces, not starting with -
+var PASSWORD = /^(?!-)[!-~]{12,64}$/;
 var tokens = {};          // token: last used
 var fails = {};           // address: { n, until }
 var lastUse = Date.now();
@@ -183,7 +183,7 @@ function api(req, res, u, who) {
             if (err || !j || PASSWORDS.indexOf(j.id) < 0) { return send(res, 400, { error: 'bad request' }); }
             var mine = typeof j.password === 'string' && j.password !== '';
             if (mine && !PASSWORD.test(j.password)) {
-                return send(res, 400, { error: 'Use 12 to 64 letters, numbers and . _ @ # % + = : , ? ~ ! ^ -' });
+                return send(res, 400, { error: 'Use 12 to 64 characters: letters, numbers and symbols, with no spaces, not starting with -' });
             }
             run(['password', j.id, '-y'].concat(mine ? ['--stdin'] : []), mine ? j.password + '\n' : '', function (e, out, er) {
                 if (e) { return send(res, 409, { error: plain(out + er).split('\n').filter(function (l) { return /ERROR|WARN/.test(l); }).join(' ') || 'It didn\'t change.' }); }

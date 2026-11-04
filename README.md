@@ -200,7 +200,7 @@ From there, [add-ons](#add-ons) are one press away.  For the bash shell and `ent
 Download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.13.0_all.ipk"}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.13.1_all.ipk"}'
 ```
 
 The Homebrew Channel won't offer updates for it unless you add the repository too, but the app's own **Update to v…** still works.
@@ -522,12 +522,12 @@ Six add-ons run a service that starts with the TV.  Entware's own settings for s
 
 <p align="center"><img src="images/cli-services.png" width="760" alt="Over SSH: webos-entware addons listing Tailscale, Samba, File Browser, minidlna, Transmission, Syncthing and the tool add-ons, then webos-entware info samba with its Windows and Mac addresses, user and password, and webos-entware password filebrowser making a new one"></p>
 
-In the TV app, open a service in **Add-ons** to see its address and password, with a QR code of the address for your phone, and **New password** for a new random one.  Over SSH:
+In the TV app, open a service in **Add-ons** to see its address and password, with a QR code of the address for your phone, and **New random password**.  To type your own, use [Manage from your phone](#manage-from-your-phone).  Over SSH:
 
 ```sh
 webos-entware info samba             # the address, user and password
 webos-entware password samba         # a new random password
-webos-entware password samba --ask   # type your own (12 to 64 letters, numbers and . _ @ # % + = : , ? ~ ! ^ -)
+webos-entware password samba --ask   # type your own: 12 to 64 characters, symbols welcome, no spaces
 webos-entware remove samba           # stops it, and deletes its settings and password
 ```
 
@@ -535,7 +535,7 @@ Change a password here rather than in the service's own settings page: setting a
 
 ### Manage from your phone
 
-**Add-ons > Manage from your phone** in the TV app starts a small dashboard and shows a QR code.  Scan it and your phone's browser opens the dashboard, signed in.  It's the same idea as TiviBro's web editor.  From there you can add, finish setting up and remove add-ons, see each service's address and password, and make a new password or set your own, without typing on the TV.
+**Add-ons > Manage from your phone** in the TV app starts a small dashboard and shows a QR code.  Scan it and your phone's browser opens the dashboard, signed in.  It's the same idea as TiviBro's web editor.  From there you can add, finish setting up and remove add-ons, see each service's address and password, and change a password, to a random one or one you type (with Show, and a checklist as you type), without typing on the TV.
 
 - **A sign-in code** shown on the TV: eight characters that can't be mistaken for each other across a room.  The QR code carries it, or you type it.  Five wrong codes lock that phone out for a minute.
 - **Only your home network** (and your tailnet) can reach it.  It's served by the TV's own Node.js on port 8095, and stops by itself after 30 minutes without use, or when you choose **Stop** on the TV.  A new start makes a new code.
@@ -543,7 +543,7 @@ Change a password here rather than in the service's own settings page: setting a
 
 Over SSH: `webos-entware web start` prints the address and code, and `webos-entware web stop` stops it.
 
-<p align="center"><img src="images/web-dashboard.png" width="300" alt="The phone dashboard: Tailscale asking you to sign in, and File Browser running with its address, user admin, its password with Show and Copy, and Open, New password, Set my own and Remove"></p>
+<p align="center"><img src="images/web-dashboard.png" width="300" alt="The phone dashboard: Tailscale asking you to sign in, and File Browser running with its address, user admin, its password with Show and Copy, and Open, Change password and Remove"></p>
 
 Ports 8080 and 9080 are taken by webOS, so File Browser uses 8090.  Removing Tailscale signs the TV out of your tailnet.
 

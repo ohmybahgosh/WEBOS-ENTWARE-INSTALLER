@@ -2,6 +2,17 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.13.1] - 2026-11-04
+
+### Fixed
+
+- **Typing your own password on the phone dashboard:** a password the dashboard couldn't take was refused with a message hidden behind the bar at the top, so nothing seemed to happen.  The form now says what's wrong as you type, with a checklist, and Save waits until it's right.  An error from the TV shows in the form itself, and other messages float where you can see them.
+
+### Changed
+
+- **Passwords can have symbols:** any 12 to 64 characters you can type, with no spaces and not starting with -.  Before, only a few symbols were allowed.
+- **Clearer password choices:** on the phone dashboard, **Change password** opens one place with **Make a random one for me** or your own, with **Show** to see what you typed.  On the TV, the choice is **New random password**.
+
 ## [2.13.0] - 2026-11-04
 
 ### Added

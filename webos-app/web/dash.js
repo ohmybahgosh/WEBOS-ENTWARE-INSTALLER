@@ -64,11 +64,15 @@
             .then(function () { go.disabled = false; go.textContent = 'Sign in'; });
     }
 
+    // Messages float at the top of the screen, so they show wherever you are
+    var msgTimer = null;
     function msg(text, ok) {
         var m = $('dash-msg');
-        m.textContent = text || '';
-        m.className = 'msg' + (ok ? ' ok' : '');
-        if (text) { m.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        clearTimeout(msgTimer);
+        $('dash-msg-text').textContent = text || '';
+        m.className = 'toast' + (ok ? ' ok' : '');
+        m.hidden = !text;
+        if (text && ok) { msgTimer = setTimeout(function () { m.hidden = true; }, 6000); }
     }
 
     function refresh() {
@@ -102,6 +106,8 @@
     function setBusy(on) {
         busy = on;
         Array.prototype.forEach.call(document.querySelectorAll('button.act'), function (b) { b.disabled = on; });
+        // Save waits for a good password too
+        Array.prototype.forEach.call(document.querySelectorAll('form.pwform'), function (f) { if (f.check) { f.check(); } });
     }
 
     function task(action, a) {
@@ -193,8 +199,24 @@
         return box;
     }
 
-    function passwordForm(a, user) {
+    // The installer takes 12 to 64 characters you can type, symbols included,
+    // with no spaces, not starting with a dash
+    function pwProblems(v) {
+        return {
+            length: v.length >= 12 && v.length <= 64,
+            chars: v !== '' && /^[!-~]+$/.test(v) && v.charAt(0) !== '-'
+        };
+    }
+
+    // Changing a service's password: a random one made on the TV, or your own
+    function passwordPanel(a, user) {
         var f = el('form', 'pwform');
+        f.setAttribute('novalidate', '');
+        f.appendChild(el('h4', '', 'Change the password'));
+        f.appendChild(el('p', 'dim small', 'The old one stops working, and ' + a.title + ' restarts for a moment.  Your settings stay.'));
+        var rnd = button('Make a random one for me', '', function () { setPassword(a, '', rnd, note); });
+        f.appendChild(rnd);
+        f.appendChild(el('div', 'or', 'or type your own'));
         // The service's user, for password managers (and screen readers)
         var u = el('input');
         u.type = 'text'; u.autocomplete = 'username'; u.value = user || ''; u.readOnly = true; u.hidden = true;
@@ -203,40 +225,74 @@
         var p1 = el('input'), p2 = el('input');
         p1.type = p2.type = 'password';
         p1.autocomplete = p2.autocomplete = 'new-password';
-        p1.placeholder = 'New password (12 or more characters)';
+        p1.autocapitalize = p2.autocapitalize = 'off';
+        p1.spellcheck = p2.spellcheck = false;
+        p1.placeholder = 'New password';
         p2.placeholder = 'Type it again';
         p1.setAttribute('aria-label', 'New password'); p2.setAttribute('aria-label', 'New password again');
-        f.appendChild(p1); f.appendChild(p2);
-        f.appendChild(el('p', 'dim small', 'Letters, numbers and . _ @ # % + = : , ? ~ ! ^ -'));
+        var w1 = el('div', 'pwfield'); w1.appendChild(p1);
+        var eye = button('Show', 'link eye', function () {
+            var on = p1.type === 'password';
+            p1.type = p2.type = on ? 'text' : 'password';
+            eye.textContent = on ? 'Hide' : 'Show';
+        }, true);
+        eye.setAttribute('aria-label', 'Show the password as you type');
+        w1.appendChild(eye);
+        f.appendChild(w1); f.appendChild(p2);
+        var rules = el('ul', 'rules');
+        var r1 = el('li', '', '12 to 64 characters'), r2 = el('li', '', 'Letters, numbers and symbols, no spaces, not starting with -'), r3 = el('li', '', 'Both the same');
+        rules.appendChild(r1); rules.appendChild(r2); rules.appendChild(r3);
+        f.appendChild(rules);
         var row = el('div', 'row');
-        var go = el('button', 'act', 'Set password');
-        go.type = 'submit'; go.disabled = busy;
+        var go = el('button', '', 'Save my password');
+        go.type = 'submit';
         row.appendChild(go);
-        row.appendChild(button('Cancel', 'ghost', function () { f.hidden = true; p1.value = p2.value = ''; }, true));
+        row.appendChild(button('Cancel', 'ghost', function () { f.hidden = true; p1.value = p2.value = ''; check(); note(''); }, true));
         f.appendChild(row);
-        f.hidden = true;
+        var out = el('p', 'msg', '');
+        out.setAttribute('role', 'alert');
+        f.appendChild(out);
+        function note(text, ok) { out.textContent = text || ''; out.className = 'msg' + (ok ? ' ok' : ''); }
+        function check() {
+            var pr = pwProblems(p1.value), same = p1.value !== '' && p1.value === p2.value;
+            r1.className = p1.value ? (pr.length ? 'ok' : 'bad') : '';
+            r2.className = p1.value ? (pr.chars ? 'ok' : 'bad') : '';
+            r3.className = p2.value ? (same ? 'ok' : 'bad') : '';
+            go.disabled = busy || !(pr.length && pr.chars && same);
+            return !go.disabled;
+        }
+        p1.addEventListener('input', check);
+        p2.addEventListener('input', check);
         f.addEventListener('submit', function (e) {
             e.preventDefault();
-            if (p1.value.length < 12) { msg('Use at least 12 characters.'); return; }
-            if (!/^[A-Za-z0-9._@#%+=:,?~!^-]+$/.test(p1.value)) { msg('Use only letters, numbers and . _ @ # % + = : , ? ~ ! ^ -'); return; }
-            if (p1.value !== p2.value) { msg('The two passwords don\'t match.'); return; }
-            setPassword(a, p1.value, go);
+            if (!check()) { note('Check the password against the list above.'); return; }
+            note('');
+            setPassword(a, p1.value, go, note);
         });
+        f.hidden = true;
+        f.check = check;
+        check();
         return f;
     }
-    function setPassword(a, value, btn) {
+    function setPassword(a, value, btn, note) {
         if (busy) { return; }
-        if (!value && !window.confirm('Make a new password for ' + a.title + '?\n\nThe old one stops working, and ' + a.title + ' restarts for a moment.')) { return; }
-        msg('');
+        if (!value && !window.confirm('Make a new random password for ' + a.title + '?\n\nThe old one stops working, and ' + a.title + ' restarts for a moment.')) { return; }
+        note('');
         setBusy(true);
-        btn.textContent = 'Changing…';
+        var was = btn.textContent;
+        btn.textContent = 'Saving…';
         call('POST', '/api/password', { id: a.id, password: value || '' }).then(function () {
             reveal[a.id] = true;
             busy = false;
-            msg('Changed the password for ' + a.title + '.  It\'s shown below.', true);
+            done[a.id] = 'Password changed.  It\'s shown above: copy it before you leave.';
             refresh();
-        }, function (e) { setBusy(false); btn.textContent = value ? 'Set password' : 'New password'; if (e.message) { msg(e.message); } });
+        }, function (e) {
+            setBusy(false);
+            btn.textContent = was;
+            note(e.message || 'It didn\'t change.', false);
+        });
     }
+    var done = {};   // a message to show on a service's card after it redraws
 
     function serviceCard(a) {
         var card = el('div', 'card');
@@ -251,6 +307,7 @@
         } else {
             (info.lines || []).forEach(function (l) { card.appendChild(el('p', '', l)); });
             if (info.user) { card.appendChild(loginBox(a, info)); }
+            if (done[a.id]) { card.appendChild(el('p', 'msg ok', done[a.id])); delete done[a.id]; }
         }
         var row = el('div', 'row'), form = null;
         if (a.state === 'notInstalled') {
@@ -263,9 +320,11 @@
             }
             if (a.state === 'needsSetup') { row.appendChild(button(a.id === 'tailscale' ? 'New sign-in link' : 'Finish setup', 'ghost', function () { task('add', a); })); }
             if (info.hasPassword && a.state === 'installed') {
-                form = passwordForm(a, info.user);
-                row.appendChild(button('New password', 'ghost', function (e) { setPassword(a, '', e.target); }));
-                row.appendChild(button('Set my own', 'ghost', function () { form.hidden = !form.hidden; if (!form.hidden) { form.querySelector('input[type=password]').focus(); } }));
+                form = passwordPanel(a, info.user);
+                row.appendChild(button('Change password', 'ghost', function () {
+                    form.hidden = !form.hidden;
+                    if (!form.hidden) { form.check(); form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+                }));
             }
             row.appendChild(button('Remove', 'danger', function () { task('remove', a); }));
         }
@@ -305,6 +364,7 @@
     $('login-form').addEventListener('submit', function (e) { e.preventDefault(); signIn($('code').value); });
     $('out').addEventListener('click', function () { call('POST', '/api/logout').catch(function () {}).then(function () { signedOut(); }); });
     $('reload').addEventListener('click', function () { msg(''); refresh(); });
+    $('dash-msg-close').addEventListener('click', function () { msg(''); });
     $('task-close').addEventListener('click', function () { $('task').hidden = true; document.body.className = ''; });
 
     // The QR code's #k=CODE signs in; it comes off the address straight away

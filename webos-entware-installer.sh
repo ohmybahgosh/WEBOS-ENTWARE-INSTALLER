@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.13.0"
+VERSION="2.13.1"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -2517,7 +2517,9 @@ setup_transmission() {
     ok=1
     json_set "$TR_CONF" rpc-authentication-required true || ok=0
     json_set "$TR_CONF" rpc-username '"tv"' || ok=0
-    json_set "$TR_CONF" rpc-password "\"$pw\"" || ok=0
+    # As a JSON string, then made safe for sed's replacement
+    pwj=$(printf '%s' "$pw" | sed -e 's/[\\"]/\\&/g' -e 's/[\\&|]/\\&/g')
+    json_set "$TR_CONF" rpc-password "\"$pwj\"" || ok=0
     json_set "$TR_CONF" rpc-port "$TR_PORT" || ok=0
     json_set "$TR_CONF" download-dir "\"$FILES_DIR/Downloads\"" || ok=0
     json_set "$TR_CONF" incomplete-dir "\"$FILES_DIR/Downloads/.incomplete\"" || ok=0
@@ -2607,8 +2609,14 @@ remove_service() {
 # A new password for a service: random, or one you type (--ask) or pipe in
 # (--stdin). It's never taken from the command line, where other programs
 # on the TV could see it.
-pw_ok() { case "$1" in *[!A-Za-z0-9._@#%+=:,?~!^-]*) return 1 ;; esac; [ ${#1} -ge 12 ] && [ ${#1} -le 64 ]; }
-PW_RULE="Use 12 to 64 letters, numbers and . _ @ # % + = : , ? ~ ! ^ -"
+# 12 to 64 characters you can type, symbols included, but no spaces, and
+# not starting with a dash (it would read as an option)
+pw_ok() {
+    [ ${#1} -ge 12 ] && [ ${#1} -le 64 ] || return 1
+    case "$1" in -*) return 1 ;; esac
+    ! printf '%s' "$1" | LC_ALL=C grep -q '[^!-~]'
+}
+PW_RULE="Use 12 to 64 characters: letters, numbers and symbols, with no spaces, not starting with -"
 addon_password() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     addon_find "$1" || error_exit "Unknown add-on: ${1:-none}. See: webos-entware addons"
