@@ -2,6 +2,19 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.12.0] - 2026-11-04
+
+### Added
+
+- **Six network services** as add-ons: Tailscale, Samba file sharing, File Browser, a DLNA media server (minidlna), Transmission and Syncthing.  Each starts with the TV, and is set up before it first starts: a password made on the TV for anything with a login, no guest access, and Entware's stock settings replaced.  If a setup doesn't finish, the service is stopped and kept from starting at boot.  See [Network services](README.md#network-services).
+- **Open a service in Add-ons** to see its address and password, with a QR code of the address for your phone.  Tailscale shows a QR code of its sign-in link.  Over SSH: `webos-entware info <name>`.
+- **Seven more add-ons:** rclone (with FUSE for `rclone mount`), Network tools (iperf3, nmap, tcpdump, iftop and dig), Archive tools (unzip, 7z and unrar), Vim, Midnight Commander, micro, and Search tools (ripgrep, fd and fzf).
+- A shared folder for the services, `/opt/files`, with `Downloads`, `Media` and `Sync` in it, and USB drives in `USB`.  Removing a service never deletes it.
+
+### Changed
+
+- A service package installed on its own, with `ent install` or the Packages screen, waits until it's set up as an add-on, so it never starts with settings that let anyone in.  Removing one from the Packages screen also takes its setup away.
+
 ## [2.11.1] - 2026-11-04
 
 ### Changed

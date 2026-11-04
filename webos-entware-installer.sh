@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.11.1"
+VERSION="2.12.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -126,8 +126,9 @@ usage() {
     echo "  upgrade [name] Refresh the package list and upgrade every package, or just the one named"
     echo "  updates        List packages with updates (--refresh downloads the package list first)"
     echo "  addons         List the add-ons: packages with the setup they need on webOS"
-    echo "  add <name>     Install an add-on (nano, locate, git, python, htop, banner, ...)"
+    echo "  add <name>     Install an add-on (git, python, tailscale, samba, filebrowser, ...)"
     echo "  remove <name>  Uninstall an add-on"
+    echo "  info <name>    How to reach an add-on's service, and its password"
     echo "  installed      List installed packages, their size and what needs them"
     echo "  search <word>  Search Entware's packages (name matches first)"
     echo "  pkg-add <name> Install one Entware package, with its webOS setup"
@@ -143,7 +144,7 @@ usage() {
     echo "  -y, --yes      Don't ask; use the recommended build and answer yes"
     echo "  --no-shell     Install Entware only, leave .profile/.bashrc and the shell alone"
     echo "  --with-locate  Also set up locate (same as running locate after install)"
-    echo "  --json         With status, addons or job-status: print JSON (the TV app reads this)"
+    echo "  --json         With status, addons, info or job-status: print JSON (the TV app reads this)"
     echo "  --location=L   Where a new install goes: appstore (app storage, the default: more"
     echo "                 space, and kept by Reset to initial settings) or user (user data)"
     echo "  --arch=ARCH    Use aarch64-k3.10 (64-bit) or armv7sf-k3.2 (32-bit) without asking"
@@ -1142,7 +1143,7 @@ _entwrap_complete() {
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
 _webos_entware_complete() {
-    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove move app-update installed search pkg-add pkg-remove logs log --help" -- "${COMP_WORDS[1]}") )
+    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove info move app-update installed search pkg-add pkg-remove logs log --help" -- "${COMP_WORDS[1]}") )
 }
 complete -F _entwrap_complete entwrap ent opkg
 complete -F _webos_entware_complete webos-entware
@@ -1636,6 +1637,14 @@ post_install_action() {
         case "$p" in
             nano|nano-full|nano-plus) do_nano=1 ;;
             mlocate) do_locate=1 ;;
+            *) a=$(pkg_addon "$p")
+                # Installed on its own, a network service would start at boot
+                # with Entware's stock settings, which may let anyone in
+                if [ -n "$a" ] && [ "$a" != tailscale ] && addon_service "$a" && ! service_ready "$a"; then
+                    svc_off "$a"
+                    [ "$a" = samba ] && svc_off wsdd2
+                    info "$p won't start until it's set up with a password: webos-entware add $a"
+                fi ;;
         esac
     done
     [ "$do_nano" = 1 ] && setup_nanorc
@@ -1800,6 +1809,19 @@ rsync|rsync|rsync|yes|Fast copies to and from the TV over SSH
 curl|curl|curl|yes|Fetch URLs and test APIs from the shell
 jq|jq|jq|yes|Read and filter JSON, like luna-send replies
 banner|Login banner|neofetch|yes|A webOS wordmark and your TV's specs each time you log in over SSH
+tailscale|Tailscale|tailscale|yes|Reach the TV from anywhere over your tailnet, with no ports opened
+samba|Samba file sharing|samba4-server wsdd2|yes|Share the TV's files and USB drives with Windows and Mac, with a password
+filebrowser|File Browser|filebrowser|yes|Upload and manage the TV's files from a phone or computer's browser
+minidlna|Media server (DLNA)|minidlna|yes|Play videos, music and photos from the TV or a USB drive on other devices
+transmission|Transmission|transmission-daemon transmission-web|yes|Torrents from a browser, saved to the TV or a USB drive, with a password
+syncthing|Syncthing|syncthing|yes|Keep a folder in sync with your phone and computers, with a password
+rclone|rclone|rclone fuse3-utils|yes|Copy and sync with Google Drive, Dropbox, OneDrive and 70 more clouds
+nettools|Network tools|iperf3 nmap tcpdump iftop bind-dig|yes|iperf3, nmap, tcpdump, iftop and dig, for testing the TV's network
+archives|Archive tools|unzip p7zip unrar|yes|Open zip, 7z and rar files
+vim|Vim|vim-full|yes|The full Vim editor
+mc|Midnight Commander|mc|yes|A two-pane file manager for the terminal
+micro|micro|micro|yes|A simple terminal editor with mouse support and familiar shortcuts
+find|Search tools|ripgrep fd fzf|yes|ripgrep, fd and fzf: fast search inside files and by name, and a fuzzy finder
 ADDONS
 }
 
@@ -1827,7 +1849,10 @@ addon_state() {
         certs) ca_ok || { echo needsSetup; return; } ;;
         git|python) ca_ok || { echo needsSetup; return; } ;;
         banner) banner_ready || { echo needsSetup; return; } ;;
+        rclone) ca_ok || { echo needsSetup; return; } ;;
+        find) [ -x /opt/bin/fd ] || { echo needsSetup; return; } ;;
     esac
+    if addon_service "$AD_ID"; then service_ready "$AD_ID" || { echo needsSetup; return; }; fi
     echo installed
 }
 
@@ -1838,9 +1863,9 @@ addons_list() {
         addon_catalog | while IFS='|' read -r AD_ID AD_TITLE AD_PKGS AD_REMOVABLE AD_ABOUT; do
             [ "$first" = 1 ] || printf ','
             first=0
-            printf '{"id":%s,"title":%s,"packages":%s,"about":%s,"removable":%s,"state":%s}' \
+            printf '{"id":%s,"title":%s,"packages":%s,"about":%s,"removable":%s,"service":%s,"state":%s}' \
                 "$(json_str "$AD_ID")" "$(json_str "$AD_TITLE")" "$(json_str "$AD_PKGS")" "$(json_str "$AD_ABOUT")" \
-                "$( [ "$AD_REMOVABLE" = yes ] && echo true || echo false)" "$(json_str "$(addon_state)")"
+                "$( [ "$AD_REMOVABLE" = yes ] && echo true || echo false)" "$(json_bool addon_service "$AD_ID")" "$(json_str "$(addon_state)")"
         done
         printf ']\n'
         return 0
@@ -1852,8 +1877,10 @@ addons_list() {
             needsSetup) st="${YELLOW}needs setup${NC}" ;;
             *) st="not installed" ;;
         esac
-        printf '  %-8s %b\n           %s\n' "$AD_ID" "$st" "$AD_ABOUT"
+        printf '  %-13s %b\n                %s\n' "$AD_ID" "$st" "$AD_ABOUT"
     done
+    echo
+    echo "webos-entware info <name> shows how to reach a service, and its password."
 }
 
 addon_add() {
@@ -1872,19 +1899,26 @@ addon_add() {
         nano) setup_nanorc ;;
         locate) setup_locate || exit 1 ;;
         certs) ca_ok || error_exit "ca-bundle installed, but $CA_FILE is missing." ;;
-        git|python)
+        git|python|rclone)
             if ! ca_ok; then
                 /opt/bin/opkg install ca-bundle >/dev/null 2>&1 && ca_ok ||
                     warn "ca-bundle didn't install, so HTTPS may fail with certificate errors."
             fi ;;
     esac
+    # Entware puts fd in /opt/usr/bin, which isn't on the PATH
+    [ "$AD_ID" = find ] && [ ! -e /opt/bin/fd ] && [ -x /opt/usr/bin/fd ] && ln -s /opt/usr/bin/fd /opt/bin/fd
     ensure_ca
+    if addon_service "$AD_ID"; then
+        setup_service "$AD_ID" || exit 1
+        info "webos-entware info $AD_ID shows this again."
+        return 0
+    fi
     if [ "$AD_ID" = locate ]; then
         # setup_locate already said it's ready
         [ "$SETUP_SHELL" = 1 ] && info "Log in again to use plain updatedb."
         return 0
     fi
-    success "$AD_TITLE is ready."
+    success "Added $AD_TITLE."
 }
 
 addon_remove() {
@@ -1902,6 +1936,8 @@ addon_remove() {
     # Dependents first (git-http before git): opkg won't remove a package
     # another one still needs. No --autoremove, so shared libraries and
     # ca-bundle, which other packages may rely on, stay.
+    addon_service "$AD_ID" && remove_service "$AD_ID"
+    [ "$AD_ID" = find ] && [ "$(readlink /opt/bin/fd 2>/dev/null)" = /opt/usr/bin/fd ] && rm -f /opt/bin/fd
     rev=""
     for p in $AD_PKGS; do rev="$p $rev"; done
     # shellcheck disable=SC2086
@@ -1910,6 +1946,7 @@ addon_remove() {
         rm -f "$LOCATE_CRON" "$UPDATEDB_WRAPPER" "$LOCATE_DB" /opt/etc/updatedb.group
         if grep -qs "^#.*$MARKER" "$UPDATEDB_CONF"; then rm -f "$UPDATEDB_CONF"; fi
     fi
+    addon_service "$AD_ID" && [ -d "$FILES_DIR" ] && info "Your files in $FILES_DIR are kept."
     success "Removed $AD_TITLE."
 }
 
@@ -2091,6 +2128,458 @@ remove_banner() {
     return 0
 }
 
+# === Network services (add-ons) ===
+# Tailscale, Samba, File Browser, minidlna, Transmission and Syncthing run
+# as Entware services, so they start with the TV (the boot script runs
+# /opt/etc/init.d/rc.unslung). Each one is set up before it first starts:
+# no guest access, and a password made on the TV for anything that listens
+# on the network. Passwords are kept in $CRED_DIR (root only), and
+# 'webos-entware info <name>' shows them again. Files go in $FILES_DIR,
+# with USB drives under $FILES_DIR/USB.
+FILES_DIR="/opt/files"
+USB_ROOT="/tmp/usb"
+CRED_DIR="/opt/etc/webos-entware/credentials"
+FB_PORT=8090
+ST_PORT=8384
+TR_PORT=9091
+DLNA_PORT=8200
+SMB_CONF="/opt/etc/samba/smb.conf"
+FB_CONF="/opt/etc/filebrowser/filebrowser.conf"
+FB_DB="/opt/etc/filebrowser/filebrowser.db"
+DLNA_CONF="/opt/etc/minidlna.conf"
+TR_CONF="/opt/etc/transmission/settings.json"
+ST_HOME="/opt/etc/syncthing"
+ST_INIT="/opt/etc/init.d/S91webos-syncthing"
+TS_DIR="/opt/var/lib/tailscale"
+TS_UP_LOG="$TS_DIR/webos-entware-up.json"
+
+addon_service() {
+    case "$1" in tailscale|samba|filebrowser|minidlna|transmission|syncthing) return 0 ;; esac
+    return 1
+}
+svc_script() {
+    case "$1" in
+        tailscale) echo /opt/etc/init.d/S06tailscaled ;;
+        samba) echo /opt/etc/init.d/S91smb ;;
+        wsdd2) echo /opt/etc/init.d/S99wsdd2 ;;
+        filebrowser) echo /opt/etc/init.d/S99filebrowser ;;
+        minidlna) echo /opt/etc/init.d/S90minidlna ;;
+        transmission) echo /opt/etc/init.d/S88transmission ;;
+        syncthing) echo "$ST_INIT" ;;
+    esac
+}
+svc_proc() {
+    case "$1" in
+        tailscale) echo tailscaled ;; samba) echo smbd ;; filebrowser) echo filebrowser ;;
+        minidlna) echo minidlnad ;; transmission) echo transmission-daemon ;; syncthing) echo syncthing ;;
+        wsdd2) echo wsdd2 ;;
+    esac
+}
+# Runs an Entware service's init script: start or stop
+svc() {
+    f=$(svc_script "$1")
+    [ -n "$f" ] && [ -x "$f" ] || return 1
+    (unset LD_PRELOAD LD_LIBRARY_PATH; PATH="/opt/sbin:/opt/bin:$PATH"; export PATH; "$f" "$2" < /dev/null > /dev/null 2>&1)
+}
+svc_running() { pidof "$(svc_proc "$1")" > /dev/null 2>&1; }
+# Waits up to $3 seconds for a service to be up, or down
+svc_wait() {
+    n=0
+    while [ $n -lt "${3:-15}" ]; do
+        if [ "$2" = up ]; then svc_running "$1" && return 0; else svc_running "$1" || return 0; fi
+        sleep 1
+        n=$((n + 1))
+    done
+    if [ "$2" = up ]; then svc_running "$1"; else ! svc_running "$1"; fi
+}
+svc_stop() {
+    svc_running "$1" || return 0
+    svc "$1" stop
+    svc_wait "$1" down 15 && return 0
+    killall "$(svc_proc "$1")" 2>/dev/null
+    svc_wait "$1" down 5
+}
+
+# The TV's address on the home network
+tv_ip() {
+    ip -o -4 addr show 2>/dev/null | awk '$2 != "lo" && $2 !~ /^tailscale/ { sub(/\/.*/, "", $4); print $4; exit }'
+}
+tv_addr() { a=$(tv_ip); echo "${a:-the-TVs-IP}"; }
+new_password() { tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 16; }
+
+# Saved logins: user=... and password=..., readable by root only
+cred_get() { sed -n "s/^$2=//p" "$CRED_DIR/$1" 2>/dev/null | head -n 1; }
+cred_save() {
+    mkdir -p "$CRED_DIR" && chmod 700 "$CRED_DIR"
+    (umask 077; printf 'user=%s\npassword=%s\n' "$2" "$3" > "$CRED_DIR/$1")
+}
+# The password already made for an add-on, or a new one
+cred_password() {
+    p=$(cred_get "$1" password)
+    [ -n "$p" ] || p=$(new_password)
+    [ ${#p} -ge 12 ] || { warn "Couldn't make a password (no /dev/urandom?)."; return 1; }
+    echo "$p"
+}
+
+files_dirs() {
+    mkdir -p "$FILES_DIR/Downloads/Watch" "$FILES_DIR/Media" "$FILES_DIR/Sync" || return 1
+    [ -e "$FILES_DIR/USB" ] || [ -L "$FILES_DIR/USB" ] || ln -s "$USB_ROOT" "$FILES_DIR/USB"
+    return 0
+}
+# A config file that's ours, or wasn't there, is written over. Anyone
+# else's is kept next to it first.
+take_conf() {
+    [ -f "$1" ] || { mkdir -p "$(dirname "$1")"; return 0; }
+    grep -qs "$MARKER" "$1" && return 0
+    b=$(backup_name "$1")
+    cp -p "$1" "$b" && info "Kept the old $(basename "$1") as $b."
+}
+# Sets "key": value in a JSON settings file with one key per line (Transmission's)
+json_set() {
+    grep -q "^[[:space:]]*\"$2\":" "$1" || return 1
+    sed -i "s|^\([[:space:]]*\"$2\": \).*[^,]\(,\{0,1\}\)\$|\1$3\2|" "$1"
+}
+
+ts() { (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/bin/tailscale "$@" < /dev/null 2>/dev/null); }
+ts_field() { ts status --json | sed -n "s/^  \"$1\": \"\([^\"]*\)\".*/\1/p" | head -n 1; }
+
+service_ready() {
+    svc_running "$1" || return 1
+    case "$1" in
+        tailscale) [ "$(ts_field BackendState)" = Running ] ;;
+        samba) grep -qs "$MARKER" "$SMB_CONF" && [ -s "$CRED_DIR/samba" ] ;;
+        filebrowser) grep -qs "$MARKER" "$FB_CONF" && [ -s "$CRED_DIR/filebrowser" ] ;;
+        minidlna) grep -qs "$MARKER" "$DLNA_CONF" ;;
+        transmission) grep -qs '"rpc-authentication-required": true' "$TR_CONF" && [ -s "$CRED_DIR/transmission" ] ;;
+        syncthing) [ -x "$ST_INIT" ] && [ -s "$CRED_DIR/syncthing" ] ;;
+    esac
+}
+
+# When a setup doesn't finish, the service is stopped and kept from
+# starting at boot: an Entware service's stock settings may be open to
+# anyone on the network (Samba's let guests in, Transmission's has no
+# password). Adding it again turns it back on.
+setup_failed() {
+    svc_stop "$1"
+    svc_off "$1"
+    [ "$1" = samba ] && { svc_stop wsdd2; svc_off wsdd2; }
+    warn "$2"
+    return 1
+}
+# Off: rc.unslung only runs init scripts that can run, and Samba's has no
+# ENABLED switch
+svc_off() {
+    f=$(svc_script "$1")
+    [ -f "$f" ] || return 0
+    sed -i 's/^ENABLED=yes/ENABLED=no/' "$f"
+    chmod 644 "$f"
+}
+svc_on() {
+    f=$(svc_script "$1")
+    [ -f "$f" ] || return 0
+    sed -i 's/^ENABLED=no/ENABLED=yes/' "$f"
+    chmod 755 "$f"
+}
+
+setup_service() {
+    files_dirs || { warn "Couldn't make $FILES_DIR."; return 1; }
+    svc_on "$1"
+    [ "$1" = samba ] && svc_on wsdd2
+    "setup_$1"
+}
+
+setup_tailscale() {
+    mkdir -p "$TS_DIR"
+    svc_running tailscale || svc tailscale start
+    n=0
+    until [ -n "$(ts_field BackendState)" ] || [ $n -ge 20 ]; do sleep 1; n=$((n + 1)); done
+    st=$(ts_field BackendState)
+    [ -n "$st" ] || { setup_failed tailscale "Tailscale didn't start. See $TS_DIR."; return 1; }
+    if [ "$st" != Running ]; then
+        # Waits for the sign-in in the background. DNS and the firewall
+        # are left to webOS.
+        pkill -f "tailscale up" 2>/dev/null
+        (unset LD_PRELOAD LD_LIBRARY_PATH
+         nohup /opt/bin/tailscale up --accept-dns=false --netfilter-mode=off --json < /dev/null > "$TS_UP_LOG" 2>&1 &)
+        n=0
+        until [ -n "$(ts_field AuthURL)" ] || [ "$(ts_field BackendState)" = Running ] || [ $n -ge 30 ]; do sleep 1; n=$((n + 1)); done
+    fi
+    if [ "$(ts_field BackendState)" = Running ]; then
+        ip4=$(ts ip -4 | head -n 1)
+        success "Tailscale is connected. The TV is $ip4 on your tailnet: ssh root@$ip4"
+        return 0
+    fi
+    url=$(ts_field AuthURL)
+    [ -n "$url" ] || { warn "Tailscale is running, but didn't give a sign-in link. Check the TV's internet connection, then add it again."; return 1; }
+    success "Tailscale is running. Sign in to connect the TV to your tailnet:"
+    echo "  $url"
+    info "In the TV app, open Tailscale in Add-ons for a QR code of this link. The TV connects by itself once you sign in, and after every restart."
+    return 0
+}
+
+setup_samba() {
+    pw=$(cred_password samba) || return 1
+    svc_stop samba
+    svc_stop wsdd2
+    take_conf "$SMB_CONF"
+    cat > "$SMB_CONF" << EOF
+# Samba add-on ($MARKER): shares $FILES_DIR, with USB drives in USB.
+# Sign in as tv. 'webos-entware info samba' shows the password.
+[global]
+    netbios name = LGTV
+    server string = LG TV (Entware)
+    workgroup = WORKGROUP
+    security = user
+    map to guest = Never
+    username map = /opt/etc/samba/users.map
+    passdb backend = smbpasswd
+    smb passwd file = /opt/etc/samba/smbpasswd
+    server min protocol = SMB2_10
+    load printers = no
+    printing = bsd
+    printcap name = /dev/null
+    disable spoolss = yes
+    unix extensions = no
+    log file = /opt/var/log/samba/log.%m
+    max log size = 100
+    log level = 0
+
+[TV]
+    comment = Files on the TV, and USB drives in USB
+    path = $FILES_DIR
+    valid users = root
+    read only = no
+    follow symlinks = yes
+    wide links = yes
+EOF
+    echo "root = tv" > /opt/etc/samba/users.map
+    # smbd needs these, and the init script only makes them when it runs
+    mkdir -p /opt/var/log/samba /opt/var/lib/samba/private /opt/var/cache/samba /opt/var/run/samba/ncalrpc
+    printf '%s\n%s\n' "$pw" "$pw" | (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/bin/smbpasswd -s -a root) > /dev/null 2>&1 ||
+        { setup_failed samba "Couldn't set Samba's password."; return 1; }
+    chmod 600 /opt/etc/samba/smbpasswd 2>/dev/null
+    cred_save samba tv "$pw"
+    svc samba start
+    svc_wait samba up 10 || { setup_failed samba "Samba didn't start. See /opt/var/log/samba."; return 1; }
+    svc wsdd2 start
+    success "Samba is sharing $FILES_DIR (USB drives are in USB)."
+    echo "  Windows: \\\\$(tv_addr)\\TV    Mac: smb://$(tv_addr)/TV"
+    echo "  User: tv    Password: $pw"
+}
+
+fb() { (unset LD_PRELOAD LD_LIBRARY_PATH; cd /opt/etc/filebrowser && /opt/sbin/filebrowser "$@" -d "$FB_DB" < /dev/null > /dev/null 2>&1); }
+setup_filebrowser() {
+    pw=$(cred_password filebrowser) || return 1
+    svc_stop filebrowser
+    take_conf "$FB_CONF"
+    cat > "$FB_CONF" << EOF
+# File Browser add-on ($MARKER): $FILES_DIR, on port $FB_PORT
+ADDR="-a 0.0.0.0"
+PORT="-p $FB_PORT"
+DB="-d $FB_DB"
+LOG="-l /opt/var/log/filebrowser.log"
+ROOT="-r $FILES_DIR"
+OPTIONS="\$ADDR \$PORT \$DB \$LOG \$ROOT"
+EOF
+    [ -f "$FB_DB" ] || fb config init -a 0.0.0.0 -p "$FB_PORT" -r "$FILES_DIR" ||
+        { setup_failed filebrowser "Couldn't set up File Browser's settings."; return 1; }
+    fb users update admin -p "$pw" || fb users add admin "$pw" --perm.admin ||
+        { setup_failed filebrowser "Couldn't set File Browser's password."; return 1; }
+    cred_save filebrowser admin "$pw"
+    svc filebrowser start
+    svc_wait filebrowser up 10 || { setup_failed filebrowser "File Browser didn't start. See /opt/var/log/filebrowser.log."; return 1; }
+    success "File Browser is at http://$(tv_addr):$FB_PORT"
+    echo "  User: admin    Password: $pw"
+}
+
+setup_minidlna() {
+    svc_stop minidlna
+    take_conf "$DLNA_CONF"
+    cat > "$DLNA_CONF" << EOF
+# minidlna add-on ($MARKER): serves $FILES_DIR (USB drives are in USB)
+port=$DLNA_PORT
+friendly_name=LG TV (Entware)
+media_dir=$FILES_DIR
+wide_links=yes
+db_dir=/opt/var/minidlna
+log_dir=/opt/var/log
+inotify=yes
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+strict_dlna=no
+notify_interval=900
+serial=12345678
+model_number=1
+EOF
+    mkdir -p /opt/var/minidlna
+    svc minidlna start
+    svc_wait minidlna up 10 || { setup_failed minidlna "minidlna didn't start. See /opt/var/log/minidlna.log."; return 1; }
+    success "minidlna is serving $FILES_DIR as \"LG TV (Entware)\" to media players on your network."
+    echo "  Put videos, music and photos in $FILES_DIR/Media, or on a USB drive."
+}
+
+setup_transmission() {
+    pw=$(cred_password transmission) || return 1
+    [ -f "$TR_CONF" ] || { setup_failed transmission "$TR_CONF is missing. Remove Transmission and add it again."; return 1; }
+    # It writes its settings back when it stops, so it's stopped first
+    svc_stop transmission
+    ok=1
+    json_set "$TR_CONF" rpc-authentication-required true || ok=0
+    json_set "$TR_CONF" rpc-username '"tv"' || ok=0
+    json_set "$TR_CONF" rpc-password "\"$pw\"" || ok=0
+    json_set "$TR_CONF" rpc-port "$TR_PORT" || ok=0
+    json_set "$TR_CONF" download-dir "\"$FILES_DIR/Downloads\"" || ok=0
+    json_set "$TR_CONF" incomplete-dir "\"$FILES_DIR/Downloads/.incomplete\"" || ok=0
+    json_set "$TR_CONF" incomplete-dir-enabled true || ok=0
+    json_set "$TR_CONF" watch-dir "\"$FILES_DIR/Downloads/Watch\"" || ok=0
+    json_set "$TR_CONF" watch-dir-enabled true || ok=0
+    if [ "$ok" != 1 ] || ! grep -q '"rpc-authentication-required": true' "$TR_CONF"; then
+        setup_failed transmission "Couldn't set Transmission's password in $TR_CONF."
+        return 1
+    fi
+    chmod 600 "$TR_CONF"
+    cred_save transmission tv "$pw"
+    svc transmission start
+    svc_wait transmission up 10 || { setup_failed transmission "Transmission didn't start."; return 1; }
+    success "Transmission is at http://$(tv_addr):$TR_PORT"
+    echo "  User: tv    Password: $pw"
+    echo "  Downloads go to $FILES_DIR/Downloads. Torrent files dropped in Downloads/Watch start by themselves."
+}
+
+setup_syncthing() {
+    pw=$(cred_password syncthing) || return 1
+    svc_stop syncthing
+    # The package's own start script sets no password or home for
+    # Syncthing, so this one runs it instead
+    [ -f /opt/etc/init.d/S92syncthing ] && { sed -i 's/^ENABLED=yes/ENABLED=no/' /opt/etc/init.d/S92syncthing; chmod 644 /opt/etc/init.d/S92syncthing; }
+    mkdir -p "$ST_HOME" && chmod 700 "$ST_HOME"
+    printf '%s\n' "$pw" | (unset LD_PRELOAD LD_LIBRARY_PATH; HOME="$ST_HOME" STNODEFAULTFOLDER=1 \
+        /opt/bin/syncthing generate --home="$ST_HOME" --gui-user=tv --gui-password=- --no-port-probing) > /dev/null 2>&1 ||
+        { setup_failed syncthing "Couldn't set up Syncthing in $ST_HOME."; return 1; }
+    cat > "$ST_INIT" << EOF
+#!/bin/sh
+# Syncthing add-on ($MARKER): settings in $ST_HOME, web page on port $ST_PORT
+ENABLED=yes
+PROCS=syncthing
+ARGS="serve --home=$ST_HOME --no-browser --no-upgrade --gui-address=http://0.0.0.0:$ST_PORT"
+PREARGS="env HOME=$ST_HOME STNODEFAULTFOLDER=1"
+DESC=Syncthing
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func
+EOF
+    chmod 755 "$ST_INIT"
+    cred_save syncthing tv "$pw"
+    svc syncthing start
+    svc_wait syncthing up 15 || { setup_failed syncthing "Syncthing didn't start."; return 1; }
+    success "Syncthing is at http://$(tv_addr):$ST_PORT"
+    echo "  User: tv    Password: $pw"
+    echo "  Share a folder like $FILES_DIR/Sync with your other devices from there."
+}
+
+# Stops a service and takes away what its setup added. What's in
+# $FILES_DIR stays.
+remove_service() {
+    case "$1" in
+        tailscale)
+            pkill -f "tailscale up" 2>/dev/null
+            svc_running tailscale && ts logout > /dev/null 2>&1
+            svc_stop tailscale
+            rm -rf /opt/var/lib/tailscale
+            rm -f /opt/var/tailscaled.state ;;
+        samba)
+            svc_stop wsdd2
+            svc_stop samba
+            grep -qs "$MARKER" "$SMB_CONF" && rm -f /opt/etc/samba/smb.conf
+            rm -f /opt/etc/samba/smbpasswd /opt/etc/samba/users.map ;;
+        filebrowser)
+            svc_stop filebrowser
+            grep -qs "$MARKER" "$FB_CONF" && rm -f /opt/etc/filebrowser/filebrowser.conf
+            rm -f /opt/etc/filebrowser/filebrowser.db ;;
+        minidlna)
+            svc_stop minidlna
+            grep -qs "$MARKER" "$DLNA_CONF" && rm -f /opt/etc/minidlna.conf
+            rm -rf /opt/var/minidlna ;;
+        transmission)
+            svc_stop transmission
+            # It holds the password
+            rm -f /opt/etc/transmission/settings.json ;;
+        syncthing)
+            svc_stop syncthing
+            rm -f /opt/etc/init.d/S91webos-syncthing
+            rm -rf /opt/etc/syncthing ;;
+    esac
+    case "$1" in [a-z]*) rm -f "/opt/etc/webos-entware/credentials/$1" ;; esac
+    return 0
+}
+
+# How to reach an add-on, and its login: 'webos-entware info <name>'
+INFO_URL="" INFO_USER="" INFO_PASS="" INFO_LINES=""
+info_line() { INFO_LINES="$INFO_LINES
+$1"; }
+addon_info_collect() {
+    a=$(tv_addr)
+    INFO_URL="" INFO_USER=$(cred_get "$AD_ID" user) INFO_PASS=$(cred_get "$AD_ID" password) INFO_LINES=""
+    case "$AD_ID" in
+        tailscale)
+            st=$(ts_field BackendState)
+            if [ "$st" = Running ]; then
+                ip4=$(ts ip -4 | head -n 1)
+                info_line "Connected to your tailnet as $ip4."
+                info_line "From any device on it: ssh root@$ip4"
+            elif [ -n "$(ts_field AuthURL)" ]; then
+                INFO_URL=$(ts_field AuthURL)
+                info_line "Not signed in yet. Scan the QR code, or open the link, and sign in to Tailscale."
+            else
+                info_line "Not connected (${st:-not running}). Choose Finish setup to get a sign-in link."
+            fi ;;
+        samba)
+            info_line "Windows: \\\\$a\\TV  (in File Explorer's address bar)"
+            info_line "Mac: smb://$a/TV  (Finder, Go, Connect to Server)"
+            info_line "Shares $FILES_DIR. USB drives are in the USB folder." ;;
+        filebrowser)
+            INFO_URL="http://$a:$FB_PORT"
+            info_line "Open $INFO_URL in a browser on your phone or computer."
+            info_line "Upload, download and manage $FILES_DIR (USB drives are in USB)." ;;
+        minidlna)
+            info_line "Media players on your network see \"LG TV (Entware)\" (in VLC: Local Network, UPnP)."
+            info_line "It serves $FILES_DIR: put media in Media, or on a USB drive." ;;
+        transmission)
+            INFO_URL="http://$a:$TR_PORT"
+            info_line "Open $INFO_URL in a browser to add and manage torrents."
+            info_line "Downloads go to $FILES_DIR/Downloads. Torrent files dropped in Downloads/Watch start by themselves." ;;
+        syncthing)
+            INFO_URL="http://$a:$ST_PORT"
+            info_line "Open $INFO_URL in a browser to add devices and folders."
+            info_line "Sync a folder like $FILES_DIR/Sync with your phone or computer." ;;
+        rclone)
+            info_line "Set up a cloud account over SSH with: rclone config"
+            info_line "Then, for example: rclone copy gdrive:Photos $FILES_DIR/Media/Photos" ;;
+        nettools) info_line "iperf3, nmap, tcpdump, iftop and dig, for testing the TV's network over SSH." ;;
+        archives) info_line "unzip, 7z (p7zip) and unrar, over SSH." ;;
+        vim) info_line "Edit files over SSH with vim." ;;
+        mc) info_line "Run mc over SSH for a two-pane file manager." ;;
+        micro) info_line "Edit files over SSH with micro (Ctrl+S saves, Ctrl+Q quits)." ;;
+        find) info_line "rg searches inside files, fd finds files by name, and fzf picks from a list (Ctrl+R in bash)." ;;
+        *) info_line "$AD_ABOUT." ;;
+    esac
+}
+addon_info() {
+    addon_find "$1" || error_exit "Unknown add-on: ${1:-none}. See: webos-entware addons"
+    state=$(addon_state)
+    addon_info_collect
+    if [ "$JSON" = 1 ]; then
+        printf '{"id":%s,"title":%s,"state":%s,"service":%s,"url":%s,"user":%s,"password":%s,"lines":%s}\n' \
+            "$(json_str "$AD_ID")" "$(json_str "$AD_TITLE")" "$(json_str "$state")" "$(json_bool addon_service "$AD_ID")" \
+            "$(json_str "$INFO_URL")" "$(json_str "$INFO_USER")" "$(json_str "$INFO_PASS")" "$(printf '%s\n' "$INFO_LINES" | json_lines)"
+        return 0
+    fi
+    log "$CYAN" "$AD_TITLE ($state)"
+    printf '%s\n' "$INFO_LINES" | sed '/^$/d; s/^/  /'
+    [ "$AD_ID" = tailscale ] && [ -n "$INFO_URL" ] && echo "  $INFO_URL"
+    [ -n "$INFO_USER" ] && echo "  User: $INFO_USER    Password: $INFO_PASS"
+    return 0
+}
+
 # === Packages: installed, search, add and remove one ===
 # For the TV app's Packages screen.  Package names and search words are
 # checked before anything reaches opkg.
@@ -2241,6 +2730,9 @@ pkg_remove() {
     # locate's settings and hourly job go with it
     if [ "$PKG" = mlocate ]; then addon_find locate && addon_remove locate; return; fi
     confirm "Remove $PKG?" || { info "Kept $PKG."; return 0; }
+    # A service stops first, and its setup goes with it
+    a=$(pkg_addon "$PKG")
+    [ -n "$a" ] && addon_service "$a" && remove_service "$a"
     /opt/bin/opkg remove "$PKG" || error_exit "$PKG didn't uninstall cleanly. See: ent list"
     pkg_installed "$PKG" && error_exit "$PKG is still installed."
     success "Removed $PKG."
@@ -3145,7 +3637,7 @@ elif [ "$1" = move ]; then
     LOC_CHOICE=$MOVE_TO
     [ -n "$MOVE_TO" ] || error_exit "Move it where? Use: webos-entware move appstore (app storage) or move user (user data)."
     shift 2
-elif [ "$1" = add ] || [ "$1" = remove ]; then
+elif [ "$1" = add ] || [ "$1" = remove ] || [ "$1" = info ]; then
     ACTION=$1
     ADDON=${2:-}
     [ -n "$ADDON" ] || error_exit "Name an add-on, e.g. webos-entware $1 htop. See: webos-entware addons"
@@ -3256,6 +3748,7 @@ case "$ACTION" in
     upgrade) upgrade_packages ;;
     addons) addons_list ;;
     add) addon_add "$ADDON" ;;
+    info) addon_info "$ADDON" ;;
     remove) addon_remove "$ADDON" ;;
     move) move_entware "$MOVE_TO" ;;
     app-update) app_update ;;

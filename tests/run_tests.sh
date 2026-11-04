@@ -33,6 +33,14 @@ cat > "$W/fake-opkg" << 'F'
 #!/bin/sh
 DB=/opt/lib/opkg/fake-installed
 mkdir -p /opt/lib/opkg; touch $DB
+# A service: a copy of sleep with the daemon's name, and an init script
+# like Entware's (ENABLED, start and stop)
+fake_daemon() { # process, init script
+    mkdir -p /opt/etc/init.d /opt/lib/fake
+    cp -L /bin/sleep "/opt/lib/fake/$1"
+    printf '#!/bin/sh\nENABLED=yes\ncase "$1" in\n  start) [ "$ENABLED" = yes ] || exit 0; pidof %s >/dev/null || (/opt/lib/fake/%s 300 </dev/null >/dev/null 2>&1 &) ;;\n  stop) pkill -x %s ;;\nesac\nexit 0\n' "$1" "$1" "$1" > "/opt/etc/init.d/$2"
+    chmod 755 "/opt/etc/init.d/$2"
+}
 case "$1" in
     print-architecture) echo "arch all 1"; echo "arch aarch64-3.10 10" ;;
     update) [ -e /run/entware-fail-update ] && { echo "fake: update failed"; exit 1; }
@@ -70,6 +78,69 @@ case "$1" in
                     printf '#!/bin/sh\nfor f in "$1"/*; do [ -x "$f" ] && "$f"; done\n' > /opt/bin/run-parts-vixie
                     printf '#!/bin/sh\necho "cron $1" >> /tmp/cron.log\n' > /opt/etc/init.d/S10cron
                     chmod 755 /opt/sbin/cron /opt/bin/run-parts-vixie /opt/etc/init.d/S10cron ;;
+                tailscale) fake_daemon tailscaled S06tailscaled
+                    cat > /opt/bin/tailscale << 'T'
+#!/bin/sh
+case "$1" in
+    status) pidof tailscaled > /dev/null || { echo "failed to connect to local tailscaled"; exit 1; }
+        st=NeedsLogin url=""
+        [ -e /tmp/ts-up ] && url=https://login.tailscale.com/a/fake123
+        [ -e /tmp/ts-in ] && { st=Running; url=""; }
+        printf '{\n  "Version": "1.96.1",\n  "BackendState": "%s",\n  "AuthURL": "%s",\n  "TailscaleIPs": null\n}\n' "$st" "$url" ;;
+    up) echo "$*" > /tmp/ts-up ;;
+    ip) echo 100.101.102.103 ;;
+    logout) rm -f /tmp/ts-in; echo logout >> /tmp/ts.log ;;
+esac
+T
+                    chmod 755 /opt/bin/tailscale ;;
+                samba4-server) fake_daemon smbd S91smb
+                    mkdir -p /opt/etc/samba; printf '[global]\n    guest ok = yes\n' > /opt/etc/samba/smb.conf
+                    cat > /opt/bin/smbpasswd << 'T'
+#!/bin/sh
+[ -e /run/fail-smbpasswd ] && exit 1
+read -r a; read -r b
+[ "$a" = "$b" ] || exit 1
+echo "$* $a" >> /tmp/smbpasswd.log
+echo "root:0:$a" > /opt/etc/samba/smbpasswd
+T
+                    chmod 755 /opt/bin/smbpasswd ;;
+                wsdd2) fake_daemon wsdd2 S99wsdd2 ;;
+                filebrowser) fake_daemon filebrowser S99filebrowser
+                    mkdir -p /opt/etc/filebrowser /opt/sbin
+                    printf 'ADDR="-a 192.168.1.1"\nPORT="-p 8080"\n' > /opt/etc/filebrowser/filebrowser.conf
+                    cat > /opt/sbin/filebrowser << 'T'
+#!/bin/sh
+echo "$*" >> /tmp/fb.log
+db=$(echo "$*" | sed -n 's/.*-d \([^ ]*\).*/\1/p')
+case "$1 $2" in
+    "config init") : > "$db" ;;
+    "users update") grep -q "^$3 " /tmp/fb-users 2>/dev/null || exit 1; sed -i "s/^$3 .*/$3 $5/" /tmp/fb-users ;;
+    "users add") echo "$3 $4" >> /tmp/fb-users ;;
+esac
+T
+                    chmod 755 /opt/sbin/filebrowser ;;
+                minidlna) fake_daemon minidlnad S90minidlna; echo "media_dir=/opt/media" > /opt/etc/minidlna.conf ;;
+                transmission-daemon) fake_daemon transmission-daemon S88transmission
+                    mkdir -p /opt/etc/transmission
+                    printf '{\n    "download-dir": "/opt/downloads/torrent",\n    "incomplete-dir": "/opt/downloads/torrent/incomplete",\n    "incomplete-dir-enabled": false,\n    "rpc-authentication-required": false,\n    "rpc-password": "",\n    "rpc-port": 9091,\n    "rpc-username": "root",\n    "watch-dir": "/opt/etc/transmission/watchdir",\n    "watch-dir-enabled": true\n}\n' > /opt/etc/transmission/settings.json ;;
+                syncthing) mkdir -p /opt/etc/init.d /opt/lib/fake; cp -L /bin/sleep /opt/lib/fake/syncthing
+                    printf '#!/bin/sh\nENABLED=yes\nPROCS=syncthing\n. /opt/etc/init.d/rc.func\n' > /opt/etc/init.d/S92syncthing; chmod 755 /opt/etc/init.d/S92syncthing
+                    [ -f /opt/etc/init.d/rc.func ] || cat > /opt/etc/init.d/rc.func << 'T'
+case "$1" in
+    start) [ "$ENABLED" = yes ] || exit 0; for PROC in $PROCS; do pidof $PROC > /dev/null || ($PREARGS $PROC $ARGS < /dev/null > /dev/null 2>&1 &); done ;;
+    stop) for PROC in $PROCS; do pkill -x $PROC; done ;;
+esac
+T
+                    cat > /opt/bin/syncthing << 'T'
+#!/bin/sh
+echo "$* STNODEFAULTFOLDER=$STNODEFAULTFOLDER" >> /tmp/st.log
+case "$1" in
+    generate) h=$(echo "$*" | sed -n 's/.*--home=\([^ ]*\).*/\1/p'); read -r pw; mkdir -p "$h"; echo "<gui user=tv password=$pw>" > "$h/config.xml" ;;
+    serve) exec /opt/lib/fake/syncthing 300 ;;
+esac
+T
+                    chmod 755 /opt/bin/syncthing ;;
+                fd) mkdir -p /opt/usr/bin; printf '#!/bin/sh\n' > /opt/usr/bin/fd; chmod 755 /opt/usr/bin/fd ;;
             esac
         done ;;
     remove) shift
@@ -552,7 +623,7 @@ assert d[\"htop\"][\"state\"] == \"notInstalled\" and d[\"git\"][\"packages\"] =
 assert d[\"locate\"][\"state\"] == \"notInstalled\" and len(d) >= 10, d
 " "$W/out"'
 run add htop -y
-ok "add installs an add-on" 'grep -q "htop is ready" "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
+ok "add installs an add-on" 'grep -q "Added htop." "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
 run add git -y
 ok "add git brings HTTPS certificates with it" '[ -f /opt/lib/opkg/info/git-http.control ] && [ -s /opt/etc/ssl/certs/ca-certificates.crt ]'
 run add locate -y
@@ -561,8 +632,8 @@ run addons
 ok "addons lists states for people too" 'grep -q "htop.*installed" "$W/out" && grep -q "tmux.*not installed" "$W/out"'
 ! run add "htop;reboot" -y
 ok "add refuses a name that isn't in the catalog" 'grep -q "Unknown add-on" "$W/out"'
-! run add vim -y
-ok "add refuses packages outside the catalog" 'grep -q "Unknown add-on: vim" "$W/out"'
+! run add emacs -y
+ok "add refuses packages outside the catalog" 'grep -q "Unknown add-on: emacs" "$W/out"'
 ! run remove nano -y
 ok "remove keeps the base setup" 'grep -q "part of the base setup" "$W/out" && [ -x /opt/bin/nano ]'
 rm -f /tmp/opkg-removed.log
@@ -583,7 +654,7 @@ for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2;
 ok "job add finishes and reports its name" 'python3 -c "
 import json,sys; d=json.load(open(sys.argv[1]))
 assert d[\"state\"] == \"done\" and d[\"name\"] == \"add tmux\" and d[\"exit\"] == 0, d
-assert any(\"tmux is ready\" in l for l in d[\"log\"]), d
+assert any(\"Added tmux\" in l for l in d[\"log\"]), d
 " "$W/out" && [ -f /opt/lib/opkg/info/tmux.control ]'
 (cd /tmp && $SH /tmp/webos-entware-installer.sh job remove tmux) > "$W/out" 2>&1
 for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
@@ -940,6 +1011,81 @@ ok "logs reads well for people too" 'grep -q "Boot log" "$W/out" && grep -q "pkg
 ! (cd /tmp && $SH /tmp/webos-entware-installer.sh job pkg-add "x y") > "$W/out" 2>&1
 ok "job pkg-add refuses names that aren't packages" 'grep -q "isn.t a package name" "$W/out"'
 rm -f /opt/lib/opkg/fake-list /tmp/logid
+run uninstall -y
+
+echo "== [$SH] 37. network services: set up with a password before they start, and removed cleanly"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock /tmp/ts-* /tmp/fb-users /tmp/fb.log /tmp/st.log /tmp/smbpasswd.log
+run install -y
+jq_ok() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if ($1) else 1)" "$W/out"; }
+pw_of() { sed -n 's/^password=//p' "/opt/etc/webos-entware/credentials/$1"; }
+run add filebrowser -y
+ok "add filebrowser sets it up on port 8090 for /opt/files, and starts it" 'grep -q "File Browser is at http://.*:8090" "$W/out" && grep -q "^# File Browser add-on (webos-entware-installer)" /opt/etc/filebrowser/filebrowser.conf && grep -q "ROOT=\"-r /opt/files\"" /opt/etc/filebrowser/filebrowser.conf && pidof filebrowser > /dev/null'
+ok "it keeps the stock settings it replaced" 'grep -q 192.168.1.1 /opt/etc/filebrowser/filebrowser.conf.bak'
+ok "with a new 16-character password, saved for root only" 'p=$(pw_of filebrowser) && [ ${#p} -eq 16 ] && grep -q "^admin $p" /tmp/fb-users && [ "$(stat -c %a /opt/etc/webos-entware/credentials/filebrowser)" = 600 ] && [ "$(stat -c %a /opt/etc/webos-entware/credentials)" = 700 ]'
+ok "and makes the shared folders, with USB drives in USB" '[ -d /opt/files/Downloads/Watch ] && [ -d /opt/files/Media ] && [ "$(readlink /opt/files/USB)" = /tmp/usb ]'
+FBPW=$(pw_of filebrowser)
+run info filebrowser --json
+ok "info --json gives its address and login" 'jq_ok "d[\"state\"] == \"installed\" and d[\"service\"] is True and d[\"url\"].endswith(\":8090\") and d[\"user\"] == \"admin\" and d[\"password\"] == \"$FBPW\""'
+run add filebrowser -y
+ok "adding it again keeps the password" '[ "$(pw_of filebrowser)" = "$FBPW" ] && grep -q "users update admin -p $FBPW" /tmp/fb.log'
+pkill -x filebrowser; sleep 0.3
+run addons --json
+ok "a service that stopped needs setup again" 'jq_ok "[a for a in d if a[\"id\"] == \"filebrowser\"][0][\"state\"] == \"needsSetup\""'
+
+run add samba -y
+ok "add samba shares /opt/files with a password, and no guests" 'grep -q "Samba is sharing /opt/files" "$W/out" && grep -q "map to guest = Never" /opt/etc/samba/smb.conf && ! grep -q "guest ok" /opt/etc/samba/smb.conf && grep -q "path = /opt/files" /opt/etc/samba/smb.conf && pidof smbd > /dev/null && pidof wsdd2 > /dev/null'
+ok "you sign in as tv, root's Samba user" 'grep -qx "root = tv" /opt/etc/samba/users.map && grep -q "^-s -a root $(pw_of samba)" /tmp/smbpasswd.log && grep -q "guest ok = yes" /opt/etc/samba/smb.conf.bak'
+
+run add transmission -y
+ok "add transmission turns on its password and saves to /opt/files/Downloads" 'grep -q "Transmission is at http://.*:9091" "$W/out" && grep -q "\"rpc-authentication-required\": true," /opt/etc/transmission/settings.json && grep -q "\"rpc-password\": \"$(pw_of transmission)\"," /opt/etc/transmission/settings.json && grep -q "\"rpc-username\": \"tv\"," /opt/etc/transmission/settings.json && grep -q "\"watch-dir-enabled\": true$" /opt/etc/transmission/settings.json && pidof transmission-daemon > /dev/null'
+ok "and leaves its settings file valid JSON, for root only" 'python3 -c "import json; json.load(open(\"/opt/etc/transmission/settings.json\"))" && [ "$(stat -c %a /opt/etc/transmission/settings.json)" = 600 ]'
+
+run add syncthing -y
+ok "add syncthing gives it a home, a password (on stdin, not the command line) and no default folder" 'grep -q "Syncthing is at http://.*:8384" "$W/out" && grep -q "password=$(pw_of syncthing)>" /opt/etc/syncthing/config.xml && ! grep -q "$(pw_of syncthing)" /tmp/st.log && grep -q "generate --home=/opt/etc/syncthing --gui-user=tv --gui-password=- .*STNODEFAULTFOLDER=1" /tmp/st.log'
+ok "and runs it from its own start script instead of the package's" 'pidof syncthing > /dev/null && grep -q "serve --home=/opt/etc/syncthing --no-browser --no-upgrade --gui-address=http://0.0.0.0:8384" /tmp/st.log && [ -x /opt/etc/init.d/S91webos-syncthing ] && [ ! -x /opt/etc/init.d/S92syncthing ] && grep -q "^ENABLED=no" /opt/etc/init.d/S92syncthing'
+
+run add minidlna -y
+ok "add minidlna serves /opt/files" 'grep -q "^media_dir=/opt/files$" /opt/etc/minidlna.conf && grep -q "^wide_links=yes" /opt/etc/minidlna.conf && pidof minidlnad > /dev/null'
+
+run add tailscale -y
+ok "add tailscale starts it and gives the sign-in link" 'grep -q "https://login.tailscale.com/a/fake123" "$W/out" && grep -q "up --accept-dns=false --netfilter-mode=off" /tmp/ts-up && pidof tailscaled > /dev/null'
+run info tailscale --json
+ok "until you sign in, it needs setup, and info has the link for a QR code" 'jq_ok "d[\"state\"] == \"needsSetup\" and d[\"url\"] == \"https://login.tailscale.com/a/fake123\""'
+touch /tmp/ts-in
+run info tailscale
+ok "signed in, info shows the TV's tailnet address" 'grep -q "Connected to your tailnet as 100.101.102.103" "$W/out" && grep -q "ssh root@100.101.102.103" "$W/out"'
+run addons --json
+ok "and every service shows as running" 'jq_ok "all(a[\"state\"] == \"installed\" for a in d if a[\"service\"] and a[\"id\"] != \"filebrowser\")"'
+
+run remove tailscale -y
+ok "remove tailscale signs the TV out and deletes its state" 'grep -q logout /tmp/ts.log && ! pidof tailscaled > /dev/null && [ ! -e /opt/var/lib/tailscale ] && [ ! -f /opt/lib/opkg/info/tailscale.control ]'
+echo hi > /opt/files/Media/movie.mkv
+run remove samba -y
+ok "remove samba stops it, deletes its settings and password, and keeps your files" '! pidof smbd > /dev/null && ! pidof wsdd2 > /dev/null && [ ! -e /opt/etc/samba/smb.conf ] && [ ! -e /opt/etc/samba/smbpasswd ] && [ ! -e /opt/etc/webos-entware/credentials/samba ] && [ -f /opt/files/Media/movie.mkv ] && grep -q "files in /opt/files are kept" "$W/out"'
+run remove transmission -y
+ok "remove transmission deletes its settings, which hold the password" '! pidof transmission-daemon > /dev/null && [ ! -e /opt/etc/transmission/settings.json ]'
+run remove syncthing -y; run remove minidlna -y; run remove filebrowser -y
+ok "remove syncthing, minidlna and filebrowser clean up too" '! pidof syncthing > /dev/null && ! pidof minidlnad > /dev/null && [ ! -e /opt/etc/init.d/S91webos-syncthing ] && [ ! -e /opt/etc/syncthing ] && [ ! -e /opt/etc/filebrowser/filebrowser.db ] && [ -z "$(ls /opt/etc/webos-entware/credentials)" ]'
+
+touch /run/fail-smbpasswd
+! run add samba -y
+rm -f /run/fail-smbpasswd
+ok "if a setup fails, the service is stopped and kept from starting at boot" 'grep -q "Couldn.t set Samba.s password" "$W/out" && ! pidof smbd > /dev/null && [ ! -x /opt/etc/init.d/S91smb ] && [ ! -x /opt/etc/init.d/S99wsdd2 ]'
+run add samba -y
+ok "and adding it again turns it back on" '[ -x /opt/etc/init.d/S91smb ] && pidof smbd > /dev/null'
+run remove samba -y
+/opt/bin/opkg install transmission-daemon > /dev/null
+run post-install transmission-daemon
+ok "installed on its own, a service waits to be set up with a password" '[ ! -x /opt/etc/init.d/S88transmission ] && grep -q "won.t start until it.s set up with a password: webos-entware add transmission" "$W/out"'
+/opt/bin/opkg remove transmission-daemon > /dev/null
+
+run add find -y
+ok "add find puts fd on the PATH" '[ "$(readlink /opt/bin/fd)" = /opt/usr/bin/fd ] && grep -q "Added Search tools" "$W/out"'
+run remove find -y
+ok "and remove takes the link away" '[ ! -e /opt/bin/fd ] && [ ! -L /opt/bin/fd ]'
+run add nettools -y
+ok "a tool bundle installs every package in it" '[ -z "$(for p in iperf3 nmap tcpdump iftop bind-dig; do [ -f /opt/lib/opkg/info/$p.control ] || echo "$p"; done)" ]'
+pkill -f /opt/lib/fake/ 2>/dev/null
 run uninstall -y
 
 echo "== [$SH] $PASS passed, $FAIL failed"

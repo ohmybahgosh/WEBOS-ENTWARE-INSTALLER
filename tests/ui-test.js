@@ -34,8 +34,14 @@ function demo(scenario) {
         ['rsync', 'rsync', 'rsync', true, 'notInstalled'],
         ['curl', 'curl', 'curl', true, 'notInstalled'],
         ['jq', 'jq', 'jq', true, 'notInstalled'],
-        ['banner', 'Login banner', 'neofetch', true, 'notInstalled']
-    ].map(([id, title, packages, removable, state]) => ({ id, title, packages, removable, state, about: 'About ' + title }));
+        ['banner', 'Login banner', 'neofetch', true, 'notInstalled'],
+        ['tailscale', 'Tailscale', 'tailscale', true, 'needsSetup'],
+        ['filebrowser', 'File Browser', 'filebrowser', true, 'installed']
+    ].map(([id, title, packages, removable, state]) => ({ id, title, packages, removable, state, service: id === 'tailscale' || id === 'filebrowser', about: 'About ' + title }));
+    const INFO = {
+        tailscale: { url: 'https://login.tailscale.com/a/fake123', user: '', password: '', lines: ['Not signed in yet. Scan the QR code, or open the link, and sign in to Tailscale.'] },
+        filebrowser: { url: 'http://192.168.1.50:8090', user: 'admin', password: 'Xk4mP9qL2vR7nT3w', lines: ['Open http://192.168.1.50:8090 in a browser on your phone or computer.'] }
+    };
     let UPDATES = [{ name: 'htop', installed: '3.4.1-1', available: '3.4.2-1' }, { name: 'curl', installed: '8.11.1-1', available: '8.12.0-1' }];
     const base = {
         version: '2.8.0', model: 'OLED55C2PUA', webos: 'webOS 25', webosRelease: '10.2.1', firmware: '33.21.30',
@@ -65,6 +71,11 @@ function demo(scenario) {
         const reply = (out) => setTimeout(() => cb(true, out, ''), 30);
         if (args === 'status --json') { return reply(JSON.stringify(Object.assign({}, base, { updates: UPDATES.length, updatesChecked: '2026-11-02 20:58', updatesAgeHours: 0, job: job ? job.state : 'none', jobName: job ? job.name : '' }))); }
         if (args === 'addons --json') { return reply(JSON.stringify(ADDONS)); }
+        const inf = /^info ([a-z0-9]+) --json$/.exec(args);
+        if (inf && INFO[inf[1]]) {
+            const a = ADDONS.find((x) => x.id === inf[1]);
+            return reply(JSON.stringify(Object.assign({ id: a.id, title: a.title, state: a.state, service: true }, INFO[inf[1]])));
+        }
         if (args === 'app-update --check --json') {
             const latest = window.ENTWARE_LATEST || base.version;
             return reply(JSON.stringify({ current: base.version, command: base.version, latest, newer: latest !== base.version, notes: '', error: '' }));
@@ -161,7 +172,7 @@ function check(name, cond) {
     await press(page, 'ArrowDown', order.indexOf('addons'));
     await press(page, 'Enter');
     await page.waitForSelector('.addon');
-    check('opens with every add-on', (await page.$$('.addon')).length === 12);
+    check('opens with every add-on', (await page.$$('.addon')).length === 14);
     check('the first row has focus', await page.$eval('.addon', (r) => r.classList.contains('focus')));
     check('states show as Included, Finish setup and Add', await page.$eval('#addon-list', (l) => /Included/.test(l.textContent) && /Finish setup/.test(l.textContent) && /Add/.test(l.textContent)));
     await page.screenshot({ path: path.join(OUT, '3-addons.png') });
@@ -215,6 +226,33 @@ function check(name, cond) {
     check('removes as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job remove tmux'));
     await press(page, 'Enter');
     await page.waitForSelector('.addon');
+
+    // A network service opens with its address, password and a QR code
+    check('a service shows Running, and Tailscale asks you to sign in', await page.$eval('#addon-list', (l) => /Running/.test(l.textContent) && /Sign in/.test(l.textContent)));
+    await press(page, 'ArrowDown', 20);
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /File Browser/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.cred'));
+    check('a running service shows its address, login and a QR code', /Xk4mP9qL2vR7nT3w/.test(await page.textContent('.cred')) && /admin/.test(await page.textContent('.cred')) && !!(await page.$('.qr svg')) && (await page.evaluate(() => window.ENTWARE_CALLS)).includes('info filebrowser --json'));
+    check('with Remove as its only choice', await page.$$eval('.addon', (rs) => rs.length === 1 && /Remove File Browser/.test(rs[0].textContent)));
+    await page.screenshot({ path: path.join(OUT, '16-addon-info.png') });
+    await press(page, 'Enter');
+    check('asks before removing it, and says files stay', /Remove File Browser\?/.test(await overlayTitle(page)) && /files in \/opt\/files stay/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Escape');
+    await page.waitForFunction(() => /File Browser/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.cred'));
+    check('BACK on the question returns to the service', true);
+    await press(page, 'Escape');
+    await page.waitForSelector('#addon-list .addon.focus');
+    check('BACK returns to Add-ons, on the same row', /File Browser/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'ArrowUp');
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /Tailscale/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.qr svg'));
+    check('Tailscale shows a QR code of its sign-in link, and can get a new one', /login\.tailscale\.com/.test(await page.textContent('#overlay-body')) && /Get a new sign-in link/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
+    check('which runs its setup again as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job add tailscale'));
+    await press(page, 'Enter');
+    await page.waitForSelector('#addon-list .addon.focus');
+    check('and afterwards it\'s back on Tailscale in the list', /Tailscale/.test(await page.$eval('.addon.focus', (r) => r.textContent)) && /Running/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
     await press(page, 'Escape');
     check('BACK closes Add-ons', await page.$eval('#overlay', (o) => o.classList.contains('hidden')));
 

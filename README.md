@@ -16,7 +16,7 @@
 
 </div>
 
-Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`, and gives you a bash shell, handy webOS commands and one-press [add-ons](#add-ons) like git, Python and htop.  Run it from the **[TV app](#the-tv-app)** with your remote, or over SSH.  Either way it's one POSIX shell script with no dependencies.
+Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of Linux command line packages with `opkg`, and gives you a bash shell, handy webOS commands and one-press [add-ons](#add-ons) like git, Python, Tailscale, Samba file sharing and a media server.  Run it from the **[TV app](#the-tv-app)** with your remote, or over SSH.  Either way it's one POSIX shell script with no dependencies.
 
 > [!IMPORTANT]
 > **This changes a rooted TV, so read what it does first.**  It installs into the TV's app storage (`/mnt/lg/appstore/entware`), adds one Homebrew Channel boot script and, unless you use `--no-shell`, swaps in its own shell files after backing yours up.  Everything it adds is listed in [What it changes on the TV](#what-it-changes-on-the-tv), and `webos-entware uninstall` takes it all back out.  Keep **telnet** on in the Homebrew Channel as a way back in.  Provided as-is, with no warranty.
@@ -26,7 +26,7 @@ Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of L
 >
 > Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
 >
-> - **Tests on every push:** 250+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
+> - **Tests on every push:** 300+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
 > - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
 >
 > Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
@@ -90,7 +90,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 
 - **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
-- **Add-ons:** nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl, jq and a [login banner](#login-banner), each with the setup it needs on webOS.  One press adds, finishes setting up or removes one.
+- **Add-ons:** 25 of them, each with the setup it needs on webOS.  Tools like git, Python, htop, tmux, Vim and a [login banner](#login-banner), and [network services](#network-services) like Tailscale, Samba, File Browser, a DLNA media server, Transmission and Syncthing.  One press adds, finishes setting up or removes one.  A service opens to its address and password, with a QR code for your phone.
 - **Packages:** every package that's installed, with its version and size and **Remove**, and a search field that opens the TV's keyboard.  Type a word like htop or python, and **Install** any of the 2,900+ Entware packages that match, with the same webOS setup `ent install` does.  Packages Entware needs, and ones other packages need, say why they stay.
 - **Package updates:** a screen listing every package with an update, its current and new version, with **Update** for one or **Update all**.  The button shows how many there are, and the app checks Entware's server for new ones once a day.
 - **Uninstall Entware**, with a confirmation before anything is removed.
@@ -105,7 +105,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 
 <p align="center">
   <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, Full check and logs, Report for GitHub and Uninstall Entware">
-  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux, ncdu, rsync, curl and jq with Add, and the Login banner installed">
+  <img src="images/app-addons.png" width="49%" alt="The Add-ons screen at the network services: Tailscale asking you to sign in, and Samba, File Browser, the DLNA media server, Transmission and Syncthing running">
 </p>
 <p align="center"><img src="images/app-packages.gif" width="720" alt="Animated: the Packages screen lists what's installed, then a search for top finds atop, htop and iftop, and installing iftop runs in the background until it shows Installed"></p>
 
@@ -127,7 +127,8 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 ## Features
 
 - ✅ **A TV app** for the Homebrew Channel: install, repair, add-ons, updates and uninstall from the remote, with live progress.
-- ✅ **One-press add-ons** (nano colors, locate, git, Python, htop, tmux, a login banner and more), each set up for webOS.
+- ✅ **One-press add-ons** (git, Python, htop, tmux, Vim, a login banner and more), each set up for webOS.
+- ✅ **Network services, set up safely:** Tailscale, Samba, File Browser, a DLNA media server, Transmission and Syncthing, each with a password made on the TV and no guest access, before it first starts.
 - ✅ **Checks the TV before touching anything**: root, model, webOS version, kernel, Homebrew Channel, free space and the Entware download server.
 - ✅ **Picks the right Entware build**: recommends 64-bit (`aarch64`) or 32-bit (`armv7`) from your kernel, tells you why, and asks you to continue, switch or exit.
 - ✅ **Test-runs the build first**. If the 64-bit build can't run, it falls back to 32-bit.
@@ -196,7 +197,7 @@ From there, [add-ons](#add-ons) are one press away.  For the bash shell and `ent
 Download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.11.1_all.ipk"}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.12.0_all.ipk"}'
 ```
 
 The Homebrew Channel won't offer updates for it unless you add the repository too, but the app's own **Update to v…** still works.
@@ -298,6 +299,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware addons` | List the [add-ons](#add-ons) and whether each is installed |
 | `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
 | `webos-entware remove <name>` | Uninstall an add-on |
+| `webos-entware info <name>` | How to reach a [network service](#network-services), and its password |
 | `webos-entware installed` | List installed packages with their version, size and what needs them (`--json` for scripts) |
 | `webos-entware search <word>` | Search Entware's packages, names first, marking what's installed |
 | `webos-entware pkg-add <name>` | Install one package with its webOS setup, like `ent install` |
@@ -481,10 +483,45 @@ webos-entware remove git     # and take it off again
 | `curl` | curl | Fetch URLs and test APIs |
 | `jq` | jq | Read and filter JSON, like `luna-send` replies |
 | `banner` | neofetch 7.1.0, from GitHub | A [login banner](#login-banner) with a webOS wordmark and your TV's specs.  The only add-on not from Entware, so it's checked against the release's checksum |
+| `rclone` | rclone, fuse3-utils | Copy, sync and mount Google Drive, Dropbox, OneDrive and 70 more clouds.  Set one up with `rclone config` |
+| `nettools` | iperf3, nmap, tcpdump, iftop, bind-dig | Test the TV's network: speed between devices, open ports, traffic and DNS |
+| `archives` | unzip, p7zip, unrar | Open zip, 7z and rar files |
+| `vim` | vim-full | The full Vim editor |
+| `mc` | mc | Midnight Commander, a two-pane file manager |
+| `micro` | micro | A simple editor with mouse support and familiar shortcuts (Ctrl+S, Ctrl+Q) |
+| `find` | ripgrep, fd, fzf | Fast search inside files (`rg`) and by name (`fd`), and a fuzzy finder.  Entware keeps fd outside the PATH, so the add-on links it into `/opt/bin` |
 
-Any other Entware package installs with `ent install <package>` as usual.  The list is fixed in the installer, so the app can only ever ask for one of these by name.
+The six [network services](#network-services) below are add-ons too.  Any other Entware package installs with `ent install <package>` as usual.  The list is fixed in the installer, so the app can only ever ask for one of these by name.
 
 <p align="center"><img src="images/cli-addons.png" width="760" alt="webos-entware addons listing every add-on and whether it is installed, then adding the login banner"></p>
+
+### Network services
+
+Six add-ons run a service that starts with the TV.  Entware's own settings for some of them are open to anyone on your network (Samba lets guests in, and Transmission has no password), so each add-on sets the service up before it first starts:
+
+- **A password made on the TV** for anything with a login, 16 random letters and numbers.  It's kept in `/opt/etc/webos-entware/credentials`, which only root can read, and adding the add-on again keeps it.
+- **No guest access**, and nothing started with its stock settings.  If a setup doesn't finish, the service is stopped and kept from starting at boot.  Installed on its own with `ent install` (or the Packages screen), a service waits until you add it here.
+- **One shared folder, `/opt/files`,** with `Downloads`, `Media` and `Sync` in it, and USB drives in `USB`.  Removing a service never deletes your files.
+
+| Add-on | Packages | What you get | Where |
+|:-------|:---------|:-------------|:------|
+| `tailscale` | tailscale | Reach the TV over SSH from anywhere on your tailnet, with no ports opened.  The app shows a QR code of the sign-in link, and the TV reconnects by itself after a restart.  DNS and the firewall stay webOS's | `ssh root@<tailnet IP>` |
+| `samba` | samba4-server, wsdd2 | Share `/opt/files` with Windows and Mac.  SMB2 and up, and it shows up in Windows' Network | `\\<TV IP>\TV`, user `tv` |
+| `filebrowser` | filebrowser | Upload, download and manage `/opt/files` from a browser on your phone or computer | `http://<TV IP>:8090`, user `admin` |
+| `minidlna` | minidlna | Play videos, music and photos from `/opt/files` and USB drives on other TVs, consoles and VLC.  No login: DLNA has none, and it only reads | "LG TV (Entware)" |
+| `transmission` | transmission-daemon, transmission-web | Torrents from a browser, saved to `/opt/files/Downloads`.  Torrent files dropped in `Downloads/Watch` start by themselves | `http://<TV IP>:9091`, user `tv` |
+| `syncthing` | syncthing | Keep a folder like `/opt/files/Sync` in sync with your phone and computers | `http://<TV IP>:8384`, user `tv` |
+
+In the TV app, open a service in **Add-ons** to see its address and password, with a QR code of the address for your phone.  Over SSH:
+
+```sh
+webos-entware info samba     # the address, user and password
+webos-entware remove samba   # stops it, and deletes its settings and password
+```
+
+Ports 8080 and 9080 are taken by webOS, so File Browser uses 8090.  Removing Tailscale signs the TV out of your tailnet.
+
+<p align="center"><img src="images/app-addon-info.png" width="760" alt="File Browser in the TV app's Add-ons: Running, with a QR code of http://192.168.50.96:8090, the address, user admin and its password, and Remove File Browser"></p>
 
 ---
 
@@ -534,6 +571,7 @@ Entware goes in a new root-only folder at the top of app storage, not `/media/de
 | `/home/root/.bash_profile` | Loads `.profile` and `.bashrc` in bash |
 | `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |
 | `/opt/bin/neofetch`, `/opt/etc/webos-entware/banner` | Only with the [login banner](#login-banner) add-on: neofetch, and the banner's wordmark and settings |
+| `/opt/files`, `/opt/etc/webos-entware/credentials` | Only with a [network service](#network-services): the shared folder, and each service's password |
 
 Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. A repair keeps the installer's `.bashrc` as it is, edits included, and if it ever has to rewrite `.profile` or `.bash_profile` after you changed them, it saves your copy as `.bak` first (then `.bak.1`, `.bak.2` and so on, so an older backup is never overwritten). Uninstalling saves an edited `.bashrc` as `.bashrc.entware-saved`.
 

@@ -28,7 +28,7 @@
 
     var state = null;        // last status --json
     var latest = null;       // newest release on GitHub, if newer than this app
-    var overlayMode = null;  // null, 'busy', 'message', 'confirm', or a list: 'addons', 'updates', 'report', 'packages', 'logs'
+    var overlayMode = null;  // null, 'busy', 'message', 'confirm', or a list: 'addons', 'updates', 'report', 'packages', 'logs', 'addoninfo'
     var onConfirm = null;
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
@@ -261,13 +261,19 @@
             var b = backTo;
             backTo = '';
             if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); }
-            else if (b === 'packages') { openPackages(); } else if (b === 'logs') { openLogs(); } else { openAddons(); }
+            else if (b === 'packages') { openPackages(); } else if (b === 'logs') { openLogs(); }
+            else if (b === 'addoninfo' && addonInfo) { openAddonInfo(addonInfo.addon); }
+            else {
+                // Back on the add-on that was open
+                if (addonInfo) { listIndex = addonInfo.index; addonInfo = null; }
+                openAddons();
+            }
             return;
         }
         focusCurrent();
     }
     function confirmThen(title, text, fn) {
-        backTo = /^(addons|updates|packages|logs)$/.test(overlayMode || '') ? overlayMode : ''; // BACK returns to the list
+        backTo = /^(addons|updates|packages|logs|addoninfo)$/.test(overlayMode || '') ? overlayMode : ''; // BACK returns to the list
         onConfirm = fn;
         overlay('confirm', esc(title), esc(text), 'Press OK to go ahead, or BACK to cancel.');
     }
@@ -385,8 +391,8 @@
     }
 
     function addonPill(a) {
-        if (a.state === 'installed') { return a.removable ? '<span class="pill pill-ok">Installed</span>' : '<span class="pill pill-ok">Included</span>'; }
-        if (a.state === 'needsSetup') { return '<span class="pill pill-warn">Finish setup</span>'; }
+        if (a.state === 'installed') { return a.removable ? '<span class="pill pill-ok">' + (a.service ? 'Running' : 'Installed') + '</span>' : '<span class="pill pill-ok">Included</span>'; }
+        if (a.state === 'needsSetup') { return '<span class="pill pill-warn">' + (a.id === 'tailscale' ? 'Sign in' : 'Finish setup') + '</span>'; }
         return '<span class="pill pill-add">Add</span>';
     }
 
@@ -395,7 +401,7 @@
             return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
                 '<div><b>' + esc(a.title) + '</b><small>' + esc(a.about) + '</small></div>' + addonPill(a) + '</div>';
         }).join('') + '</div>';
-        overlay('addons', 'Add-ons', html, 'OK adds, finishes setup or removes.  BACK to close.');
+        overlay('addons', 'Add-ons', html, 'OK adds one, or opens it to finish setup, see its password or remove it.  BACK to close.');
         Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
             row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
             row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseAddon(); });
@@ -421,8 +427,12 @@
         if (a.state === 'notInstalled') {
             confirmThen('Add ' + a.title + '?', a.about + '.  ' + (a.id === 'banner' ?
                 'Downloads neofetch 7.1.0 from GitHub and checks it against the release\'s checksum.  Needs internet.' :
-                'Installs ' + a.packages + ' from Entware, and needs internet.'),
+                'Installs ' + a.packages + ' from Entware, and needs internet.') +
+                (a.id === 'tailscale' ? '  It starts with the TV.  Then sign in to Tailscale with the QR code it shows here.' :
+                    (a.service ? '  It starts with the TV, with no guest access and a password made on the TV.  Afterwards, open it here for its address and password.' : '')),
                 function () { startJob('add ' + a.id); });
+        } else if (a.service) {
+            openAddonInfo(a, listIndex);
         } else if (a.state === 'needsSetup') {
             confirmThen('Finish setting up ' + a.title + '?', 'It\'s installed, but not set up for webOS yet.  This finishes the setup.',
                 function () { startJob('add ' + a.id); });
@@ -432,6 +442,76 @@
         } else {
             backTo = 'addons';
             overlay('message', esc(a.title), esc(a.title + ' is part of the base setup, so it stays installed.  ' + a.about + '.'), 'Press OK or BACK to go back.');
+        }
+    }
+
+    // A network service: how to reach it and its password, with a QR code
+    // of its address (or Tailscale's sign-in link) for a phone, and what can
+    // be done with it
+    var addonInfo = null;   // { addon, index (in the add-ons list), info, rows }
+    function openAddonInfo(a, index) {
+        if (busy) { return; }
+        busy = true;
+        if (index !== undefined) { addonInfo = { addon: a, index: index }; }
+        overlay('busy', '<span class="spinner"></span>' + esc(a.title), logHtml(['Checking ' + a.title + '…']), '');
+        runScript('info ' + a.id + ' --json', function (ok, out) {
+            busy = false;
+            var d = parseJson(out);
+            if (!d || d.id !== a.id) {
+                backTo = 'addons';
+                overlay('message', '<span class="result-bad">Couldn\'t check ' + esc(a.title) + '</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to go back.');
+                return;
+            }
+            var rows = [];
+            if (d.state !== 'installed') {
+                rows.push(a.id === 'tailscale' ?
+                    { act: 'setup', title: d.url ? 'Get a new sign-in link' : 'Connect', sub: 'starts Tailscale and asks it for a sign-in link' } :
+                    { act: 'setup', title: 'Finish setup', sub: 'sets it up again and starts it, with the same password' });
+            }
+            rows.push({ act: 'remove', title: 'Remove ' + a.title, sub: a.id === 'tailscale' ? 'signs the TV out of your tailnet and uninstalls tailscale' :
+                'stops it and uninstalls ' + a.packages + '.  Your files in /opt/files stay.' });
+            addonInfo = { addon: a, index: addonInfo && addonInfo.addon.id === a.id ? addonInfo.index : 0, info: d, rows: rows };
+            listIndex = 0;
+            renderAddonInfo();
+        });
+    }
+    function renderAddonInfo() {
+        var a = addonInfo.addon, d = addonInfo.info, svg = '';
+        if (d.url) {
+            try {
+                var qr = window.qrcode(0, 'M');
+                qr.addData(d.url);
+                qr.make();
+                svg = qr.createSvgTag({ cellSize: 4, margin: 12, scalable: true });
+            } catch (e) { svg = ''; }
+        }
+        var text = (d.lines || []).map(function (l) { return '<p>' + esc(l) + '</p>'; }).join('') +
+            (d.user ? '<div class="cred">User <b>' + esc(d.user) + '</b><br>Password <b>' + esc(d.password) + '</b></div>' : '') +
+            (d.url && a.id === 'tailscale' ? '<p class="dim">' + esc(d.url) + '</p>' : '');
+        var html = '<div class="qr qr-small">' + svg + '<div class="info-text">' + text + '</div></div>' +
+            '<div class="addons addons-short" id="addon-list">' + addonInfo.rows.map(function (r, i) {
+                return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
+                    '<div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div></div>';
+            }).join('') + '</div>';
+        overlay('addoninfo', esc(a.title) + (d.state === 'installed' ? ' <span class="pill pill-ok">Running</span>' : ''), html,
+            (svg ? 'Scan the QR code with your phone.  ' : '') + 'OK picks, BACK goes back.');
+        backTo = 'addons';
+        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
+            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseAddonInfo(); });
+        });
+        focusAddon(listIndex);
+    }
+    function chooseAddonInfo() {
+        var a = addonInfo && addonInfo.addon, r = addonInfo && addonInfo.rows[listIndex];
+        if (!a || !r || !/^[a-z0-9]+$/.test(a.id)) { return; }
+        if (r.act === 'setup') {
+            backTo = '';
+            startJob('add ' + a.id);
+        } else if (r.act === 'remove') {
+            confirmThen('Remove ' + a.title + '?', 'Stops it, uninstalls ' + a.packages + ' and deletes its settings and password.' +
+                (a.id === 'tailscale' ? '  The TV signs out of your tailnet.' : '  Your files in /opt/files stay.'),
+                function () { startJob('remove ' + a.id); });
         }
     }
 
@@ -944,11 +1024,11 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
-        if (/^(addons|updates|report|packages|logs)$/.test(overlayMode || '')) {
+        if (/^(addons|updates|report|packages|logs|addoninfo)$/.test(overlayMode || '')) {
             if (k === KEY.UP) { focusAddon(listIndex - 1); }
             else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
             else if (k === KEY.ENTER) {
-                ({ updates: chooseUpdate, report: chooseReport, packages: choosePackage, logs: chooseLog }[overlayMode] || chooseAddon)();
+                ({ updates: chooseUpdate, report: chooseReport, packages: choosePackage, logs: chooseLog, addoninfo: chooseAddonInfo }[overlayMode] || chooseAddon)();
             }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
             e.preventDefault();

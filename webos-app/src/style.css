@@ -112,3 +112,12 @@ footer .right { margin: 0 0 0 auto; }
 .panel-title .dim { font-size: 21px; font-weight: 500; color: #7d8ba1; margin-left: 12px; }
 .whatsnew { margin: 0; padding: 0 0 0 30px; font-size: 23px; line-height: 1.45; color: #c9d6e8; }
 .whatsnew li { margin-bottom: 12px; }
+
+/* An add-on's address and password */
+.panel-body .qr-small { align-items: flex-start; margin-bottom: 26px; }
+.panel-body .qr-small svg { width: 300px; height: 300px; margin-right: 40px; }
+.info-text p { margin: 0 0 12px; word-break: break-word; }
+.cred { display: inline-block; margin-top: 6px; padding: 16px 24px; border-radius: 14px; background: #101c30; font-size: 26px; line-height: 1.6; }
+.cred b { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; color: #e8eef7; margin-left: 12px; letter-spacing: 1px; }
+.addons-short { max-height: 260px; }
+.panel-title .pill { font-size: 19px; vertical-align: middle; }
