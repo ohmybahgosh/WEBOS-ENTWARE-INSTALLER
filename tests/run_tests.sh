@@ -43,7 +43,10 @@ fake_daemon() { # process, init script
     printf '#!/bin/sh\nENABLED=yes\ncase "$1" in\n  start) [ "$ENABLED" = yes ] || exit 0; pidof %s >/dev/null || (/opt/lib/fake/%s 300 </dev/null >/dev/null 2>&1 &) ;;\n  stop) pkill -x %s ;;\nesac\nexit 0\n' "$1" "$1" "$1" > "/opt/etc/init.d/$2"
     chmod 755 "/opt/etc/init.d/$2"
 }
+# Another opkg holding the lock: everything but --version gives up
+[ "$1" != --version ] && [ -e /run/opkg-locked ] && { echo " * opkg_conf_load: Could not lock /opt/tmp/opkg.lock: Resource temporarily unavailable."; exit 255; }
 case "$1" in
+    --version) echo "opkg version fake (2025-11-05)" ;;
     print-architecture) echo "arch all 1"; echo "arch aarch64-3.10 10" ;;
     update) [ -e /run/entware-fail-update ] && { echo "fake: update failed"; exit 1; }
         mkdir -p /opt/var/opkg-lists; touch /opt/var/opkg-lists/entware
@@ -1018,6 +1021,18 @@ ok "logs reads well for people too" 'grep -q "Boot log" "$W/out" && grep -q "pkg
 ! (cd /tmp && $SH /tmp/webos-entware-installer.sh job pkg-add "x y") > "$W/out" 2>&1
 ok "job pkg-add refuses names that aren't packages" 'grep -q "isn.t a package name" "$W/out"'
 rm -f /opt/lib/opkg/fake-list /tmp/logid
+run uninstall -y
+
+echo "== [$SH] 36b. while another opkg holds its lock"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run install -y
+N=$(grep -c '^Package:' /opt/lib/opkg/status)
+touch /run/opkg-locked
+run status --json
+ok "status still counts the packages (issue #3: null packages)" 'python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d[\"packages\"] == int(sys.argv[2]) and d[\"opkg\"] is True else 1)" "$W/out" "$N"'
+run status
+ok "and the full check says opkg runs, with the count" 'grep -q "opkg runs:          .*yes" "$W/out" && grep -q "Packages installed: $N" "$W/out" && ! grep -q "opkg doesn.t run" "$W/out"'
+rm -f /run/opkg-locked
 run uninstall -y
 
 echo "== [$SH] 37. network services: set up with a password before they start, and removed cleanly"

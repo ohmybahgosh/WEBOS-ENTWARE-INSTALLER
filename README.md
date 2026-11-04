@@ -200,7 +200,7 @@ From there, [add-ons](#add-ons) are one press away.  For the bash shell and `ent
 Download `org.ohmybahgosh.entware_*.ipk` from the [latest release](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases/latest) and install it with `ares-install`, or on the TV:
 
 ```sh
-luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.13.1_all.ipk"}'
+luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"org.ohmybahgosh.entware","ipkUrl":"/tmp/org.ohmybahgosh.entware_2.13.2_all.ipk"}'
 ```
 
 The Homebrew Channel won't offer updates for it unless you add the repository too, but the app's own **Update to v…** still works.

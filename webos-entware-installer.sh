@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.13.1"
+VERSION="2.13.2"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -697,7 +697,13 @@ unmount_opt() {
     ! opt_ours
 }
 
-opkg_works() { /opt/bin/opkg print-architecture 2>/dev/null | grep -q '^arch '; }
+# opkg runs.  --version doesn't wait for opkg's lock, so this holds while
+# another opkg is busy (an update check, an install); print-architecture
+# does, and also reads opkg.conf, so a new download is tested with that.
+opkg_works() { /opt/bin/opkg --version 2>/dev/null | grep -q '^opkg version' || opkg_tested; }
+opkg_tested() { /opt/bin/opkg print-architecture 2>/dev/null | grep -q '^arch '; }
+# Installed packages, from opkg's status file, which needs no lock either
+pkg_count() { n=$(grep -c '^Package:' "$OPKG_STATUS" 2>/dev/null); echo "${n:-0}"; }
 
 # === TV details ===
 # Value of "key": "value" in a small JSON file or text (no jq on the TV)
@@ -904,7 +910,7 @@ bootstrap_opkg() {
             wget -q -O /opt/etc/opkg.conf "$ENTWARE_BASE/$ARCH/installer/opkg.conf" ||
             error_exit "Could not download opkg. Check the TV's internet connection."
         chmod 755 /opt/bin/opkg
-        if opkg_works; then
+        if opkg_tested; then
             grep -q '^option tmp_dir' /opt/etc/opkg.conf || echo "option tmp_dir /opt/tmp" >> /opt/etc/opkg.conf
             success "The $(build_label "$ARCH") build runs on this TV."
             [ "$ARCH" = "$BUILD" ] || HOW=fallback
@@ -3630,7 +3636,7 @@ show_status() {
     printf "/opt mounted:       "; yesno opt_ours
     printf "opkg runs:          "; yesno opkg_works
     if opkg_works; then
-        echo "Packages installed: $(/opt/bin/opkg list-installed 2>/dev/null | wc -l)"
+        echo "Packages installed: $(pkg_count)"
         echo "Disk used:          $(du -sh "$BIND_SRC" 2>/dev/null | awk '{print $1}')"
     fi
     printf "Boot script:        "; yesno [ -x "$INIT_SCRIPT" ]
@@ -3770,7 +3776,7 @@ status_json() {
         build=$(feed_build "$BIND_SRC/etc/opkg.conf")
     fi
     if opkg_works; then
-        pkgs=$(/opt/bin/opkg list-installed 2>/dev/null | wc -l | tr -d ' ')
+        pkgs=$(pkg_count)
         used=$(du -sh "$BIND_SRC" 2>/dev/null | awk '{print $1}')
     fi
     free_kb=$(free_kb_of "$(part_of "$BIND_SRC")")

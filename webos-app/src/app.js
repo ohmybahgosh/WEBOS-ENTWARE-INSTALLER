@@ -138,7 +138,7 @@
         } else {
             dot = 'dot-ok';
             head = 'Entware is ready';
-            sub = s.packages + ' packages.  No problems found.';
+            sub = (s.packages !== null && s.packages !== undefined ? s.packages + ' packages.  ' : '') + 'No problems found.';
         }
         $('dot').className = 'dot ' + dot;
         $('headline').textContent = head;

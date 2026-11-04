@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.13.2] - 2026-11-04
+
+### Fixed
+
+- **"null packages" on the TV app's status** ([#3](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/3)): while another opkg held its lock (an update check, an install from SSH), the status check couldn't run opkg, so it had no package count, and the full check could say opkg doesn't run.  It now counts packages from opkg's status file and checks opkg without waiting for the lock.  The app also leaves the count out rather than show "null" if it's ever missing.
+
 ## [2.13.1] - 2026-11-04
 
 ### Fixed
