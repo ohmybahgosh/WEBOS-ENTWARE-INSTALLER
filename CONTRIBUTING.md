@@ -20,6 +20,7 @@ python3 tests/check-issue-forms.py
 webos-app/build.sh                  # the TV app's IPK (needs ares-package from @webos-tools/cli)
 tests/check-ipk.sh                  # checks the IPK and its manifest
 node tests/ui-test.js               # drives the app with the remote's keys (needs playwright)
+node tests/web-test.js              # the phone dashboard: its server's checks, and the page on a phone
 ```
 
 The tests need root because they run in a private mount namespace, with tmpfs over the TV's paths and fake `wget`, `opkg` and `luna-send`.  Nothing is downloaded and your machine is left as it was.
@@ -33,7 +34,7 @@ Ground rules:
 - **Only Entware that's root's alone.**  Anything that mounts or runs Entware checks `/opt` after mounting it, so a folder another user can write to is never used.
 - **Pinned and checked downloads.**  Anything that isn't from Entware's own server comes from a fixed release and is kept only if its SHA-256 matches.
 - **Keep the user's files.**  Shell files are backed up before they're replaced, and settings people edit (nanorc, the banner's config) are kept.
-- **A test for every change in behavior,** in `tests/run_tests.sh` (or `tests/ui-test.js` for the app).
+- **A test for every change in behavior,** in `tests/run_tests.sh` (or `tests/ui-test.js` for the app, `tests/web-test.js` for the phone dashboard).
 - **Write for TV owners.**  Plain words in output, the app and docs, two spaces between sentences, no em dashes, and a line in `CHANGELOG.md` for anything they'd notice.
 
 Open a pull request against `main`; the template lists what to check.

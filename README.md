@@ -26,7 +26,7 @@ Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of L
 >
 > Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
 >
-> - **Tests on every push:** 320+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
+> - **Tests on every push:** 320+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, [tests the phone dashboard](tests/web-test.js) on a phone-sized screen, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
 > - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
 >
 > Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
@@ -70,6 +70,8 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 - [locate (mlocate)](#locate-mlocate)
 - [Login banner](#login-banner)
 - [Add-ons](#add-ons)
+  - [Network services](#network-services)
+  - [Manage from your phone](#manage-from-your-phone)
 - [Where Entware lives](#where-entware-lives)
 - [What it changes on the TV](#what-it-changes-on-the-tv)
   - [Upgrading from an older setup](#upgrading-from-an-older-setup)
@@ -102,7 +104,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
-<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, adding the Login banner and watching it install, then opening Package updates"></p>
+<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, showing the Manage from your phone QR code and sign-in code, adding the Login banner and watching it install, then opening Package updates"></p>
 
 <p align="center">
   <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, Full check and logs, Report for GitHub and Uninstall Entware">
@@ -518,6 +520,8 @@ Six add-ons run a service that starts with the TV.  Entware's own settings for s
 | `transmission` | transmission-daemon, transmission-web | Torrents from a browser, saved to `/opt/files/Downloads`.  Torrent files dropped in `Downloads/Watch` start by themselves | `http://<TV IP>:9091`, user `tv` |
 | `syncthing` | syncthing | Keep a folder like `/opt/files/Sync` in sync with your phone and computers | `http://<TV IP>:8384`, user `tv` |
 
+<p align="center"><img src="images/cli-services.png" width="760" alt="Over SSH: webos-entware addons listing Tailscale, Samba, File Browser, minidlna, Transmission, Syncthing and the tool add-ons, then webos-entware info samba with its Windows and Mac addresses, user and password, and webos-entware password filebrowser making a new one"></p>
+
 In the TV app, open a service in **Add-ons** to see its address and password, with a QR code of the address for your phone, and **New password** for a new random one.  Over SSH:
 
 ```sh
@@ -594,6 +598,8 @@ Entware goes in a new root-only folder at the top of app storage, not `/media/de
 | `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |
 | `/opt/bin/neofetch`, `/opt/etc/webos-entware/banner` | Only with the [login banner](#login-banner) add-on: neofetch, and the banner's wordmark and settings |
 | `/opt/files`, `/opt/etc/webos-entware/credentials` | Only with a [network service](#network-services): the shared folder, and each service's password |
+| Each service's settings in `/opt/etc` | Only with a network service: `samba/smb.conf`, `filebrowser/filebrowser.conf`, `minidlna.conf`, `transmission/settings.json`, `syncthing/` and the `S91webos-syncthing` start script.  Entware's stock settings are kept as `.bak` first, and removing the service deletes what it set up |
+| `/tmp/webos-entware-web` | Only while the [phone dashboard](#manage-from-your-phone) runs: its port and sign-in code, root only.  Gone when it stops, and at every restart |
 
 Your own `.profile`, `.bash_profile` and `.bashrc` are saved with a `.pre-entware` suffix before they are replaced. Your old `.profile` and `.bashrc` still run from the new files. A repair keeps the installer's `.bashrc` as it is, edits included, and if it ever has to rewrite `.profile` or `.bash_profile` after you changed them, it saves your copy as `.bak` first (then `.bak.1`, `.bak.2` and so on, so an older backup is never overwritten). Uninstalling saves an edited `.bashrc` as `.bashrc.entware-saved`.
 
@@ -667,6 +673,12 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 **"No terminal to answer on."** The installer couldn't ask its questions. Run it from an SSH session, or add `-y` or `--arch=...`.
 
+**A service isn't running.** Open it in the TV app's Add-ons and choose **Finish setup**, or run `webos-entware add <name>` again: it keeps the password and says what went wrong.  If another program on the TV has its port, it says which port.  Services start at boot through the boot script, so after updating from 2.11 or older, adding any service (or a repair) brings an older boot script up to date.
+
+**Forgot a service's password?** `webos-entware info <name>`, or open it in Add-ons on the TV or in the phone dashboard.
+
+**The phone dashboard won't open.** The phone needs to be on the same network as the TV (or on your tailnet), and the dashboard stops after 30 minutes without use: start it again from Add-ons.  A new start makes a new code, so scan the new QR code.
+
 **Installed with an older version of this script?** Run install again. It keeps your packages and cleans up after the old version. See [Upgrading from an older setup](#upgrading-from-an-older-setup).
 
 ---
@@ -681,7 +693,9 @@ From there, `rm /home/root/.profile` gets normal SSH back right away. Then run `
 
 **Can I keep my own shell?** Yes. Install with `--no-shell`. Entware programs are in `/opt/bin` and `/opt/sbin`. Without the shell setup there's no backup remount at login, so `/opt` depends on the boot script alone.
 
-**How is it tested?** `tests/run_tests.sh` runs install, repair, reboots, add-ons and uninstall on a Linux PC as root, inside a private mount namespace with fake `wget` and `opkg`, under busybox sh and dash. It doesn't touch the PC or download anything. CI also builds the TV app, checks the IPK and clicks through the app in a headless browser. None of it can stand in for a real TV, so changes are tried on one (an LG C2 on webOS 25) before release.
+**How is it tested?** `tests/run_tests.sh` runs install, repair, reboots, add-ons and uninstall on a Linux PC as root, inside a private mount namespace with fake `wget` and `opkg`, under busybox sh and dash. It doesn't touch the PC or download anything. CI also builds the TV app, checks the IPK, clicks through the app in a headless browser, and tests the phone dashboard's sign-in, checks and page. None of it can stand in for a real TV, so changes are tried on one (an LG C2 on webOS 25) before release.
+
+**Will my browser show certificate errors?** No.  File Browser, Transmission, Syncthing and the phone dashboard are plain `http://` on your home network, so there are no certificates to go wrong.  Browsers mark them "Not secure", and one with HTTPS-only mode turned on shows a page first with a button to continue.  Plain http isn't encrypted on your Wi-Fi, which is normal for home devices.  A self-signed certificate would be worse: every page would open with a full warning.  For encryption, use the services over [Tailscale](#network-services).
 
 **Does the app phone home?** No. It only talks to GitHub: it reads the latest release number to say when an update is out, and downloads that release when you choose **Update**. See [SECURITY.md](SECURITY.md).
 
@@ -701,7 +715,7 @@ Compatibility reports, bug reports and ideas are welcome: use the [issue forms](
 
 AI-assisted pull requests are welcome too, held to the same standard as the rest of this project: say in the pull request that AI was used, make sure you understand and have reviewed every change, and test it on a real TV.
 
-To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app/build.sh`.  The IPK and its Homebrew Channel manifest land in `webos-app/out/`.  `tests/check-ipk.sh` checks the build, and `node tests/ui-test.js` (with `npm install playwright`) clicks through the app and saves screenshots to `tests/ui-out/`.
+To build the TV app yourself: `npm install -g @webos-tools/cli`, then `webos-app/build.sh`.  The IPK and its Homebrew Channel manifest land in `webos-app/out/`.  `tests/check-ipk.sh` checks the build, `node tests/ui-test.js` (with `npm install playwright`) clicks through the app and saves screenshots to `tests/ui-out/`, and `node tests/web-test.js` does the same for the phone dashboard.
 
 ---
 
