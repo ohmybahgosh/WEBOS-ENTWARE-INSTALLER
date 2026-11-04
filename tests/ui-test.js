@@ -65,6 +65,10 @@ function demo(scenario) {
         const reply = (out) => setTimeout(() => cb(true, out, ''), 30);
         if (args === 'status --json') { return reply(JSON.stringify(Object.assign({}, base, { updates: UPDATES.length, updatesChecked: '2026-11-02 20:58', updatesAgeHours: 0, job: job ? job.state : 'none', jobName: job ? job.name : '' }))); }
         if (args === 'addons --json') { return reply(JSON.stringify(ADDONS)); }
+        if (args === 'app-update --check --json') {
+            const latest = window.ENTWARE_LATEST || base.version;
+            return reply(JSON.stringify({ current: base.version, command: base.version, latest, newer: latest !== base.version, notes: '', error: '' }));
+        }
         if (/^updates --json( --refresh)?$/.test(args)) {
             return reply(JSON.stringify({ checked: '2026-11-02 20:58', ageHours: 0, refreshFailed: false, packages: UPDATES }));
         }
@@ -137,6 +141,9 @@ function check(name, cond) {
     check('says Entware is ready', /ready/.test(await page.textContent('#headline')));
     check('the status card fits', !(await overflows(page)));
     check('shows Add-ons', await visible(page, 'addons'));
+    await page.waitForFunction(() => window.ENTWARE_CALLS.indexOf('app-update --check --json') >= 0);
+    await page.waitForTimeout(100);
+    check('no Update button when the app is the newest release', !(await visible(page, 'update')));
     // With every button showing, including an update, the column still clears the footer
     const clears = await page.evaluate(() => {
         document.querySelectorAll('.btn').forEach((b) => { b.style.display = ''; });
@@ -266,6 +273,8 @@ function check(name, cond) {
     await page.close();
     ({ page, errors } = await open('update'));
     await page.waitForFunction(() => document.querySelector('[data-action="update"]').style.display !== 'none');
+    check('the app asks the installer whether a newer release is out', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('app-update --check --json'));
+    check('and says which version you have', /you have v2\.8\.0/.test(await page.textContent('#update-hint')));
     check('a newer release shows Update to v9.9.9 first', /Update to v9\.9\.9/.test(await page.textContent('#update-title')) &&
         (await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none')[0].getAttribute('data-action'))) === 'update');
     check('every button still fits above the footer', await page.evaluate(() => {

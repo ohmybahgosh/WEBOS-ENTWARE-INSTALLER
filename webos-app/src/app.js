@@ -213,7 +213,10 @@
         show('move', canMove(s));
         show('uninstall', s.installed);
         show('update', !!latest);
-        if (latest) { $('update-title').textContent = 'Update to v' + latest; }
+        if (latest) {
+            $('update-title').textContent = 'Update to v' + latest;
+            $('update-hint').textContent = 'you have v' + s.version + ', downloads, checks and installs it';
+        }
         if (current >= buttons().length) { current = buttons().length - 1; }
         if (!overlayMode) { focusCurrent(); }
 
@@ -876,7 +879,9 @@
 
     // ------------------------------------------------------------------ updates
 
-    // Newer release on GitHub?  The Update button installs it (app-update);
+    // Newer release on GitHub?  The installer asks (app-update --check, from
+    // the TV, so no browser limits apply); if it can't answer, GitHub's API
+    // is asked directly.  The Update button installs it (app-update), and
     // the Homebrew Channel offers it too.
     function versionParts(v) { return String(v || '').replace(/^v/, '').split('.').map(function (n) { return parseInt(n, 10) || 0; }); }
     function newer(a, b) {
@@ -885,10 +890,17 @@
         return false;
     }
     function checkUpdate(current) {
-        if (window.ENTWARE_DEMO) {
-            if (window.ENTWARE_LATEST && newer(window.ENTWARE_LATEST, current)) { latest = window.ENTWARE_LATEST; render(); }
-            return;
-        }
+        runScript('app-update --check --json', function (ok, out) {
+            var d = parseJson(out);
+            if (d && d.latest) {
+                latest = d.newer && newer(d.latest, current) ? d.latest : null;
+                if (state) { render(); }
+            } else if (!window.ENTWARE_DEMO) {
+                checkUpdateApi(current);
+            }
+        });
+    }
+    function checkUpdateApi(current) {
         var xhr = new XMLHttpRequest();
         xhr.open('GET', RELEASES_API);
         xhr.timeout = 10000;

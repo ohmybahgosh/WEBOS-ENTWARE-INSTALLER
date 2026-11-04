@@ -759,11 +759,30 @@ fake_release() { # version, package id
 app_up() { (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update -y) > "$W/out" 2>&1; }
 appv() { sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' $AD/appinfo.json; }
 fake_release 2.9.1 org.ohmybahgosh.entware
+app_check() { (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check --json) > "$W/out" 2>&1; }
+jq_ok() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if ($1) else 1)" "$W/out"; }
+app_check
+ok "app-update --check --json says when the app is up to date" 'jq_ok "d[\"current\"] == \"2.9.1\" and d[\"latest\"] == \"2.9.1\" and d[\"newer\"] is False and d[\"error\"] == \"\""'
 app_up
 ok "app-update says when the app is up to date" 'grep -q "The app is up to date (v2.9.1)" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+sed -i 's/^VERSION=.*/VERSION="2.9.0"/' /opt/bin/webos-entware
+app_up
+ok "and still brings an older webos-entware command up to the release" 'grep -q "^VERSION=\"2.9.1\"" /opt/bin/webos-entware && grep -q "Updated the webos-entware command to v2.9.1" "$W/out"'
+app_up
+ok "but leaves it alone once it's current" '! grep -q "Updated the webos-entware command" "$W/out"'
 rm -rf "$W/rel"
+! app_check
+ok "app-update --check --json says when GitHub can't be reached" 'jq_ok "d[\"latest\"] == \"\" and d[\"newer\"] is False and \"GitHub\" in d[\"error\"]"'
 ! app_up
 ok "app-update says when GitHub can't be reached" 'grep -q "Couldn.t reach GitHub" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+fake_release 9.9.9 org.ohmybahgosh.entware
+mkdir /tmp/webos-entware.lock && echo $$ > /tmp/webos-entware.lock/pid
+app_check
+rm -rf /tmp/webos-entware.lock
+ok "app-update --check --json finds a newer release, even while a task runs" 'jq_ok "d[\"latest\"] == \"9.9.9\" and d[\"newer\"] is True and d[\"notes\"].endswith(\"/tag/v9.9.9\")"'
+ok "and changes nothing" '[ "$(appv)" = 2.9.1 ] && [ -z "$(ls -d /tmp/.webos-entware-update.* 2>/dev/null)" ]'
+(cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check) > "$W/out" 2>&1
+ok "app-update --check says so in words too" 'grep -q "Version 9.9.9 is out (the app is v2.9.1)" "$W/out"'
 fake_release 9.9.9 org.ohmybahgosh.entware
 echo tampered >> "$W/rel/org.ohmybahgosh.entware_9.9.9_all.ipk"
 ! app_up

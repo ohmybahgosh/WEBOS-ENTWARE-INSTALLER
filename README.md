@@ -305,6 +305,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware logs` | This boot's boot script log and the TV app's last 10 tasks.  `log <name>` shows one |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
 | `webos-entware app-update` | Update the TV app (and this command) to the newest release, checked against its checksums |
+| `webos-entware app-update --check` | Only say whether a newer release is out (add `--json` for the app) |
 | `webos-entware move appstore` | Move Entware to app storage, or `move user` to user data.  A repair also moves older installs to app storage.  See [Where Entware lives](#where-entware-lives) |
 | `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>`, `pkg-add <name>`, `pkg-remove <name>` or `move <place>` in the background; `job-status` follows it.  Its log is kept for `logs` |
 | `webos-entware` | Open the menu |

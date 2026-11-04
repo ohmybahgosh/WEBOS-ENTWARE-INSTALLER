@@ -62,6 +62,7 @@ ASSUME_YES=0
 SETUP_SHELL=1
 WITH_LOCATE=0
 JSON=0
+CHECK_ONLY=0
 LOCKED=0
 # One install, repair or uninstall at a time, from SSH or the TV app
 LOCK_DIR="/tmp/webos-entware.lock"
@@ -133,7 +134,8 @@ usage() {
     echo "  pkg-remove <name>  Uninstall one package (not ones Entware needs)"
     echo "  logs           The boot log and the TV app's recent tasks; log <name> shows one"
     echo "  move <place>   Move Entware to app storage (appstore) or back to user data (user)"
-    echo "  app-update     Update the TV app (and this command) to the newest release"
+    echo "  app-update     Update the TV app (and this command) to the newest release;"
+    echo "                 with --check, only say whether a newer one is out"
     echo "  job <task>     Run install, uninstall, locate, upgrade, add <name>, remove <name>,"
     echo "                 move <place> or app-update in the background (the TV app uses this)"
     echo "  job-status     Show the background task's progress"
@@ -2790,7 +2792,41 @@ version_gt() {
         for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
         exit 1 }'
 }
+# The webos-entware command's own version
+manager_version() { sed -n 's/^VERSION="\([0-9.]*\)".*/\1/p' "$MANAGER" 2>/dev/null | head -n 1; }
+
+# app-update --check: is a newer release out?  Only reads; the TV app asks
+# this when it opens and every few hours, and shows an Update button if so.
+app_update_check() {
+    cur=$(app_version)
+    UW=$(mktemp -d /tmp/.webos-entware-update.XXXXXX) || error_exit "Couldn't make a temporary folder."
+    trap 'rm -rf "${UW:?}"' EXIT
+    v=""
+    if fetch "$RELEASES_URL/latest/download/SHA256SUMS" "$UW/SHA256SUMS" 2>/dev/null; then
+        v=$(sed -n "s/^[0-9a-f]\{64\}  ${APP_ID}_\([0-9]*\.[0-9]*\.[0-9]*\)_all\.ipk\$/\1/p" "$UW/SHA256SUMS" | head -n 1)
+    fi
+    newer=false err=""
+    [ -n "$v" ] && version_gt "$v" "${cur:-0}" && newer=true
+    [ -n "$v" ] || err="Couldn't check GitHub for a new release."
+    if [ "$JSON" = 1 ]; then
+        printf '{"current":%s,"command":%s,"latest":%s,"newer":%s,"notes":%s,"error":%s}\n' \
+            "$(json_str "$cur")" "$(json_str "$(manager_version)")" "$(json_str "$v")" "$newer" \
+            "$(json_str "${v:+$RELEASES_URL/tag/v$v}")" "$(json_str "$err")"
+        [ -n "$v" ]
+        return
+    fi
+    [ -n "$v" ] || error_exit "Couldn't reach GitHub. Check the TV's internet connection."
+    if [ "$newer" = true ]; then
+        info "Version $v is out (the app is v${cur:-not installed}). What's new: $RELEASES_URL/tag/v$v"
+        echo "Update with: $(run_cmd) app-update"
+    else
+        success "The app is up to date (v${cur:-$v})."
+    fi
+    return 0
+}
+
 app_update() {
+    [ "$CHECK_ONLY" = 1 ] && { app_update_check; return; }
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     [ -f "$APP_DIR/appinfo.json" ] || error_exit "The Entware TV app isn't installed. Install it from the Homebrew Channel (repository https://ohmybahgosh.dev/repo)."
     # Installing replaces the app's folder, this script's copy included, so
@@ -2812,6 +2848,9 @@ app_update() {
     v=${file#"${APP_ID}"_}
     v=${v%_all.ipk}
     if ! version_gt "$v" "${cur:-0}"; then
+        # The command can lag behind the app (an app installed from the
+        # Homebrew Channel doesn't update it), so bring it along anyway
+        update_command "$v"
         success "The app is up to date (v${cur:-$v})."
         return 0
     fi
@@ -2825,14 +2864,7 @@ app_update() {
     fi
     success "Downloaded v$v and checked it against the release."
 
-    # The saved webos-entware command follows the app, if it checks out too
-    sline=$(grep -E "^[0-9a-f]{64}  webos-entware-installer\.sh$" "$UW/SHA256SUMS" | head -n 1)
-    if [ -n "$sline" ] && opt_ours && [ -f "$MANAGER" ] &&
-        fetch "$RELEASES_URL/download/v$v/webos-entware-installer.sh" "$UW/installer.sh" &&
-        [ "$(sha256sum "$UW/installer.sh" | awk '{print $1}')" = "${sline%% *}" ] && grep -qs "$MARKER" "$UW/installer.sh"; then
-        cp "$UW/installer.sh" "$MANAGER.new" && chmod 755 "$MANAGER.new" && mv -f "$MANAGER.new" "$MANAGER" &&
-            success "Updated the webos-entware command to v$v."
-    fi
+    update_command "$v"
 
     info "Installing v$v. The app closes for a moment, then opens again."
     luna-send -n 1 luna://com.webos.appInstallService/dev/install \
@@ -2844,6 +2876,20 @@ app_update() {
     success "The app is now v$v."
     luna-send -n 1 luna://com.webos.notification/createToast "{\"sourceId\":\"$APP_ID\",\"message\":\"Entware app updated to v$v\"}" < /dev/null > /dev/null 2>&1
     luna-send -n 1 luna://com.webos.applicationManager/launch "{\"id\":\"$APP_ID\"}" < /dev/null > /dev/null 2>&1
+    return 0
+}
+
+# The saved webos-entware command follows the app, when it's older than
+# release $1 and the download checks out too ($UW/SHA256SUMS is that release's)
+update_command() {
+    opt_ours && [ -f "$MANAGER" ] || return 0
+    version_gt "$1" "$(manager_version)" || return 0
+    sline=$(grep -E "^[0-9a-f]{64}  webos-entware-installer\.sh$" "$UW/SHA256SUMS" | head -n 1)
+    if [ -n "$sline" ] && fetch "$RELEASES_URL/download/v$1/webos-entware-installer.sh" "$UW/installer.sh" &&
+        [ "$(sha256sum "$UW/installer.sh" | awk '{print $1}')" = "${sline%% *}" ] && grep -qs "$MARKER" "$UW/installer.sh"; then
+        cp "$UW/installer.sh" "$MANAGER.new" && chmod 755 "$MANAGER.new" && mv -f "$MANAGER.new" "$MANAGER" &&
+            success "Updated the webos-entware command to v$1."
+    fi
     return 0
 }
 
@@ -3133,6 +3179,7 @@ for arg in "$@"; do
         --with-locate) WITH_LOCATE=1 ;;
         --json) JSON=1 ;;
         --refresh) REFRESH=1 ;;
+        --check) CHECK_ONLY=1 ;;
         --location=user|--location=appstore) LOCATION="${arg#--location=}" ;;
         --arch=aarch64-k3.10|--arch=armv7sf-k3.2) FORCE_ARCH="${arg#--arch=}" ;;
         -h|--help) usage; exit 0 ;;
@@ -3190,11 +3237,15 @@ if [ -z "$ACTION" ]; then
     esac
 fi
 
+[ "$CHECK_ONLY" = 1 ] && [ "$ACTION" != app-update ] && error_exit "--check goes with app-update."
 case "$ACTION" in
     install|uninstall|locate|upgrade|add|remove|move|app-update|pkg-add|pkg-remove)
-        take_lock
-        trap 'release_lock' EXIT
-        trap 'exit 1' INT TERM HUP ;;
+        # app-update --check only reads, so it doesn't wait on a running task
+        if [ "$CHECK_ONLY" != 1 ]; then
+            take_lock
+            trap 'release_lock' EXIT
+            trap 'exit 1' INT TERM HUP
+        fi ;;
 esac
 
 case "$ACTION" in
