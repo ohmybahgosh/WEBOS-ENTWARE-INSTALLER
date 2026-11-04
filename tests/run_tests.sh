@@ -17,6 +17,8 @@ fi
 
 W=$(mktemp -d /run/entware-test.XXXXXX)
 cp "$SCRIPT" "$W/installer.sh"
+# Node.js for the phone dashboard, found before /opt is covered
+NODE=$(command -v node || true)
 for d in /mnt /tmp /var/lib/webosbrew /var/lib/opkg /var/cache/opkg /home/root; do
     mkdir -p "$d" && mount -t tmpfs tmpfs "$d"
 done
@@ -210,6 +212,11 @@ f=\${1##*/}
 cp "$W/rel/\$f" "\$OUT"
 F
 chmod 755 "$W/bin/"* "$W/fake-opkg"
+case "$NODE" in
+    '') ;;
+    /opt/*) cp "$NODE" "$W/bin/node" ;;
+    *) ln -s "$NODE" "$W/bin/node" ;;
+esac
 export PATH="$W/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME=/home/root
 
@@ -1047,6 +1054,19 @@ run add syncthing -y
 ok "add syncthing gives it a home, a password (on stdin, not the command line) and no default folder" 'grep -q "Syncthing is at http://.*:8384" "$W/out" && grep -q "password=$(pw_of syncthing)>" /opt/etc/syncthing/config.xml && ! grep -q "$(pw_of syncthing)" /tmp/st.log && grep -q "generate --home=/opt/etc/syncthing --gui-user=tv --gui-password=- .*STNODEFAULTFOLDER=1" /tmp/st.log'
 ok "and runs it from its own start script instead of the package's" 'pidof syncthing > /dev/null && grep -q "serve --home=/opt/etc/syncthing --no-browser --no-upgrade --gui-address=http://0.0.0.0:8384" /tmp/st.log && [ -x /opt/etc/init.d/S91webos-syncthing ] && [ ! -x /opt/etc/init.d/S92syncthing ] && grep -q "^ENABLED=no" /opt/etc/init.d/S92syncthing'
 
+run password filebrowser -y
+ok "password makes a new one, sets it in the service and saves it" 'p=$(pw_of filebrowser) && [ "$p" != "$FBPW" ] && [ ${#p} -eq 16 ] && grep -q "users update admin -p $p" /tmp/fb.log && grep -q "Changed the password for File Browser" "$W/out" && pidof filebrowser > /dev/null'
+printf 'Mine_pass#2026x\n' | run password transmission --stdin -y
+ok "password --stdin takes your own, off the command line" '[ "$(pw_of transmission)" = "Mine_pass#2026x" ] && grep -q "\"rpc-password\": \"Mine_pass#2026x\"," /opt/etc/transmission/settings.json && pidof transmission-daemon > /dev/null'
+! printf 'mine with spaces 1\n' | run password transmission --stdin -y
+ok "a password outside the safe characters is refused, and nothing changes" 'grep -q "Use 12 to 64 letters" "$W/out" && [ "$(pw_of transmission)" = "Mine_pass#2026x" ]'
+! printf 'short-1\n' | run password samba --stdin -y
+ok "and so is a short one" 'grep -q "Use 12 to 64" "$W/out"'
+! run password minidlna -y
+ok "a service without a login has no password to change" 'grep -q "has no password" "$W/out"'
+! run password tailscale -y
+ok "and Tailscale's sign-in isn't a password either" 'grep -q "has no password" "$W/out"'
+
 run add minidlna -y
 ok "add minidlna serves /opt/files" 'grep -q "^media_dir=/opt/files$" /opt/etc/minidlna.conf && grep -q "^wide_links=yes" /opt/etc/minidlna.conf && pidof minidlnad > /dev/null'
 
@@ -1070,6 +1090,17 @@ ok "remove transmission deletes its settings, which hold the password" '! pidof 
 run remove syncthing -y; run remove minidlna -y; run remove filebrowser -y
 ok "remove syncthing, minidlna and filebrowser clean up too" '! pidof syncthing > /dev/null && ! pidof minidlnad > /dev/null && [ ! -e /opt/etc/init.d/S91webos-syncthing ] && [ ! -e /opt/etc/syncthing ] && [ ! -e /opt/etc/filebrowser/filebrowser.db ] && [ -z "$(ls /opt/etc/webos-entware/credentials)" ]'
 
+python3 -c "
+import socket, time, os
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind((\"0.0.0.0\", 8090)); s.listen(1)
+open(\"/tmp/listener.pid\", \"w\").write(str(os.getpid())); time.sleep(30)" &
+for _ in $(seq 1 20); do [ -s /tmp/listener.pid ] && break; sleep 0.1; done
+/opt/bin/opkg install filebrowser > /dev/null
+! run add filebrowser -y
+ok "a service won't start when something else has its port" 'grep -q "already uses port 8090" "$W/out" && ! pidof filebrowser > /dev/null'
+kill "$(cat /tmp/listener.pid)"; rm -f /tmp/listener.pid
+run remove filebrowser -y
+
 touch /run/fail-smbpasswd
 ! run add samba -y
 rm -f /run/fail-smbpasswd
@@ -1081,6 +1112,39 @@ run remove samba -y
 run post-install transmission-daemon
 ok "installed on its own, a service waits to be set up with a password" '[ ! -x /opt/etc/init.d/S88transmission ] && grep -q "won.t start until it.s set up with a password: webos-entware add transmission" "$W/out"'
 /opt/bin/opkg remove transmission-daemon > /dev/null
+
+/opt/bin/opkg install htop > /dev/null
+run add htop -y
+ok "an add-on that's already installed isn't downloaded again" 'grep -q "htop already installed. Checking its setup" "$W/out" && grep -q "Added htop" "$W/out"'
+/opt/bin/opkg install ripgrep > /dev/null
+run add find -y
+ok "and only the missing packages of one are" 'grep -q "Already installed: ripgrep. Installing: fd fzf" "$W/out"'
+run remove find -y
+run addons --json
+ok "addons --json says when webOS already has a command, and BusyBox's don't count" 'jq_ok "d[[a[\"id\"] for a in d].index(\"python\")][\"system\"] == \"$(PATH=/usr/sbin:/usr/bin:/sbin:/bin; command -v python3)\" and d[[a[\"id\"] for a in d].index(\"htop\")][\"system\"] == \"\" and d[[a[\"id\"] for a in d].index(\"samba\")][\"password\"] is True"'
+
+if [ -x "$W/bin/node" ]; then
+    rm -rf /tmp/web; cp -R "$HERE/../webos-app/web" /tmp/web
+    run web start --json
+    ok "web start runs the phone dashboard and gives its address and code" 'jq_ok "d[\"running\"] is True and d[\"port\"] >= 8095 and len(d[\"code\"]) == 8 and d[\"url\"].startswith(\"http://\")" && [ "$(stat -c %a /tmp/webos-entware-web)" = 700 ] && [ "$(stat -c %a /tmp/webos-entware-web/code)" = 600 ]'
+    WPORT=$(cat /tmp/webos-entware-web/port) WCODE=$(cat /tmp/webos-entware-web/code)
+    ok "signed in with the code, it lists the add-ons through the installer" 'python3 -c "
+import json, sys, urllib.request
+base = \"http://127.0.0.1:\" + sys.argv[1]
+r = urllib.request.urlopen(urllib.request.Request(base + \"/api/login\", json.dumps({\"code\": sys.argv[2]}).encode(), {\"Content-Type\": \"application/json\"}))
+tok = json.load(r)[\"token\"]
+s = json.load(urllib.request.urlopen(urllib.request.Request(base + \"/api/state\", headers={\"X-Token\": tok})))
+assert any(a[\"id\"] == \"samba\" for a in s[\"addons\"]), s
+" "$WPORT" "$WCODE"'
+    run web start --json
+    ok "starting it again keeps the one that runs" '[ "$(cat /tmp/webos-entware-web/code)" = "$WCODE" ] && jq_ok "d[\"code\"] == \"$WCODE\""'
+    run web stop
+    ok "web stop stops it and forgets the code" '! [ -e /tmp/webos-entware-web ] && grep -q "Stopped the phone dashboard" "$W/out"'
+    run web status --json
+    ok "and status says it isn't running" 'jq_ok "d[\"running\"] is False"'
+else
+    echo "  (Node.js isn't installed, so the phone dashboard isn't started here)"
+fi
 
 run add find -y
 ok "add find puts fd on the PATH" '[ "$(readlink /opt/bin/fd)" = /opt/usr/bin/fd ] && grep -q "Added Search tools" "$W/out"'

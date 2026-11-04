@@ -39,8 +39,8 @@ function demo(scenario) {
         ['filebrowser', 'File Browser', 'filebrowser', true, 'installed']
     ].map(([id, title, packages, removable, state]) => ({ id, title, packages, removable, state, service: id === 'tailscale' || id === 'filebrowser', about: 'About ' + title }));
     const INFO = {
-        tailscale: { url: 'https://login.tailscale.com/a/fake123', user: '', password: '', lines: ['Not signed in yet. Scan the QR code, or open the link, and sign in to Tailscale.'] },
-        filebrowser: { url: 'http://192.168.1.50:8090', user: 'admin', password: 'Xk4mP9qL2vR7nT3w', lines: ['Open http://192.168.1.50:8090 in a browser on your phone or computer.'] }
+        tailscale: { url: 'https://login.tailscale.com/a/fake123', user: '', password: '', lines: ['Not signed in yet. Open the sign-in link (on the TV, scan the QR code) and sign in to Tailscale.'] },
+        filebrowser: { hasPassword: true, url: 'http://192.168.1.50:8090', user: 'admin', password: 'Xk4mP9qL2vR7nT3w', lines: ['Open http://192.168.1.50:8090 in a browser on your phone or computer.'] }
     };
     let UPDATES = [{ name: 'htop', installed: '3.4.1-1', available: '3.4.2-1' }, { name: 'curl', installed: '8.11.1-1', available: '8.12.0-1' }];
     const base = {
@@ -71,6 +71,8 @@ function demo(scenario) {
         const reply = (out) => setTimeout(() => cb(true, out, ''), 30);
         if (args === 'status --json') { return reply(JSON.stringify(Object.assign({}, base, { updates: UPDATES.length, updatesChecked: '2026-11-02 20:58', updatesAgeHours: 0, job: job ? job.state : 'none', jobName: job ? job.name : '' }))); }
         if (args === 'addons --json') { return reply(JSON.stringify(ADDONS)); }
+        if (args === 'web start --json') { return reply(JSON.stringify({ running: true, port: 8095, url: 'http://192.168.1.50:8095', code: 'ACDE3479' })); }
+        if (args === 'web stop --json') { return reply(JSON.stringify({ running: false, port: null, url: '', code: '' })); }
         const inf = /^info ([a-z0-9]+) --json$/.exec(args);
         if (inf && INFO[inf[1]]) {
             const a = ADDONS.find((x) => x.id === inf[1]);
@@ -90,7 +92,7 @@ function demo(scenario) {
         if (args === 'logs --json') { return reply(JSON.stringify({ boot: ['20:00:01 boot script started', '20:00:02 mounted /opt'], current: 'none', tasks: TASKS })); }
         s = /^log ([A-Za-z0-9._+-]+) --json$/.exec(args);
         if (s) { return reply(JSON.stringify({ id: s[1], log: ['[INFO] Installing...', '[SUCCESS] Entware installed successfully!'] })); }
-        let m = /^job (add|remove|move|upgrade|pkg-add|pkg-remove) ([A-Za-z0-9._+-]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
+        let m = /^job (add|remove|password|move|upgrade|pkg-add|pkg-remove) ([A-Za-z0-9._+-]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
         if (m) {
             job = { name: m[2] ? m[1] + ' ' + m[2] : m[1], state: 'running', polls: 0 };
             return reply('Started: ' + job.name + '.');
@@ -172,11 +174,25 @@ function check(name, cond) {
     await press(page, 'ArrowDown', order.indexOf('addons'));
     await press(page, 'Enter');
     await page.waitForSelector('.addon');
-    check('opens with every add-on', (await page.$$('.addon')).length === 14);
+    check('opens with Manage from your phone, then every add-on', (await page.$$('.addon')).length === 15 && /Manage from your phone/.test(await page.$eval('.addon', (r) => r.textContent)));
     check('the first row has focus', await page.$eval('.addon', (r) => r.classList.contains('focus')));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /Manage from your phone/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.qr svg'));
+    check('it starts the phone dashboard and shows its QR code, address and code', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('web start --json') &&
+        /ACDE 3479/.test(await page.textContent('.web-code')) && /192\.168\.1\.50:8095/.test(await page.textContent('#overlay-body')));
+    await page.screenshot({ path: path.join(OUT, '17-phone-dashboard.png') });
+    await press(page, 'Escape');
+    await page.waitForSelector('#addon-list .addon.focus');
+    check('BACK leaves it running and returns to the list', !(await page.evaluate(() => window.ENTWARE_CALLS)).includes('web stop --json') && /Manage from your phone/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await press(page, 'Enter');
+    await page.waitForSelector('.web-code');
+    await press(page, 'Enter');
+    await page.waitForSelector('#addon-list .addon.focus');
+    check('OK on Stop stops it', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('web stop --json'));
+    await press(page, 'ArrowDown');
     check('states show as Included, Finish setup and Add', await page.$eval('#addon-list', (l) => /Included/.test(l.textContent) && /Finish setup/.test(l.textContent) && /Add/.test(l.textContent)));
     await page.screenshot({ path: path.join(OUT, '3-addons.png') });
-    await press(page, 'ArrowDown', 11);
+    await press(page, 'ArrowDown', 11);  // from nano
     const inView = await page.$eval('#addon-list', (l) => {
         const r = l.querySelector('.addon.focus');
         return r.offsetTop >= l.scrollTop && r.offsetTop + r.offsetHeight <= l.scrollTop + l.clientHeight + 1;
@@ -208,7 +224,7 @@ function check(name, cond) {
     await page.screenshot({ path: path.join(OUT, '6-added.png') });
     await press(page, 'Enter');
     await page.waitForSelector('.addon');
-    check('closing the result returns to Add-ons, with htop installed', await page.$$eval('.addon', (rs) => /Installed/.test(rs[5].textContent)));
+    check('closing the result returns to Add-ons, with htop installed', await page.$$eval('.addon', (rs) => /Installed/.test(rs[6].textContent)));
 
     // Base packages can't be removed
     await press(page, 'ArrowUp', 5);
@@ -233,8 +249,17 @@ function check(name, cond) {
     await press(page, 'Enter');
     await page.waitForFunction(() => /File Browser/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.cred'));
     check('a running service shows its address, login and a QR code', /Xk4mP9qL2vR7nT3w/.test(await page.textContent('.cred')) && /admin/.test(await page.textContent('.cred')) && !!(await page.$('.qr svg')) && (await page.evaluate(() => window.ENTWARE_CALLS)).includes('info filebrowser --json'));
-    check('with Remove as its only choice', await page.$$eval('.addon', (rs) => rs.length === 1 && /Remove File Browser/.test(rs[0].textContent)));
+    check('with New password, Manage from your phone and Remove', await page.$$eval('.addon', (rs) => rs.length === 3 && /New password/.test(rs[0].textContent) && /Manage from your phone/.test(rs[1].textContent) && /Remove File Browser/.test(rs[2].textContent)));
     await page.screenshot({ path: path.join(OUT, '16-addon-info.png') });
+    await press(page, 'Enter');
+    check('asks before making a new password, and says how to pick your own', /New password for File Browser\?/.test(await overlayTitle(page)) && /password filebrowser --ask/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
+    check('which runs as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job password filebrowser') && /New password for File Browser: done/.test(await overlayTitle(page)));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /File Browser/.test(document.getElementById('overlay-title').textContent) && document.querySelector('.cred'));
+    check('and closing it returns to File Browser, to see the new one', true);
+    await press(page, 'ArrowDown', 2);
     await press(page, 'Enter');
     check('asks before removing it, and says files stay', /Remove File Browser\?/.test(await overlayTitle(page)) && /files in \/opt\/files stay/.test(await page.textContent('#overlay-body')));
     await press(page, 'Escape');

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0b1220">
+<title>Entware on your TV</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="dash.css">
+</head>
+<body>
+<header>
+  <img src="icon.png" alt="" width="40" height="40">
+  <div><h1>Entware</h1><p id="tv">on your LG TV</p></div>
+  <button id="out" class="link" hidden>Sign out</button>
+</header>
+
+<main>
+  <section id="login" hidden>
+    <h2>Enter the code on your TV</h2>
+    <p class="dim">It's on the TV under Add-ons, Manage from your phone.</p>
+    <form id="login-form" autocomplete="off">
+      <input id="code" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" spellcheck="false" maxlength="20" placeholder="ABCD 1234" aria-label="Code">
+      <button type="submit">Sign in</button>
+    </form>
+    <p id="login-msg" class="msg" role="alert"></p>
+  </section>
+
+  <section id="dash" hidden>
+    <div id="task" class="task" hidden>
+      <b id="task-title"></b>
+      <pre id="task-log"></pre>
+    </div>
+    <p id="dash-msg" class="msg" role="alert"></p>
+    <h2>Services</h2>
+    <p class="dim">They start with the TV.  Their files are in /opt/files, with USB drives in USB.</p>
+    <div id="services"></div>
+    <h2>Tools</h2>
+    <div id="tools" class="tools"></div>
+  </section>
+</main>
+
+<footer><a href="https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER" rel="noreferrer">WEBOS-ENTWARE-INSTALLER</a></footer>
+<script src="dash.js"></script>
+</body>
+</html>

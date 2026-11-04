@@ -104,6 +104,9 @@ jobs:
         run: |
           node --check webos-app/gen-manifest.js
           node --check tests/ui-test.js
+          node --check tests/web-test.js
+          node --check webos-app/web/server.js
+          node --check webos-app/web/dash.js
           cd webos-app && npx --yes "eslint@$ESLINT" --max-warnings 0 src/
       - name: Build the IPK and manifest
         run: |
@@ -116,6 +119,7 @@ jobs:
           npm install --no-save --no-package-lock "playwright@$PLAYWRIGHT"
           npx playwright install --with-deps chromium
           node tests/ui-test.js webos-app/dist tests/ui-out
+          node tests/web-test.js tests/ui-out
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ipk

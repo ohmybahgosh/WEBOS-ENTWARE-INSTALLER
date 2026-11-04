@@ -23,6 +23,9 @@ mkdir -p "$DIST/assets" "$OUT"
 cp -R "$HERE/src/." "$DIST/"
 cp "$SCRIPT" "$DIST/assets/webos-entware-installer.sh"
 chmod 755 "$DIST/assets/webos-entware-installer.sh"
+# The phone dashboard, served from the TV by 'webos-entware web start'
+mkdir -p "$DIST/assets/web"
+cp "$HERE/web/server.js" "$HERE/web/index.html" "$HERE/web/dash.js" "$HERE/web/dash.css" "$HERE/web/icon.png" "$DIST/assets/web/"
 cp "$ROOT/LICENSE" "$DIST/LICENSE"
 
 # QR code library (MIT, by Kazuhiko Arase), fetched from npm and checked

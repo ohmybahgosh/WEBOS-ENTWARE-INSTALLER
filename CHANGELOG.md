@@ -2,6 +2,25 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.13.0] - 2026-11-04
+
+### Added
+
+- **Manage from your phone:** the first row in Add-ons shows a QR code that opens a dashboard on your phone, signed in, like TiviBro's web editor.  Add and remove add-ons, see each service's address and password, and make a new password or set your own.  It needs the code shown on the TV, only answers your home network and tailnet, and stops after 30 minutes without use.  Over SSH: `webos-entware web start`.
+- **Change a service's password:** New password on a service's screen in the TV app, and `webos-entware password <name>` over SSH (`--ask` to type your own).  Settings, devices and torrents stay.
+
+### Changed
+
+- Adding an add-on whose packages are already installed doesn't download them again, and only the missing ones of a bundle are installed.
+- When webOS has its own copy of an add-on's command (it ships curl and python3), the installer and the app say so and ask first.
+- A service won't start when something else on the TV already uses its port, and says which port.
+- Transmission's screen says how much room app storage has, and how to save big downloads to a USB drive.
+- File Browser's and minidlna's logs are kept under 1 MB.
+
+### Fixed
+
+- The TV's model was missing from status when the installer ran with standard input closed: luna-send gives up then, so it now reads from /dev/null.
+
 ## [2.12.0] - 2026-11-04
 
 ### Added

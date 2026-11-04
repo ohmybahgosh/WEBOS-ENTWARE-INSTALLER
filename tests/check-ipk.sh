@@ -18,7 +18,7 @@ APPDIR=$(find "$W/data" -name appinfo.json -exec dirname {} \; | head -n 1)
 VERSION=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$ROOT/webos-entware-installer.sh")
 
 ok "the IPK is a webOS package (debian-binary 2.0)" '[ "$(cat "$W/debian-binary")" = 2.0 ]'
-ok "it has the app files" 'for f in index.html app.js style.css appinfo.json icon80.png icon130.png icon160.png vendor/qrcode.js LICENSE assets/webos-entware-installer.sh; do [ -s "$APPDIR/$f" ] || { echo "    missing $f"; exit 1; }; done'
+ok "it has the app files" 'for f in index.html app.js style.css appinfo.json icon80.png icon130.png icon160.png vendor/qrcode.js LICENSE assets/webos-entware-installer.sh assets/web/server.js assets/web/index.html assets/web/dash.js assets/web/dash.css assets/web/icon.png; do [ -s "$APPDIR/$f" ] || { echo "    missing $f"; exit 1; }; done'
 ok "it carries this exact installer, executable" 'cmp -s "$APPDIR/assets/webos-entware-installer.sh" "$ROOT/webos-entware-installer.sh" && [ -x "$APPDIR/assets/webos-entware-installer.sh" ]'
 ok "nothing unexpected is packed (maps, node_modules, dotfiles)" '[ -z "$(find "$APPDIR" \( -name "*.map" -o -name node_modules -o -name ".*" \) -print)" ]'
 ok "the app version matches the installer ($VERSION)" 'node -e "process.exit(require(process.argv[1]).version === process.argv[2] ? 0 : 1)" "$APPDIR/appinfo.json" "$VERSION"'

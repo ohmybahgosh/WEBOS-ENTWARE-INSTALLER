@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.12.0"
+VERSION="2.13.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -63,6 +63,7 @@ SETUP_SHELL=1
 WITH_LOCATE=0
 JSON=0
 CHECK_ONLY=0
+PW_FROM=random
 LOCKED=0
 # One install, repair or uninstall at a time, from SSH or the TV app
 LOCK_DIR="/tmp/webos-entware.lock"
@@ -129,6 +130,9 @@ usage() {
     echo "  add <name>     Install an add-on (git, python, tailscale, samba, filebrowser, ...)"
     echo "  remove <name>  Uninstall an add-on"
     echo "  info <name>    How to reach an add-on's service, and its password"
+    echo "  password <name>  A new random password for a service; --ask to type your own,"
+    echo "                 or --stdin to pipe one in"
+    echo "  web [start|stop|status]  The phone dashboard: add-ons and passwords from a phone"
     echo "  installed      List installed packages, their size and what needs them"
     echo "  search <word>  Search Entware's packages (name matches first)"
     echo "  pkg-add <name> Install one Entware package, with its webOS setup"
@@ -533,10 +537,10 @@ start_job() {
     case "$1" in
         install|uninstall|locate|app-update) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
         upgrade) [ -z "${2:-}" ] || pkg_name_ok "$2" || error_exit "That isn't a package name: $2" ;;
-        add|remove) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
+        add|remove|password) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
         pkg-add|pkg-remove) pkg_name_ok "${2:-}" || error_exit "That isn't a package name: ${2:-none}" ;;
         move) case "${2:-}" in user|appstore) ;; *) error_exit "Move it where? Use: move appstore or move user." ;; esac ;;
-        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, pkg-add, pkg-remove, move or app-update." ;;
+        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, password, pkg-add, pkg-remove, move or app-update." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     # Only one start at a time: two at once would share one log and exit code
@@ -723,7 +727,7 @@ tv_info() {
     TV_MODEL=""
     if command -v luna-send >/dev/null 2>&1; then
         INFO=$(limited luna-send -n 1 -f luna://com.webos.service.tv.systemproperty/getSystemInfo \
-            '{"keys":["modelName","firmwareVersion"]}' 2>/dev/null)
+            '{"keys":["modelName","firmwareVersion"]}' < /dev/null 2>/dev/null)
         TV_MODEL=$(echo "$INFO" | json_get modelName)
         [ -n "$FIRMWARE" ] || FIRMWARE=$(echo "$INFO" | json_get firmwareVersion)
     fi
@@ -1143,7 +1147,7 @@ _entwrap_complete() {
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
 _webos_entware_complete() {
-    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove info move app-update installed search pkg-add pkg-remove logs log --help" -- "${COMP_WORDS[1]}") )
+    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove info password web move app-update installed search pkg-add pkg-remove logs log --help" -- "${COMP_WORDS[1]}") )
 }
 complete -F _entwrap_complete entwrap ent opkg
 complete -F _webos_entware_complete webos-entware
@@ -1864,9 +1868,10 @@ addons_list() {
         addon_catalog | while IFS='|' read -r AD_ID AD_TITLE AD_PKGS AD_REMOVABLE AD_ABOUT; do
             [ "$first" = 1 ] || printf ','
             first=0
-            printf '{"id":%s,"title":%s,"packages":%s,"about":%s,"removable":%s,"service":%s,"state":%s}' \
+            printf '{"id":%s,"title":%s,"packages":%s,"about":%s,"removable":%s,"service":%s,"password":%s,"system":%s,"state":%s}' \
                 "$(json_str "$AD_ID")" "$(json_str "$AD_TITLE")" "$(json_str "$AD_PKGS")" "$(json_str "$AD_ABOUT")" \
-                "$( [ "$AD_REMOVABLE" = yes ] && echo true || echo false)" "$(json_bool addon_service "$AD_ID")" "$(json_str "$(addon_state)")"
+                "$( [ "$AD_REMOVABLE" = yes ] && echo true || echo false)" "$(json_bool addon_service "$AD_ID")" \
+                "$(json_bool addon_has_password "$AD_ID")" "$(json_str "$(system_has "$AD_ID")")" "$(json_str "$(addon_state)")"
         done
         printf ']\n'
         return 0
@@ -1893,9 +1898,26 @@ addon_add() {
         setup_banner || exit 1
         return 0
     fi
-    /opt/bin/opkg update >/dev/null 2>&1 || warn "Couldn't refresh the package list. Trying with the one already here."
-    # shellcheck disable=SC2086  # a list of package names from the catalog
-    /opt/bin/opkg install $AD_PKGS || error_exit "$AD_TITLE didn't install. Check the TV's internet connection and free space."
+    sys=$(system_has "$AD_ID")
+    if [ -n "$sys" ] && ! addon_installed; then
+        info "webOS already has its own $(basename "$sys") ($sys). Entware's goes first on the PATH, and webOS's stays."
+        confirm "Add $AD_TITLE anyway?" || { info "Nothing was added."; return 0; }
+    fi
+    # Only what isn't installed yet: no download, and no list refresh, for
+    # packages already here
+    missing=""
+    for p in $AD_PKGS; do pkg_installed "$p" || missing="$missing $p"; done
+    if [ -z "$missing" ]; then
+        info "$AD_PKGS already installed. Checking its setup."
+    else
+        [ "$missing" = " $AD_PKGS" ] || info "Already installed:$(for p in $AD_PKGS; do pkg_installed "$p" && printf ' %s' "$p"; done). Installing:$missing"
+        if addon_service "$AD_ID"; then
+            port_check "$AD_ID" || exit 1
+        fi
+        /opt/bin/opkg update >/dev/null 2>&1 || warn "Couldn't refresh the package list. Trying with the one already here."
+        # shellcheck disable=SC2086  # package names from the catalog
+        /opt/bin/opkg install $missing || error_exit "$AD_TITLE didn't install. Check the TV's internet connection and free space."
+    fi
     case "$AD_ID" in
         nano) setup_nanorc ;;
         locate) setup_locate || exit 1 ;;
@@ -2221,6 +2243,44 @@ svc_stop() {
     svc_wait "$1" down 5
 }
 
+addon_has_password() { case "$1" in samba|filebrowser|transmission|syncthing) return 0 ;; esac; return 1; }
+# The port each service listens on, to check nothing else on the TV has it
+svc_port() {
+    case "$1" in samba) echo 445 ;; filebrowser) echo "$FB_PORT" ;; minidlna) echo "$DLNA_PORT" ;;
+        transmission) echo "$TR_PORT" ;; syncthing) echo "$ST_PORT" ;; esac
+}
+# A TCP port something listens on, from the kernel's own list
+port_busy() {
+    h=$(printf '%04X' "$1")
+    cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk -v h="$h" '$4 == "0A" { n = split($2, a, ":"); if (a[n] == h) f = 1 } END { exit !f }'
+}
+# Fails when something other than this service already listens on its port
+port_check() {
+    pt=$(svc_port "$1")
+    [ -n "$pt" ] || return 0
+    svc_running "$1" && return 0
+    port_busy "$pt" || return 0
+    warn "Something else on the TV already uses port $pt, which $1 needs. Stop it first: netstat -tlnp | grep :$pt"
+    return 1
+}
+# The command each add-on brings, to tell when webOS already has one. BusyBox
+# applets don't count: they're cut-down versions.
+addon_cmd() {
+    case "$1" in
+        python) echo python3 ;; find) echo rg ;; archives) echo 7z ;; nettools) echo iperf3 ;; vim) echo vim ;;
+        tailscale) echo tailscaled ;; samba) echo smbd ;; minidlna) echo minidlnad ;; transmission) echo transmission-daemon ;;
+        nano|locate|git|htop|tmux|ncdu|rsync|curl|jq|mc|micro|rclone|filebrowser|syncthing) echo "$1" ;;
+    esac
+}
+system_has() {
+    c=$(addon_cmd "$1")
+    [ -n "$c" ] || return 0
+    p=$(PATH=/usr/sbin:/usr/bin:/sbin:/bin; command -v "$c" 2>/dev/null)
+    case "$p" in /*) ;; *) return 0 ;; esac
+    case "$(readlink -f "$p" 2>/dev/null)" in *busybox*) return 0 ;; esac
+    echo "$p"
+}
+
 # The TV's address on the home network
 tv_ip() {
     ip -o -4 addr show 2>/dev/null | awk '$2 != "lo" && $2 !~ /^tailscale/ { sub(/\/.*/, "", $4); print $4; exit }'
@@ -2302,7 +2362,16 @@ svc_on() {
     chmod 755 "$f"
 }
 
+# Services' own logs, kept to their last 500 lines when they pass 1 MB
+trim_logs() {
+    for f in /opt/var/log/filebrowser.log /opt/var/log/minidlna.log; do
+        [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1048576 ] && { tail -n 500 "$f" > "$f.new" && mv -f "$f.new" "$f"; }
+    done
+    return 0
+}
 setup_service() {
+    port_check "$1" || return 1
+    trim_logs
     files_dirs || { warn "Couldn't make $FILES_DIR."; return 1; }
     boot_script_services
     svc_on "$1"
@@ -2535,6 +2604,109 @@ remove_service() {
     return 0
 }
 
+# A new password for a service: random, or one you type (--ask) or pipe in
+# (--stdin). It's never taken from the command line, where other programs
+# on the TV could see it.
+pw_ok() { case "$1" in *[!A-Za-z0-9._@#%+=:,?~!^-]*) return 1 ;; esac; [ ${#1} -ge 12 ] && [ ${#1} -le 64 ]; }
+PW_RULE="Use 12 to 64 letters, numbers and . _ @ # % + = : , ? ~ ! ^ -"
+addon_password() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    addon_find "$1" || error_exit "Unknown add-on: ${1:-none}. See: webos-entware addons"
+    addon_has_password "$AD_ID" || error_exit "$AD_TITLE has no password."
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    addon_installed || error_exit "$AD_TITLE isn't added. Add it first: webos-entware add $AD_ID"
+    case "$PW_FROM" in
+        stdin) IFS= read -r pw || [ -n "$pw" ] || error_exit "No password on standard input." ;;
+        ask)
+            [ -t 0 ] || error_exit "--ask needs a terminal. Use --stdin to pipe one in."
+            trap 'stty echo 2>/dev/null' EXIT INT
+            stty -echo
+            printf "New password for %s: " "$AD_TITLE"; IFS= read -r pw; echo
+            printf "Again: "; IFS= read -r pw2; echo
+            stty echo
+            [ "$pw" = "$pw2" ] || error_exit "The two passwords didn't match. Nothing changed." ;;
+        *) pw=$(new_password) ;;
+    esac
+    pw_ok "$pw" || error_exit "$PW_RULE. Nothing changed."
+    old=$(cred_get "$AD_ID" password)
+    cred_save "$AD_ID" "$(cred_get "$AD_ID" user)" "$pw"
+    info "Setting a new password for $AD_TITLE. It restarts for a moment."
+    if ! setup_service "$AD_ID"; then
+        [ -n "$old" ] && cred_save "$AD_ID" "$(cred_get "$AD_ID" user)" "$old"
+        error_exit "The password didn't change. $AD_TITLE is stopped: add it again to start it with the old one."
+    fi
+    success "Changed the password for $AD_TITLE."
+}
+
+# === Phone dashboard ===
+# A small web page for managing add-ons and passwords from a phone or
+# computer on the same network, served by the TV's own Node.js. The TV app
+# starts it and shows a QR code of its address with a sign-in code; it
+# stops by itself after 30 minutes without use. See webos-app/web.
+WEB_DIR="/tmp/webos-entware-web"
+WEB_PORT=8095
+web_server() {
+    for d in "$(dirname "$SELF")/web" "$APP_DIR/assets/web"; do
+        [ -f "$d/server.js" ] && { echo "$d/server.js"; return 0; }
+    done
+    return 1
+}
+web_node() { for n in /usr/bin/node "$(command -v node 2>/dev/null)"; do [ -x "$n" ] && { echo "$n"; return 0; }; done; return 1; }
+web_pid() { p=$(cat "$WEB_DIR/pid" 2>/dev/null); case "$p" in ''|*[!0-9]*) return 1 ;; esac; kill -0 "$p" 2>/dev/null && echo "$p"; }
+# Eight characters that can't be mistaken for each other across a room
+web_code() { tr -dc 'ACDEFHJKMNPQRTWXY3479' < /dev/urandom 2>/dev/null | head -c 8; }
+web_status() {
+    pid=$(web_pid) port=$(cat "$WEB_DIR/port" 2>/dev/null) code=$(cat "$WEB_DIR/code" 2>/dev/null)
+    a=$(tv_ip)
+    if [ "$JSON" = 1 ]; then
+        if [ -n "$pid" ] && [ -n "$port" ]; then
+            printf '{"running":true,"port":%s,"url":%s,"code":%s}\n' "$port" "$(json_str "http://${a:-127.0.0.1}:$port")" "$(json_str "$code")"
+        else
+            printf '{"running":false,"port":null,"url":"","code":""}\n'
+        fi
+        return 0
+    fi
+    if [ -n "$pid" ] && [ -n "$port" ]; then
+        success "The phone dashboard is at http://${a:-the-TVs-IP}:$port"
+        echo "  Code: $code"
+        echo "  Or open http://${a:-the-TVs-IP}:$port/#k=$code to sign in directly. It stops after 30 minutes without use."
+    else
+        info "The phone dashboard isn't running. Start it with: $(run_cmd) web start"
+    fi
+}
+web_action() {
+    case "$1" in
+        start)
+            [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+            if [ -z "$(web_pid)" ]; then
+                js=$(web_server) || error_exit "The phone dashboard comes with the TV app. Install the app from the Homebrew Channel."
+                node=$(web_node) || error_exit "Node.js isn't on this TV, so the phone dashboard can't run."
+                rm -rf "${WEB_DIR:?}"
+                (umask 077; mkdir -p "$WEB_DIR" && web_code > "$WEB_DIR/code")
+                [ "$(wc -c < "$WEB_DIR/code")" -eq 8 ] || error_exit "Couldn't make a sign-in code."
+                # A session of its own, so it outlives the app's task or SSH
+                (unset LD_PRELOAD LD_LIBRARY_PATH
+                 if command -v setsid > /dev/null 2>&1; then
+                     setsid "$node" "$js" --dir "$WEB_DIR" --script "$SELF" --port "$WEB_PORT" < /dev/null > "$WEB_DIR/log" 2>&1 &
+                 else
+                     nohup "$node" "$js" --dir "$WEB_DIR" --script "$SELF" --port "$WEB_PORT" < /dev/null > "$WEB_DIR/log" 2>&1 &
+                 fi)
+                n=0
+                while [ ! -s "$WEB_DIR/port" ] && [ $n -lt 50 ]; do sleep 0.2 2>/dev/null || sleep 1; n=$((n + 1)); done
+                [ -s "$WEB_DIR/port" ] || error_exit "The phone dashboard didn't start: $(tail -n 2 "$WEB_DIR/log" 2>/dev/null)"
+            fi
+            web_status ;;
+        stop)
+            pid=$(web_pid) && kill "$pid" 2>/dev/null
+            n=0
+            while web_pid > /dev/null && [ $n -lt 25 ]; do sleep 0.2 2>/dev/null || sleep 1; n=$((n + 1)); done
+            rm -rf "${WEB_DIR:?}"
+            if [ "$JSON" = 1 ]; then web_status; else success "Stopped the phone dashboard."; fi ;;
+        status|'') web_status ;;
+        *) error_exit "Use: webos-entware web start, web stop or web status" ;;
+    esac
+}
+
 # How to reach an add-on, and its login: 'webos-entware info <name>'
 INFO_URL="" INFO_USER="" INFO_PASS="" INFO_LINES=""
 info_line() { INFO_LINES="$INFO_LINES
@@ -2551,7 +2723,7 @@ addon_info_collect() {
                 info_line "From any device on it: ssh root@$ip4"
             elif [ -n "$(ts_field AuthURL)" ]; then
                 INFO_URL=$(ts_field AuthURL)
-                info_line "Not signed in yet. Scan the QR code, or open the link, and sign in to Tailscale."
+                info_line "Not signed in yet. Open the sign-in link (on the TV, scan the QR code) and sign in to Tailscale."
             else
                 info_line "Not connected (${st:-not running}). Choose Finish setup to get a sign-in link."
             fi ;;
@@ -2569,7 +2741,8 @@ addon_info_collect() {
         transmission)
             INFO_URL="http://$a:$TR_PORT"
             info_line "Open $INFO_URL in a browser to add and manage torrents."
-            info_line "Downloads go to $FILES_DIR/Downloads. Torrent files dropped in Downloads/Watch start by themselves." ;;
+            info_line "Downloads go to $FILES_DIR/Downloads, on the TV's app storage ($(df -m /opt 2>/dev/null | awk 'NR == 2 {print $4}') MB free). For big ones, choose a USB drive in Transmission's settings: $FILES_DIR/USB/..."
+            info_line "Torrent files dropped in Downloads/Watch start by themselves." ;;
         syncthing)
             INFO_URL="http://$a:$ST_PORT"
             info_line "Open $INFO_URL in a browser to add devices and folders."
@@ -2591,8 +2764,8 @@ addon_info() {
     state=$(addon_state)
     addon_info_collect
     if [ "$JSON" = 1 ]; then
-        printf '{"id":%s,"title":%s,"state":%s,"service":%s,"url":%s,"user":%s,"password":%s,"lines":%s}\n' \
-            "$(json_str "$AD_ID")" "$(json_str "$AD_TITLE")" "$(json_str "$state")" "$(json_bool addon_service "$AD_ID")" \
+        printf '{"id":%s,"title":%s,"state":%s,"service":%s,"hasPassword":%s,"url":%s,"user":%s,"password":%s,"lines":%s}\n' \
+            "$(json_str "$AD_ID")" "$(json_str "$AD_TITLE")" "$(json_str "$state")" "$(json_bool addon_service "$AD_ID")" "$(json_bool addon_has_password "$AD_ID")" \
             "$(json_str "$INFO_URL")" "$(json_str "$INFO_USER")" "$(json_str "$INFO_PASS")" "$(printf '%s\n' "$INFO_LINES" | json_lines)"
         return 0
     fi
@@ -3665,7 +3838,7 @@ elif [ "$1" = move ]; then
     LOC_CHOICE=$MOVE_TO
     [ -n "$MOVE_TO" ] || error_exit "Move it where? Use: webos-entware move appstore (app storage) or move user (user data)."
     shift 2
-elif [ "$1" = add ] || [ "$1" = remove ] || [ "$1" = info ]; then
+elif [ "$1" = add ] || [ "$1" = remove ] || [ "$1" = info ] || [ "$1" = password ]; then
     ACTION=$1
     ADDON=${2:-}
     [ -n "$ADDON" ] || error_exit "Name an add-on, e.g. webos-entware $1 htop. See: webos-entware addons"
@@ -3688,6 +3861,11 @@ if [ "$1" = job-status ]; then
     job_status
     exit 0
 fi
+if [ "$1" = web ]; then
+    [ "${3:-}" = --json ] && JSON=1
+    web_action "${2:-status}"
+    exit 0
+fi
 for arg in "$@"; do
     case "$arg" in
         install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates|installed|logs)
@@ -3700,6 +3878,8 @@ for arg in "$@"; do
         --json) JSON=1 ;;
         --refresh) REFRESH=1 ;;
         --check) CHECK_ONLY=1 ;;
+        --stdin) PW_FROM=stdin ;;
+        --ask) PW_FROM=ask ;;
         --location=user|--location=appstore) LOCATION="${arg#--location=}" ;;
         --arch=aarch64-k3.10|--arch=armv7sf-k3.2) FORCE_ARCH="${arg#--arch=}" ;;
         -h|--help) usage; exit 0 ;;
@@ -3759,7 +3939,7 @@ fi
 
 [ "$CHECK_ONLY" = 1 ] && [ "$ACTION" != app-update ] && error_exit "--check goes with app-update."
 case "$ACTION" in
-    install|uninstall|locate|upgrade|add|remove|move|app-update|pkg-add|pkg-remove)
+    install|uninstall|locate|upgrade|add|remove|password|move|app-update|pkg-add|pkg-remove)
         # app-update --check only reads, so it doesn't wait on a running task
         if [ "$CHECK_ONLY" != 1 ]; then
             take_lock
@@ -3777,6 +3957,7 @@ case "$ACTION" in
     addons) addons_list ;;
     add) addon_add "$ADDON" ;;
     info) addon_info "$ADDON" ;;
+    password) addon_password "$ADDON" ;;
     remove) addon_remove "$ADDON" ;;
     move) move_entware "$MOVE_TO" ;;
     app-update) app_update ;;

@@ -121,3 +121,4 @@ footer .right { margin: 0 0 0 auto; }
 .cred b { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; color: #e8eef7; margin-left: 12px; letter-spacing: 1px; }
 .addons-short { max-height: 260px; }
 .panel-title .pill { font-size: 19px; vertical-align: middle; }
+.cred.web-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 46px; font-weight: 700; letter-spacing: 6px; color: #e8eef7; margin: 4px 0 14px; }

@@ -262,7 +262,7 @@
             backTo = '';
             if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); }
             else if (b === 'packages') { openPackages(); } else if (b === 'logs') { openLogs(); }
-            else if (b === 'addoninfo' && addonInfo) { openAddonInfo(addonInfo.addon); }
+            else if (b === 'addoninfo' && addonInfo && addonInfo.addon) { openAddonInfo(addonInfo.addon); }
             else {
                 // Back on the add-on that was open
                 if (addonInfo) { listIndex = addonInfo.index; addonInfo = null; }
@@ -297,10 +297,10 @@
         if (u) { return 'Update ' + u[1]; }
         var pk = /^pkg-(add|remove) (.+)$/.exec(name || '');
         if (pk) { return (pk[1] === 'add' ? 'Install ' : 'Remove ') + pk[2]; }
-        var m = /^(add|remove) ([a-z0-9]+)$/.exec(name || '');
+        var m = /^(add|remove|password) ([a-z0-9]+)$/.exec(name || '');
         if (m) {
             var a = addonById(m[2]);
-            return (m[1] === 'add' ? 'Add ' : 'Remove ') + (a ? a.title : m[2]);
+            return ({ add: 'Add ', remove: 'Remove ', password: 'New password for ' })[m[1]] + (a ? a.title : m[2]);
         }
         return { install: 'Install and repair', uninstall: 'Uninstall', locate: 'Set up locate',
             'move appstore': 'Move to app storage', 'move user': 'Move to user data', 'app-update': 'Update the app',
@@ -313,7 +313,7 @@
 
     // Start a task in the background, then follow it
     function startJob(name) {
-        if (busy || !/^(install|uninstall|locate|upgrade|app-update|(upgrade|pkg-add|pkg-remove) [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
+        if (busy || !/^(install|uninstall|locate|upgrade|app-update|(upgrade|pkg-add|pkg-remove) [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove|password) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -352,7 +352,8 @@
                 }
                 busy = false;
                 var jn = j.name || name;
-                backTo = /^(add|remove) /.test(jn) ? 'addons' : (/^upgrade/.test(jn) ? 'updates' : (/^pkg-/.test(jn) ? 'packages' : ''));
+                backTo = /^(add|remove) /.test(jn) ? 'addons' : (/^password /.test(jn) && addonInfo ? 'addoninfo' :
+                    (/^upgrade/.test(jn) ? 'updates' : (/^pkg-/.test(jn) ? 'packages' : '')));
                 var good = j.state === 'done' && j.exit === 0;
                 var heading = good ? title + ': done' : (j.state === 'lost' ? title + ' stopped before finishing' : title + ': something went wrong');
                 overlay('message', '<span class="' + (good ? 'result-ok' : 'result-bad') + '">' + esc(heading) + '</span>', logHtml(log),
@@ -385,7 +386,7 @@
                 return;
             }
             addons = list;
-            if (listIndex >= addons.length) { listIndex = 0; }
+            if (listIndex > addons.length) { listIndex = 0; }
             renderAddons();
         });
     }
@@ -396,11 +397,15 @@
         return '<span class="pill pill-add">Add</span>';
     }
 
+    // The first row opens the phone dashboard; the add-ons follow
     function renderAddons() {
-        var html = '<div class="addons" id="addon-list">' + addons.map(function (a, i) {
-            return '<div class="addon' + (i === listIndex ? ' focus' : '') + '" data-i="' + i + '">' +
-                '<div><b>' + esc(a.title) + '</b><small>' + esc(a.about) + '</small></div>' + addonPill(a) + '</div>';
-        }).join('') + '</div>';
+        var html = '<div class="addons" id="addon-list">' +
+            '<div class="addon' + (listIndex === 0 ? ' focus' : '') + '" data-i="0"><div><b>Manage from your phone</b>' +
+            '<small>add-ons, addresses and passwords, from your phone\'s browser</small></div><span class="pill pill-add">QR code</span></div>' +
+            addons.map(function (a, i) {
+                return '<div class="addon' + (i + 1 === listIndex ? ' focus' : '') + '" data-i="' + (i + 1) + '">' +
+                    '<div><b>' + esc(a.title) + '</b><small>' + esc(a.about) + '</small></div>' + addonPill(a) + '</div>';
+            }).join('') + '</div>';
         overlay('addons', 'Add-ons', html, 'OK adds one, or opens it to finish setup, see its password or remove it.  BACK to close.');
         Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
             row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
@@ -421,11 +426,13 @@
     }
 
     function chooseAddon() {
-        var a = addons[listIndex];
+        if (listIndex === 0) { addonInfo = { addon: null, index: 0 }; openWeb('addons'); return; }
+        var a = addons[listIndex - 1];
         // Ids are short names from the installer's fixed list; anything else is refused
         if (!a || !/^[a-z0-9]+$/.test(a.id)) { return; }
         if (a.state === 'notInstalled') {
-            confirmThen('Add ' + a.title + '?', a.about + '.  ' + (a.id === 'banner' ?
+            confirmThen('Add ' + a.title + '?', (a.system ? 'webOS already has its own (' + a.system + ').  This adds Entware\'s too, which comes first on the PATH.  ' : '') +
+                a.about + '.  ' + (a.id === 'banner' ?
                 'Downloads neofetch 7.1.0 from GitHub and checks it against the release\'s checksum.  Needs internet.' :
                 'Installs ' + a.packages + ' from Entware, and needs internet.') +
                 (a.id === 'tailscale' ? '  It starts with the TV.  Then sign in to Tailscale with the QR code it shows here.' :
@@ -468,9 +475,13 @@
                     { act: 'setup', title: d.url ? 'Get a new sign-in link' : 'Connect', sub: 'starts Tailscale and asks it for a sign-in link' } :
                     { act: 'setup', title: 'Finish setup', sub: 'sets it up again and starts it, with the same password' });
             }
+            if (d.hasPassword && d.state === 'installed') {
+                rows.push({ act: 'password', title: 'New password', sub: 'makes a new random one and shows it here.  The old one stops working.' });
+            }
+            rows.push({ act: 'web', title: 'Manage from your phone', sub: d.hasPassword ? 'see it, or set your own password, from your phone' : 'all your add-ons, from your phone' });
             rows.push({ act: 'remove', title: 'Remove ' + a.title, sub: a.id === 'tailscale' ? 'signs the TV out of your tailnet and uninstalls tailscale' :
                 'stops it and uninstalls ' + a.packages + '.  Your files in /opt/files stay.' });
-            addonInfo = { addon: a, index: addonInfo && addonInfo.addon.id === a.id ? addonInfo.index : 0, info: d, rows: rows };
+            addonInfo = { addon: a, index: addonInfo && addonInfo.addon && addonInfo.addon.id === a.id ? addonInfo.index : 0, info: d, rows: rows };
             listIndex = 0;
             renderAddonInfo();
         });
@@ -508,11 +519,62 @@
         if (r.act === 'setup') {
             backTo = '';
             startJob('add ' + a.id);
+        } else if (r.act === 'password') {
+            confirmThen('New password for ' + a.title + '?', 'The old one stops working, and ' + a.title + ' restarts for a moment.  ' +
+                'To choose your own, use Manage from your phone, or over SSH: webos-entware password ' + a.id + ' --ask',
+                function () { startJob('password ' + a.id); });
+        } else if (r.act === 'web') {
+            openWeb('addoninfo');
         } else if (r.act === 'remove') {
             confirmThen('Remove ' + a.title + '?', 'Stops it, uninstalls ' + a.packages + ' and deletes its settings and password.' +
                 (a.id === 'tailscale' ? '  The TV signs out of your tailnet.' : '  Your files in /opt/files stay.'),
                 function () { startJob('remove ' + a.id); });
         }
+    }
+
+    // The phone dashboard (webos-app/web, run by 'webos-entware web'): a QR
+    // code of its address that signs the phone in, and the code to type
+    var webFrom = 'addons';
+    function openWeb(from) {
+        if (busy) { return; }
+        busy = true;
+        webFrom = from || 'addons';
+        overlay('busy', '<span class="spinner"></span>Manage from your phone', logHtml(['Starting the phone dashboard…']), '');
+        runScript('web start --json', function (ok, out) {
+            busy = false;
+            var d = parseJson(out);
+            if (!d || !d.running || !/^http:\/\/[0-9.]+:\d+$/.test(d.url) || !/^[A-Z0-9]{8}$/.test(d.code)) {
+                backTo = webFrom;
+                overlay('message', '<span class="result-bad">The phone dashboard didn\'t start</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to go back.');
+                return;
+            }
+            var svg = '';
+            try {
+                var qr = window.qrcode(0, 'M');
+                qr.addData(d.url + '/#k=' + d.code);
+                qr.make();
+                svg = qr.createSvgTag({ cellSize: 4, margin: 12, scalable: true });
+            } catch (e) { svg = ''; }
+            var code = d.code.slice(0, 4) + ' ' + d.code.slice(4);
+            listIndex = 0;
+            overlay('web', 'Manage from your phone', '<div class="qr qr-small">' + svg + '<div class="info-text">' +
+                '<p>Scan this with your phone\'s camera to add and remove add-ons, and see or change passwords, from its browser.</p>' +
+                '<p>Or open <b>' + esc(d.url) + '</b> on a phone or computer on your network, and enter this code:</p>' +
+                '<div class="cred web-code">' + esc(code) + '</div>' +
+                '<p class="dim">It stops by itself after 30 minutes without use.</p></div></div>' +
+                '<div class="addons addons-short" id="addon-list"><div class="addon focus" data-i="0"><div><b>Stop the phone dashboard</b>' +
+                '<small>signs out every phone, and makes a new code next time</small></div></div></div>',
+                'OK stops it.  BACK goes back and leaves it running.');
+            backTo = webFrom;
+        });
+    }
+    function chooseWeb() {
+        if (busy) { return; }
+        busy = true;
+        runScript('web stop --json', function () {
+            busy = false;
+            closeOverlay();
+        });
     }
 
     // ------------------------------------------------------------------ package updates
@@ -1024,11 +1086,11 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
-        if (/^(addons|updates|report|packages|logs|addoninfo)$/.test(overlayMode || '')) {
+        if (/^(addons|updates|report|packages|logs|addoninfo|web)$/.test(overlayMode || '')) {
             if (k === KEY.UP) { focusAddon(listIndex - 1); }
             else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
             else if (k === KEY.ENTER) {
-                ({ updates: chooseUpdate, report: chooseReport, packages: choosePackage, logs: chooseLog, addoninfo: chooseAddonInfo }[overlayMode] || chooseAddon)();
+                ({ updates: chooseUpdate, report: chooseReport, packages: choosePackage, logs: chooseLog, addoninfo: chooseAddonInfo, web: chooseWeb }[overlayMode] || chooseAddon)();
             }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
             e.preventDefault();
