@@ -15,6 +15,10 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 
 - A service package installed on its own, with `ent install` or the Packages screen, waits until it's set up as an add-on, so it never starts with settings that let anyone in.  Removing one from the Packages screen also takes its setup away.
 
+### Fixed
+
+- Entware services you installed yourself now start with the TV too.  The boot script started them with no PATH, so init scripts that don't set their own (like Samba's), or that start through `nohup` or `env`, couldn't find their programs.  It also starts them in a session of their own.  Adding a network service updates an older boot script, and so does a repair.
+
 ## [2.11.1] - 2026-11-04
 
 ### Changed

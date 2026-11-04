@@ -1312,7 +1312,8 @@ if [ "$(id -u)" = 0 ] && ! grep -qs " /opt " /proc/mounts; then
         done
         echo "$(date '+%H:%M:%S') mounted /opt at login, the boot script hadn't" >> /tmp/webos-entware-boot.log
         if [ -x /opt/etc/init.d/rc.unslung ]; then
-            (unset LD_PRELOAD LD_LIBRARY_PATH; /opt/etc/init.d/rc.unslung start </dev/null >/dev/null 2>&1 &)
+            (unset LD_PRELOAD LD_LIBRARY_PATH
+             if command -v setsid >/dev/null 2>&1; then setsid /opt/etc/init.d/rc.unslung start; else /opt/etc/init.d/rc.unslung start; fi </dev/null >/dev/null 2>&1 &)
         fi
         break
     done
@@ -2175,11 +2176,31 @@ svc_proc() {
         wsdd2) echo wsdd2 ;;
     esac
 }
-# Runs an Entware service's init script: start or stop
+# Runs an Entware service's init script: start or stop. A service starts in
+# a session of its own, so it keeps running after SSH or the app's task ends.
 svc() {
     f=$(svc_script "$1")
     [ -n "$f" ] && [ -x "$f" ] || return 1
-    (unset LD_PRELOAD LD_LIBRARY_PATH; PATH="/opt/sbin:/opt/bin:$PATH"; export PATH; "$f" "$2" < /dev/null > /dev/null 2>&1)
+    (unset LD_PRELOAD LD_LIBRARY_PATH; PATH="/opt/sbin:/opt/bin:$PATH"; export PATH
+     if [ "$2" = start ] && command -v setsid > /dev/null 2>&1; then setsid "$f" start; else "$f" "$2"; fi < /dev/null > /dev/null 2>&1)
+}
+# Boot scripts from before 2.12.0 start Entware's services with no PATH, so
+# the ones whose init scripts don't set their own (Samba, and anything
+# started through nohup or env) never start, and in the boot's own session.
+# This brings an older boot script up to date.
+boot_script_services() {
+    [ -f "$INIT_SCRIPT" ] && grep -q "rc.unslung start" "$INIT_SCRIPT" || return 0
+    grep -q "export PATH HOME" "$INIT_SCRIPT" && grep -q "setsid /opt/etc/init.d/rc.unslung" "$INIT_SCRIPT" && return 0
+    grep -q "export PATH HOME" "$INIT_SCRIPT" ||
+        sed -i "s|^\\( *\\)note \"boot script started\"\$|&\\n\\1PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=$HOME_DIR; export PATH HOME|" "$INIT_SCRIPT"
+    grep -q "setsid /opt/etc/init.d/rc.unslung" "$INIT_SCRIPT" ||
+        sed -i 's|^\( *\)/opt/etc/init.d/rc.unslung start >/dev/null 2>&1$|\1if command -v setsid >/dev/null 2>\&1; then setsid /opt/etc/init.d/rc.unslung start; else /opt/etc/init.d/rc.unslung start; fi >/dev/null 2>\&1|' "$INIT_SCRIPT"
+    if grep -q "export PATH HOME" "$INIT_SCRIPT" && grep -q "setsid /opt/etc/init.d/rc.unslung" "$INIT_SCRIPT" && sh -n "$INIT_SCRIPT"; then
+        info "Updated the boot script, so services start with the TV."
+    else
+        warn "Couldn't update the boot script. Repair Entware so services start with the TV."
+    fi
+    return 0
 }
 svc_running() { pidof "$(svc_proc "$1")" > /dev/null 2>&1; }
 # Waits up to $3 seconds for a service to be up, or down
@@ -2283,6 +2304,7 @@ svc_on() {
 
 setup_service() {
     files_dirs || { warn "Couldn't make $FILES_DIR."; return 1; }
+    boot_script_services
     svc_on "$1"
     [ "$1" = samba ] && svc_on wsdd2
     "setup_$1"
@@ -2331,6 +2353,7 @@ setup_samba() {
     workgroup = WORKGROUP
     security = user
     map to guest = Never
+    restrict anonymous = 2
     username map = /opt/etc/samba/users.map
     passdb backend = smbpasswd
     smb passwd file = /opt/etc/samba/smbpasswd
@@ -2819,6 +2842,9 @@ install_boot_script() {
     SRC=$BIND_SRC
     note() { echo "\$(date '+%H:%M:%S') \$1" >> $BOOT_LOG; }
     note "boot script started"
+    # Boot scripts start with no PATH, and Entware's init scripts need one
+    # to find what they start
+    PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=$HOME_DIR; export PATH HOME
     n=0
     while [ ! -x "\$SRC/bin/opkg" ]; do
         if [ \$n -ge 30 ]; then
@@ -2849,7 +2875,9 @@ install_boot_script() {
     done
     if [ -x /opt/etc/init.d/rc.unslung ]; then
         unset LD_PRELOAD LD_LIBRARY_PATH
-        /opt/etc/init.d/rc.unslung start >/dev/null 2>&1
+        # In a session of their own, so services that stay in the foreground
+        # (Tailscale, Syncthing, File Browser) outlive the boot
+        if command -v setsid >/dev/null 2>&1; then setsid /opt/etc/init.d/rc.unslung start; else /opt/etc/init.d/rc.unslung start; fi >/dev/null 2>&1
         note "started Entware services"
     fi
 ) < /dev/null > /dev/null 2>&1 &

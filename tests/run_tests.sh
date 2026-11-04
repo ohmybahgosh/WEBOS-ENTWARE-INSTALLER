@@ -1018,7 +1018,10 @@ rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.
 run install -y
 jq_ok() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if ($1) else 1)" "$W/out"; }
 pw_of() { sed -n 's/^password=//p' "/opt/etc/webos-entware/credentials/$1"; }
+ok "the boot script gives Entware's services a PATH, and a session of their own" 'grep -q "export PATH HOME" /var/lib/webosbrew/init.d/S99entware && grep -q "then setsid /opt/etc/init.d/rc.unslung start; else" /var/lib/webosbrew/init.d/S99entware'
+sed -i -e 's|^\( *\)if command -v setsid.*$|\1/opt/etc/init.d/rc.unslung start >/dev/null 2>\&1|' -e '/export PATH HOME/d' /var/lib/webosbrew/init.d/S99entware
 run add filebrowser -y
+ok "adding a service brings an older boot script up to date" 'grep -q "export PATH HOME" /var/lib/webosbrew/init.d/S99entware && grep -q "then setsid /opt/etc/init.d/rc.unslung start; else" /var/lib/webosbrew/init.d/S99entware && sh -n /var/lib/webosbrew/init.d/S99entware && grep -q "Updated the boot script" "$W/out"'
 ok "add filebrowser sets it up on port 8090 for /opt/files, and starts it" 'grep -q "File Browser is at http://.*:8090" "$W/out" && grep -q "^# File Browser add-on (webos-entware-installer)" /opt/etc/filebrowser/filebrowser.conf && grep -q "ROOT=\"-r /opt/files\"" /opt/etc/filebrowser/filebrowser.conf && pidof filebrowser > /dev/null'
 ok "it keeps the stock settings it replaced" 'grep -q 192.168.1.1 /opt/etc/filebrowser/filebrowser.conf.bak'
 ok "with a new 16-character password, saved for root only" 'p=$(pw_of filebrowser) && [ ${#p} -eq 16 ] && grep -q "^admin $p" /tmp/fb-users && [ "$(stat -c %a /opt/etc/webos-entware/credentials/filebrowser)" = 600 ] && [ "$(stat -c %a /opt/etc/webos-entware/credentials)" = 700 ]'
@@ -1033,7 +1036,7 @@ run addons --json
 ok "a service that stopped needs setup again" 'jq_ok "[a for a in d if a[\"id\"] == \"filebrowser\"][0][\"state\"] == \"needsSetup\""'
 
 run add samba -y
-ok "add samba shares /opt/files with a password, and no guests" 'grep -q "Samba is sharing /opt/files" "$W/out" && grep -q "map to guest = Never" /opt/etc/samba/smb.conf && ! grep -q "guest ok" /opt/etc/samba/smb.conf && grep -q "path = /opt/files" /opt/etc/samba/smb.conf && pidof smbd > /dev/null && pidof wsdd2 > /dev/null'
+ok "add samba shares /opt/files with a password, and no guests" 'grep -q "Samba is sharing /opt/files" "$W/out" && grep -q "map to guest = Never" /opt/etc/samba/smb.conf && grep -q "restrict anonymous = 2" /opt/etc/samba/smb.conf && ! grep -q "guest ok" /opt/etc/samba/smb.conf && grep -q "path = /opt/files" /opt/etc/samba/smb.conf && pidof smbd > /dev/null && pidof wsdd2 > /dev/null'
 ok "you sign in as tv, root's Samba user" 'grep -qx "root = tv" /opt/etc/samba/users.map && grep -q "^-s -a root $(pw_of samba)" /tmp/smbpasswd.log && grep -q "guest ok = yes" /opt/etc/samba/smb.conf.bak'
 
 run add transmission -y
