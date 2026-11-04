@@ -6,43 +6,52 @@
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0b1220">
+<meta name="color-scheme" content="dark">
 <title>Entware on your TV</title>
 <link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
 <link rel="stylesheet" href="dash.css">
 </head>
 <body>
 <header>
   <img src="icon.png" alt="" width="40" height="40">
-  <div><h1>Entware</h1><p id="tv">on your LG TV</p></div>
-  <button id="out" class="link" hidden>Sign out</button>
+  <div><h1>Entware</h1><p id="tv">on your LG TV</p><p id="free"></p></div>
+  <button id="reload" class="link" type="button" hidden>Refresh</button>
+  <button id="out" class="link" type="button" hidden>Sign out</button>
 </header>
 
 <main>
   <section id="login" hidden>
     <h2>Enter the code on your TV</h2>
-    <p class="dim">It's on the TV under Add-ons, Manage from your phone.</p>
+    <p class="dim">On the TV, open the Entware app, then Add-ons, Manage from your phone.</p>
     <form id="login-form" autocomplete="off">
       <input id="code" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" spellcheck="false" maxlength="20" placeholder="ABCD 1234" aria-label="Code">
-      <button type="submit">Sign in</button>
+      <button id="login-go" type="submit">Sign in</button>
     </form>
     <p id="login-msg" class="msg" role="alert"></p>
   </section>
 
   <section id="dash" hidden>
+    <nav class="jump"><a href="#services-h" id="nav-svc">Services</a><a href="#tools-h" id="nav-tools">Tools</a></nav>
     <div id="task" class="task" hidden>
-      <b id="task-title"></b>
+      <div class="task-head"><b id="task-title"></b><button id="task-close" class="link" type="button" hidden>Close</button></div>
       <pre id="task-log"></pre>
     </div>
     <p id="dash-msg" class="msg" role="alert"></p>
-    <h2>Services</h2>
+    <p id="loading" class="dim" hidden>Checking the TV…</p>
+    <h2 id="services-h">Services</h2>
     <p class="dim">They start with the TV.  Their files are in /opt/files, with USB drives in USB.</p>
     <div id="services"></div>
-    <h2>Tools</h2>
-    <div id="tools" class="tools"></div>
+    <h2 id="tools-h">Tools</h2>
+    <p class="dim">For the TV's terminal, over SSH.</p>
+    <h3 id="h-have" hidden>On the TV</h3>
+    <div id="tools-have" class="tools"></div>
+    <h3 id="h-more" hidden>More to add</h3>
+    <div id="tools-more" class="tools"></div>
   </section>
 </main>
 
-<footer><a href="https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER" rel="noreferrer">WEBOS-ENTWARE-INSTALLER</a></footer>
+<footer><a href="https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER" rel="noreferrer" target="_blank">WEBOS-ENTWARE-INSTALLER</a></footer>
 <script src="dash.js"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 
 ### Added
 
-- **Manage from your phone:** the first row in Add-ons shows a QR code that opens a dashboard on your phone, signed in, like TiviBro's web editor.  Add and remove add-ons, see each service's address and password, and make a new password or set your own.  It needs the code shown on the TV, only answers your home network and tailnet, and stops after 30 minutes without use.  Over SSH: `webos-entware web start`.
+- **Manage from your phone:** the first row in Add-ons shows a QR code that opens a dashboard on your phone, signed in, like TiviBro's web editor.  Add and remove add-ons, see each service's address and password, and make a new password or set your own.  It needs the code shown on the TV, only answers your home network and tailnet, and stops after 30 minutes without use.  Over SSH: `webos-entware web start`.  A task's progress stays at the bottom of the screen while the other buttons wait, a new password shows straight after it's set, and Copy works on the TV's plain http page.
 - **Change a service's password:** New password on a service's screen in the TV app, and `webos-entware password <name>` over SSH (`--ask` to type your own).  Settings, devices and torrents stay.
 
 ### Changed

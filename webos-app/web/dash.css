@@ -9,19 +9,28 @@ header { display: flex; align-items: center; gap: 12px; padding: 18px 0 8px; }
 header img { border-radius: 10px; }
 header div { flex: 1; min-width: 0; }
 h1 { font-size: 22px; margin: 0; }
-h2 { font-size: 18px; margin: 26px 0 6px; }
-header p { margin: 0; color: var(--dim); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+h2 { font-size: 18px; margin: 26px 0 6px; scroll-margin-top: 60px; }
+h3 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 18px 0 8px; }
+header p { margin: 0; color: var(--dim); font-size: 14px; line-height: 1.35; }
+header .link { flex: none; }
 .dim { color: var(--dim); font-size: 14px; margin: 0 0 12px; }
+.small { font-size: 13px; margin: 0 0 4px; }
+[hidden] { display: none !important; }
+.jump { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 10px 0; background: var(--bg); border-bottom: 1px solid var(--line); }
+.jump a { color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
 button, .btn { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px; background: var(--blue); color: #06131f; cursor: pointer; text-decoration: none; display: inline-block; }
 button.ghost, .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
 button.danger { background: transparent; color: var(--red); border: 1px solid #5b2a2a; }
 button.link { background: none; color: var(--dim); padding: 6px; font-weight: 500; }
-button:disabled { opacity: .5; cursor: default; }
+button:disabled { opacity: .45; cursor: default; }
+button, .btn { min-height: 42px; }
+button.link { min-height: 0; }
 input { font: inherit; width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0e1727; color: var(--text); }
 input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 #login-form { display: flex; gap: 10px; margin-top: 14px; }
 #code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 22px; letter-spacing: 3px; text-transform: uppercase; }
-.msg { color: var(--red); min-height: 1em; margin: 10px 0 0; }
+.msg { color: var(--red); margin: 10px 0 0; }
+.msg:empty { display: none; }
 .msg.ok { color: var(--green); }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -34,15 +43,21 @@ input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 .login { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: #0e1727; font-size: 15px; }
 .login div { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
 .login span { color: var(--dim); width: 74px; flex: none; }
-.login code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; word-break: break-all; flex: 1; }
+.login code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; word-break: break-all; flex: 1; user-select: all; }
+.login-tools { display: flex; justify-content: flex-end; gap: 4px; margin-top: 2px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.pwform { display: none; margin-top: 10px; }
-.pwform.open { display: block; }
+.pwform { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .pwform input { margin-bottom: 8px; }
 .tools { display: grid; gap: 8px; }
 .tool { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 .tool small { display: block; color: var(--dim); font-size: 13px; }
-.task { background: #10243a; border: 1px solid var(--blue); border-radius: 12px; padding: 12px 14px; margin-top: 8px; }
-.task pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; color: #9fb0c8; max-height: 220px; overflow: auto; }
+/* A task's progress stays in view at the bottom, wherever you are */
+.task { position: fixed; z-index: 3; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); max-width: 736px; margin: 0 auto;
+  background: #10243a; border: 1px solid var(--blue); border-radius: 12px; padding: 12px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
+body.has-task main { padding-bottom: 200px; }
+.task-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.task-ok { border-color: var(--green); background: #0f2a22; }
+.task-bad { border-color: var(--red); background: #2a1316; }
+.task pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; color: #9fb0c8; max-height: 120px; overflow: auto; }
 footer { color: var(--dim); font-size: 13px; padding: 30px 0 24px; text-align: center; }
 footer a { color: var(--dim); }

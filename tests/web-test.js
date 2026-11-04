@@ -37,8 +37,12 @@ J
   "status --json") echo '{"version":"2.13.0","model":"OLED65C2PUA","webos":"webOS 25","webosRelease":"10.3.1","ip":"192.168.50.96","packages":121,"freeMB":1312,"location":"appstore","job":"none","jobName":""}' ;;
   "info filebrowser") echo '{"id":"filebrowser","title":"File Browser","state":"installed","service":true,"hasPassword":true,"url":"http://192.168.50.96:8090","user":"admin","password":"Xk4mP9qL2vR7nT3w","lines":["Open http://192.168.50.96:8090 in a browser on your phone or computer."]}' ;;
   "info tailscale") echo '{"id":"tailscale","title":"Tailscale","state":"needsSetup","service":true,"hasPassword":false,"url":"https://login.tailscale.com/a/fake123","user":"","password":"","lines":["Not signed in yet. Open the sign-in link (on the TV, scan the QR code) and sign in to Tailscale."]}' ;;
-  "job-status --json") echo '{"state":"done","name":"add htop","exit":0,"log":["[SUCCESS] Added htop."]}' ;;
-  "job add"|"job remove") echo "Started: $2 $3." ;;
+  "job-status --json")
+    # Running for the first two checks after a task starts, then done
+    n=$(cat "${CALLS}.polls" 2>/dev/null || echo 9); echo $((n + 1)) > "${CALLS}.polls"
+    if [ "$n" -lt 2 ]; then echo '{"state":"running","name":"add htop","exit":null,"log":["[INFO] Adding htop..."]}'
+    else echo '{"state":"done","name":"add htop","exit":0,"log":["[INFO] Adding htop...","[SUCCESS] Added htop."]}'; fi ;;
+  "job add"|"job remove") echo 0 > "${CALLS}.polls"; echo "Started: $2 $3." ;;
   "password filebrowser") [ "$input" = "fail-me-please-123" ] && { echo "[ERROR] It broke."; exit 1; }; echo "[SUCCESS] Changed the password for File Browser." ;;
 esac
 `, { mode: 0o755 });
@@ -133,47 +137,102 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         fs.mkdirSync(OUT, { recursive: true });
         const b = await pw.chromium.launch();
         const page = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+        // As the TV's address on a home network: not a secure context, so no clipboard API
+        await page.addInitScript(() => { Object.defineProperty(window, 'isSecureContext', { get: () => false }); });
         const errors = [];
         page.on('pageerror', (e) => errors.push(e.message));
         await page.goto('http://127.0.0.1:' + port2 + '/#k=ACDE3479');
         await page.waitForSelector('#services .card');
         check('the QR code\'s #k= signs in, and comes off the address', !/k=/.test(page.url()) && await page.isVisible('#dash'));
-        check('it shows the TV', /OLED65C2PUA/.test(await page.textContent('#tv')));
+        check('it shows the TV and Entware\'s free space', /OLED65C2PUA/.test(await page.textContent('#tv')) && /1312 MB free for Entware/.test(await page.textContent('#free')));
+        check('a bar jumps to Services and Tools, with how many', /Services \(3\)/.test(await page.textContent('#nav-svc')) && /Tools \(3\)/.test(await page.textContent('#nav-tools')));
         const cards = await page.$$eval('#services .card', (cs) => cs.map((c) => c.textContent));
         check('services show as running, sign in or not added', cards.some((c) => /File Browser.*Running/.test(c)) && cards.some((c) => /Tailscale.*Sign in/.test(c)) && cards.some((c) => /Samba.*Not added/.test(c)));
+        check('tools on the TV come first, then the ones to add', /nano/.test(await page.textContent('#tools-have')) && /htop/.test(await page.textContent('#tools-more')) && !/htop/.test(await page.textContent('#tools-have')));
+        check('a tool webOS already has says so', /webOS already has its own/.test(await page.textContent('#tools-more')));
         check('the password is hidden until you show it', !/Xk4mP9qL2vR7nT3w/.test(await page.textContent('#services')));
-        await page.click('text=Show');
-        check('and Show reveals it', /Xk4mP9qL2vR7nT3w/.test(await page.textContent('#services')));
-        check('a tool webOS already has says so', /webOS already has one/.test(await page.textContent('#tools')));
+        await page.click('#svc-filebrowser >> text=Show');
+        check('and Show reveals it', /Xk4mP9qL2vR7nT3w/.test(await page.textContent('#svc-filebrowser')));
+        await page.click('#svc-filebrowser >> text=Copy');
+        check('Copy works on a plain http page too', await page.textContent('#svc-filebrowser .login-tools') .then((t) => /Copied/.test(t)));
+        check('Open names the service and opens it in a new tab', await page.$eval('#svc-filebrowser a.btn', (a) => /Open File Browser/.test(a.textContent) && a.target === '_blank' && a.href === 'http://192.168.50.96:8090/'));
+        check('nothing scrolls sideways on a small phone', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
         await page.screenshot({ path: path.join(OUT, 'web-dashboard.png'), fullPage: true });
-        await page.click('text=Set my own');
-        await page.fill('.pwform.open input >> nth=0', 'My-own_pass#2026');
-        await page.fill('.pwform.open input >> nth=1', 'My-own_pass#2026');
+
+        await page.click('#svc-filebrowser >> text=Set my own');
+        await page.fill('#svc-filebrowser .pwform input[type=password] >> nth=0', 'My-own_pass#2026');
+        await page.fill('#svc-filebrowser .pwform input[type=password] >> nth=1', 'My-own_pass#2027');
+        await page.click('text=Set password');
+        check('two passwords that differ are caught before anything is sent', /don.t match/.test(await page.textContent('#dash-msg')));
+        await page.fill('#svc-filebrowser .pwform input[type=password] >> nth=0', 'has space here 1');
+        await page.fill('#svc-filebrowser .pwform input[type=password] >> nth=1', 'has space here 1');
+        await page.click('text=Set password');
+        check('and so are characters it can\'t take', /Use only letters/.test(await page.textContent('#dash-msg')));
+        await page.fill('#svc-filebrowser .pwform input[type=password] >> nth=0', 'My-own_pass#2026');
+        await page.fill('#svc-filebrowser .pwform input[type=password] >> nth=1', 'My-own_pass#2026');
         fs.writeFileSync(CALLS, '');
         await page.click('text=Set password');
         await page.waitForFunction(() => /Changed the password/.test(document.getElementById('dash-msg').textContent));
         check('Set my own changes it', /--stdin \| My-own_pass#2026/.test(calls()));
+        await page.waitForSelector('#svc-filebrowser .login');
+        check('and afterwards the password shows, without tapping Show', /Xk4mP9qL2vR7nT3w/.test(await page.textContent('#svc-filebrowser .login')));
+
         page.on('dialog', (d) => d.accept());
         fs.writeFileSync(CALLS, '');
-        await page.click('#tools button:has-text("Add") >> nth=0');
-        await page.waitForFunction(() => /done/.test(document.getElementById('task-title').textContent));
+        await page.click('#tools-more button:has-text("Add") >> nth=0');
+        await page.waitForSelector('#task:not([hidden])');
+        await page.waitForFunction(() => /…/.test(document.getElementById('task-title').textContent));
+        check('while a task runs, its progress shows and the other buttons wait', await page.$$eval('button.act', (bs) => bs.length > 3 && bs.every((b) => b.disabled)));
+        await page.screenshot({ path: path.join(OUT, 'web-task.png') });
+        await page.waitForFunction(() => /done/.test(document.getElementById('task-title').textContent), null, { timeout: 10000 });
         check('Add starts the task and follows it to the end', /^job add htop/m.test(calls()) && /Added htop/.test(await page.textContent('#task-log')));
+        await page.waitForFunction(() => Array.prototype.every.call(document.querySelectorAll('button.act'), (b) => !b.disabled));
+        check('then the buttons come back, and Close hides the result', await page.isVisible('#task-close'));
+        await page.click('#task-close');
+        check('Close hides the result', !(await page.isVisible('#task')));
+
+        await page.click('#reload');
+        await page.waitForSelector('#svc-filebrowser');
+        check('Refresh reloads from the TV', (await page.$$('#services .card')).length === 3);
+
         await page.click('#out');
         await page.waitForSelector('#login', { state: 'visible', timeout: 3000 }).catch(() => {});
-        check('Sign out goes back to the code', await page.isVisible('#login'));
+        check('Sign out goes back to the code', await page.isVisible('#login') && !(await page.isVisible('#dash')));
+        await page.click('#login-go');
+        check('Sign in with no code asks for it', /Enter the code/.test(await page.textContent('#login-msg')));
         await page.fill('#code', 'WRONG999');
-        await page.click('text=Sign in');
-        await page.waitForFunction(() => document.getElementById('login-msg').textContent.length > 0);
+        await page.click('#login-go');
+        await page.waitForFunction(() => /isn.t the code/.test(document.getElementById('login-msg').textContent));
         check('a wrong code says where the right one is', /on the TV/.test(await page.textContent('#login-msg')));
         await page.screenshot({ path: path.join(OUT, 'web-login.png') });
+        await page.fill('#code', 'acde 3479');
+        await page.click('#login-go');
+        await page.waitForSelector('#services .card');
+        check('typing the code signs in', await page.isVisible('#dash'));
+
+        const small = await b.newPage({ viewport: { width: 320, height: 640 } });
+        small.on('pageerror', (e) => errors.push(e.message));
+        await small.goto('http://127.0.0.1:' + port2 + '/#k=ACDE3479');
+        await small.waitForSelector('#services .card');
+        check('nothing scrolls sideways at 320 pixels either', await small.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+        await small.close();
+
+        srv2.kill('SIGTERM');
+        await sleep(400);
+        await page.click('#reload');
+        await page.waitForFunction(() => document.getElementById('dash-msg').textContent.length > 0);
+        check('when the dashboard has stopped, it says how to get it back', /Can.t reach the TV/.test(await page.textContent('#dash-msg')) && /start it again on the TV/.test(await page.textContent('#dash-msg')));
         check('no page errors', errors.length === 0);
         if (errors.length) { console.log(errors.join('\n')); }
         await b.close();
     }
 
-    await sleep(8500);
+    // A third one, left alone
+    const srv3 = spawn(process.execPath, [path.join(WEB, 'server.js'), '--dir', DIR, '--script', FAKE, '--port', '18095', '--idle', '3000'], { stdio: 'inherit' });
+    for (let i = 0; i < 50 && !fs.existsSync(path.join(DIR, 'port')); i++) { await sleep(100); }
+    await sleep(5000);
     check('it stops by itself when nobody uses it', !fs.existsSync(path.join(DIR, 'port')));
-    srv2.kill();
+    srv2.kill(); srv3.kill();
     fs.rmSync(T, { recursive: true, force: true });
     console.log(fails ? '== ' + fails + ' failed' : '== all passed');
     process.exit(fails ? 1 : 0);
