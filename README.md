@@ -91,10 +91,12 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
 - **Add-ons:** nano with syntax colors, locate, HTTPS certificates, git, Python, htop, tmux, ncdu, rsync, curl, jq and a [login banner](#login-banner), each with the setup it needs on webOS.  One press adds, finishes setting up or removes one.
+- **Packages:** every package that's installed, with its version and size and **Remove**, and a search field that opens the TV's keyboard.  Type a word like htop or python, and **Install** any of the 2,900+ Entware packages that match, with the same webOS setup `ent install` does.  Packages Entware needs, and ones other packages need, say why they stay.
 - **Package updates:** a screen listing every package with an update, its current and new version, with **Update** for one or **Update all**.  The button shows how many there are, and the app checks Entware's server for new ones once a day.
 - **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
-- **Full check:** everything `doctor` looks at, on screen.
+- **Full check and logs:** everything `doctor` looks at, on screen, plus this boot's log from the boot script and the logs of the last 10 tasks the app ran.
+- **What's new:** after the app updates, it shows what changed, once.
 - **Report for GitHub:** a QR code that opens a report on your phone with your TV, version, build and the full check already filled in.  **It works on my TV** opens a compatibility report, and **Something went wrong** a bug report.
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
@@ -102,8 +104,14 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 <p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, adding the Login banner and watching it install, then opening Package updates"></p>
 
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2, captured from the TV: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Add-ons, Full check, Report for GitHub and Uninstall Entware">
+  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, Full check and logs, Report for GitHub and Uninstall Entware">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen scrolled to the bottom: tmux, ncdu, rsync, curl and jq with Add, and the Login banner installed">
+</p>
+<p align="center"><img src="images/app-packages.gif" width="720" alt="Animated: the Packages screen lists what's installed, then a search for top finds atop, htop and iftop, and installing iftop runs in the background until it shows Installed"></p>
+
+<p align="center">
+  <img src="images/app-packages.png" width="49%" alt="The Packages screen: 37 packages installed, a search field at the top, and each package's version and size, with Remove, or why it stays">
+  <img src="images/app-logs.png" width="49%" alt="Full check and logs: the full check, this boot's log, and recent tasks like Install htop and Add banner, each with View">
 </p>
 <p align="center">
   <img src="images/app-updates.png" width="49%" alt="The Package updates screen: Update all 2 packages, htop 3.4.1-1 to 3.4.2-1 and curl 8.11.1-1 to 8.12.0-1, each with Update, and Check again">
@@ -179,7 +187,7 @@ No SSH needed.  Everything happens on the TV with the remote.
 
 **4.  Open it and choose Install Entware.**  Choose **Launch**.  The app checks your TV, picks the right build and installs Entware in about two minutes, with the progress on screen.  When it's done it says **Entware is ready**.
 
-<p align="center"><img src="images/app-status.png" width="760" alt="The Entware app on an LG C2 after installing, captured from the TV: Entware is ready, 36 packages on app storage, no problems found"></p>
+<p align="center"><img src="images/app-status.png" width="760" alt="The Entware app on an LG C2 after installing: Entware is ready, 36 packages on app storage, no problems found"></p>
 
 From there, [add-ons](#add-ons) are one press away.  For the bash shell and `ent`, SSH in to the TV (turn on SSH in the Homebrew Channel's settings first).
 
@@ -290,10 +298,15 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware addons` | List the [add-ons](#add-ons) and whether each is installed |
 | `webos-entware add <name>` | Install an add-on with its webOS setup, e.g. `add git` |
 | `webos-entware remove <name>` | Uninstall an add-on |
+| `webos-entware installed` | List installed packages with their version, size and what needs them (`--json` for scripts) |
+| `webos-entware search <word>` | Search Entware's packages, names first, marking what's installed |
+| `webos-entware pkg-add <name>` | Install one package with its webOS setup, like `ent install` |
+| `webos-entware pkg-remove <name>` | Uninstall one package.  Packages Entware needs, and ones other packages need, are kept |
+| `webos-entware logs` | This boot's boot script log and the TV app's last 10 tasks.  `log <name>` shows one |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
 | `webos-entware app-update` | Update the TV app (and this command) to the newest release, checked against its checksums |
 | `webos-entware move appstore` | Move Entware to app storage, or `move user` to user data.  A repair also moves older installs to app storage.  See [Where Entware lives](#where-entware-lives) |
-| `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>` or `move <place>` in the background; `job-status` follows it |
+| `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>`, `pkg-add <name>`, `pkg-remove <name>` or `move <place>` in the background; `job-status` follows it.  Its log is kept for `logs` |
 | `webos-entware` | Open the menu |
 
 `doctor` shows your model, webOS version, kernel, Homebrew Channel and telnet status, the installed and recommended builds, whether `/opt` is mounted, whether `opkg` and bash run, and whether the boot script and shell files are in place. It ends with "Everything looks right" or a list of problems, each with its fix.
@@ -302,7 +315,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 
 The installer also writes `/opt/etc/webos-entware/install.info` with the installer version, date, model, webOS version, firmware, kernel and build. It's handy to paste into a bug report.
 
-Install, repair, uninstall, locate and upgrade take a lock, so two of them can never run at once, from SSH or the TV app.  If one is running, the other says so and stops.  A lock left by a task that was stopped is cleared on its own.
+Install, repair, uninstall, locate, upgrade and installing or removing a package take a lock, so two of them can never run at once, from SSH or the TV app.  If one is running, the other says so and stops.  A lock left by a task that was stopped is cleared on its own.
 
 If you piped the installer into sh, there's no file to copy, so it saves the published version from GitHub instead. If that download fails, it tells you, and you can download it to `/opt/bin/webos-entware` yourself.
 

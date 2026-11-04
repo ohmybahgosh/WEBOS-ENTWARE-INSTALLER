@@ -47,6 +47,26 @@ a.version = process.argv[2];
 fs.writeFileSync(f, JSON.stringify(a, null, 4) + "\n");
 ' "$DIST/appinfo.json" "$VERSION"
 
+# This version's changelog, shown once in the app after it updates
+node -e '
+const fs = require("fs");
+const [md, ver, out] = process.argv.slice(1);
+const text = fs.readFileSync(md, "utf8");
+const head = new RegExp("^## \\[" + ver.replace(/\./g, "\\.") + "\\][^\\n]*\\n", "m");
+const m = head.exec(text);
+let notes = [];
+if (m) {
+  const body = text.slice(m.index + m[0].length).split(/\n## /)[0];
+  // Bullets, joined across wrapped lines, without Markdown
+  notes = body.split(/\n- /).slice(1).map((b) => b.split(/\n\n/)[0].replace(/\s*\n\s*/g, " ")
+    .replace(/\*\*([^*]+)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim())
+    .filter((b) => b && !/^Everything from \[?2\./.test(b))
+    // The first sentence of each, so it fits on the screen
+    .map((b) => { const i = b.indexOf(".  "); return i > 0 ? b.slice(0, i + 1) : b; }).slice(0, 6);
+}
+fs.writeFileSync(out, "window.ENTWARE_NOTES = " + JSON.stringify({ version: ver, notes }) + ";\n");
+' "$ROOT/CHANGELOG.md" "$VERSION" "$DIST/whatsnew.js"
+
 ares-package --no-minify "$DIST" -o "$OUT" >/dev/null
 IPK=$(ls "$OUT"/*.ipk)
 echo "Built $IPK"

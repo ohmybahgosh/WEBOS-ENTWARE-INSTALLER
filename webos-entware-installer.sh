@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.10.1"
+VERSION="2.11.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -73,6 +73,8 @@ MOVE_TO=""
 # A place you chose (install --location or move): repairs won't move it
 LOC_CHOICE=""
 PKG=""
+TERM_ARG=""
+LOG_ID=""
 REFRESH=0
 ROLLBACK=0
 SNAPSHOT=0
@@ -125,6 +127,11 @@ usage() {
     echo "  addons         List the add-ons: packages with the setup they need on webOS"
     echo "  add <name>     Install an add-on (nano, locate, git, python, htop, banner, ...)"
     echo "  remove <name>  Uninstall an add-on"
+    echo "  installed      List installed packages, their size and what needs them"
+    echo "  search <word>  Search Entware's packages (name matches first)"
+    echo "  pkg-add <name> Install one Entware package, with its webOS setup"
+    echo "  pkg-remove <name>  Uninstall one package (not ones Entware needs)"
+    echo "  logs           The boot log and the TV app's recent tasks; log <name> shows one"
     echo "  move <place>   Move Entware to app storage (appstore) or back to user data (user)"
     echo "  app-update     Update the TV app (and this command) to the newest release"
     echo "  job <task>     Run install, uninstall, locate, upgrade, add <name>, remove <name>,"
@@ -524,8 +531,9 @@ start_job() {
         install|uninstall|locate|app-update) [ -z "${2:-}" ] || error_exit "$1 takes no name." ;;
         upgrade) [ -z "${2:-}" ] || pkg_name_ok "$2" || error_exit "That isn't a package name: $2" ;;
         add|remove) addon_find "${2:-}" || error_exit "Unknown add-on: ${2:-none}. See: webos-entware addons" ;;
+        pkg-add|pkg-remove) pkg_name_ok "${2:-}" || error_exit "That isn't a package name: ${2:-none}" ;;
         move) case "${2:-}" in user|appstore) ;; *) error_exit "Move it where? Use: move appstore or move user." ;; esac ;;
-        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, move or app-update." ;;
+        *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, pkg-add, pkg-remove, move or app-update." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     # Only one start at a time: two at once would share one log and exit code
@@ -553,7 +561,8 @@ start_job() {
     fi
     # shellcheck disable=SC2016
     # $0 is this script, $1 the job folder, then the task and its name
-    $DETACH sh -c 'trap "" HUP; d=$1; shift; echo $$ > "$d/pid"; sh "$0" "$@" -y; echo $? > "$d/exit"' \
+    # When it ends, its log is kept with the recent tasks (webos-entware logs)
+    $DETACH sh -c 'trap "" HUP; d=$1; shift; echo $$ > "$d/pid"; sh "$0" "$@" -y; echo $? > "$d/exit"; sh "$0" job-archive >/dev/null 2>&1' \
         "$SELF" "$JOB_DIR" "$1" ${2:+"$2"} < /dev/null > "$JOB_DIR/log" 2>&1 &
     # Hold the start until the task has written its pid
     n=0
@@ -1131,7 +1140,7 @@ _entwrap_complete() {
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
 _webos_entware_complete() {
-    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove move app-update --help" -- "${COMP_WORDS[1]}") )
+    [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove move app-update installed search pkg-add pkg-remove logs log --help" -- "${COMP_WORDS[1]}") )
 }
 complete -F _entwrap_complete entwrap ent opkg
 complete -F _webos_entware_complete webos-entware
@@ -2080,6 +2089,221 @@ remove_banner() {
     return 0
 }
 
+# === Packages: installed, search, add and remove one ===
+# For the TV app's Packages screen.  Package names and search words are
+# checked before anything reaches opkg.
+OPKG_STATUS="/opt/lib/opkg/status"
+# Part of Entware or the shell setup: removing these breaks things
+BASE_PKGS=" entware-opt entware-release entware-upgrade opkg libc libgcc libpthread librt libssp libstdcpp ldconfig terminfo locales findutils grep zoneinfo-core bash nano-full coreutils-ls coreutils-dircolors ca-bundle "
+pkg_base() { case "$BASE_PKGS" in *" $1 "*) return 0 ;; esac; return 1; }
+term_ok() { case "$1" in ''|*[!A-Za-z0-9._+-]*) return 1 ;; esac; [ ${#1} -le 40 ]; }
+
+# One line per installed package: name version auto(0/1) needed-by(comma list or -)
+installed_lines() {
+    [ -f "$OPKG_STATUS" ] || return 0
+    awk '
+        function flush() { if (p != "") { n++; name[n] = p; ver[p] = v; auto[p] = a } p = ""; v = ""; a = 0 }
+        /^Package:/ { flush(); p = $2 }
+        /^Version:/ { v = $2 }
+        /^Auto-Installed: yes/ { a = 1 }
+        /^Depends:/ {
+            sub(/^Depends: */, "")
+            k = split($0, d, ",")
+            for (i = 1; i <= k; i++) {
+                x = d[i]; sub(/^ */, "", x); sub(/[ (].*/, "", x)
+                if (x != "") need[x] = (need[x] == "" ? p : need[x] "," p)
+            }
+        }
+        END {
+            flush()
+            for (i = 1; i <= n; i++) {
+                q = name[i]
+                # only dependents that are installed
+                by = ""; m = split(need[q], b, ",")
+                for (j = 1; j <= m; j++) if (b[j] in ver) by = (by == "" ? b[j] : by "," b[j])
+                print q, ver[q], auto[q], (by == "" ? "-" : by)
+            }
+        }' "$OPKG_STATUS" | sort
+}
+pkg_size_kb() {
+    f="/opt/lib/opkg/info/$1.list"
+    [ -f "$f" ] || { echo 0; return; }
+    tr '\n' '\0' < "$f" | xargs -0 ls -lnd 2>/dev/null | awk '$1 !~ /^d/ { s += $5 } END { printf "%d", (s + 1023) / 1024 }'
+}
+# The add-on a package belongs to, if any
+pkg_addon() {
+    addon_catalog | while IFS='|' read -r id _t pk _r _a; do
+        [ "$id" = banner ] && continue
+        for x in $pk; do [ "$x" = "$1" ] && { echo "$id"; return; }; done
+    done
+}
+
+installed_list() {
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    if [ "$JSON" = 1 ]; then
+        first=1
+        printf '['
+        installed_lines | while read -r n v a by; do
+            [ "$first" = 1 ] || printf ','
+            first=0
+            [ "$by" = - ] && by=""
+            printf '{"name":%s,"version":%s,"sizeKB":%s,"auto":%s,"neededBy":%s,"base":%s,"addon":%s}' \
+                "$(json_str "$n")" "$(json_str "$v")" "$(json_num "$(pkg_size_kb "$n")")" \
+                "$( [ "$a" = 1 ] && echo true || echo false)" "$(json_str "$(echo "$by" | sed 's/,/, /g')")" \
+                "$(json_bool pkg_base "$n")" "$(json_str "$(pkg_addon "$n")")"
+        done
+        printf ']\n'
+        return 0
+    fi
+    log "$CYAN" "Installed packages ($(installed_lines | wc -l | tr -d ' '))"
+    installed_lines | while read -r n v a by; do
+        note=""
+        pkg_base "$n" && note=" (part of Entware)"
+        [ "$a" = 1 ] && [ -z "$note" ] && note=" (needed by $(echo "$by" | sed 's/,/, /g'))"
+        printf '  %-24s %-16s %6s KB%s\n' "$n" "$v" "$(pkg_size_kb "$n")" "$note"
+    done
+}
+
+# Package list from Entware's server: refreshed if it's missing or a day old
+fresh_lists() {
+    h=$(lists_age_hours)
+    if [ -z "$h" ] || [ "$h" -ge 24 ]; then
+        /opt/bin/opkg update >/dev/null 2>&1 || [ -n "$h" ] ||
+            error_exit "Couldn't download the package list. Check the TV's internet connection."
+    fi
+}
+
+# Name matches first, then matches in the description; at most 60
+search_list() {
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    term_ok "$TERM_ARG" || error_exit "Search for a word made of letters, numbers, dots, dashes, underscores or plus signs (up to 40)."
+    fresh_lists
+    inst=" $(installed_lines | awk '{printf "%s ", $1}') "
+    t=$(echo "$TERM_ARG" | tr 'A-Z' 'a-z')
+    tab=$(printf '\t')
+    res=$(/opt/bin/opkg list 2>/dev/null | awk -F ' - ' -v t="$t" '
+        NF >= 2 && $1 !~ / / {
+            d = $3; for (i = 4; i <= NF; i++) d = d " - " $i
+            n = tolower($1)
+            # exact, then starts with it, then by where it appears and the shortest name
+            i = index(n, t)
+            if (i) print (n == t ? 0 : (i == 1 ? 1 : 20000 + i * 100 + length(n))) "\t" $1 "\t" $2 "\t" d
+            else if (index(tolower(d), t)) print 900000 "\t" $1 "\t" $2 "\t" d
+        }' | sort -t "$(printf '\t')" -k1,1n -k2,2 | head -n 60)
+    if [ "$JSON" = 1 ]; then
+        first=1
+        printf '['
+        while IFS="$tab" read -r _r n v d; do
+            [ -n "$n" ] || continue
+            [ "$first" = 1 ] || printf ','
+            first=0
+            case "$inst" in *" $n "*) i=true ;; *) i=false ;; esac
+            printf '{"name":%s,"version":%s,"description":%s,"installed":%s}' \
+                "$(json_str "$n")" "$(json_str "$v")" "$(json_str "$(echo "$d" | cut -c1-160)")" "$i"
+        done << EOL
+$res
+EOL
+        printf ']\n'
+    else
+        while IFS="$tab" read -r _r n v d; do
+            [ -n "$n" ] || continue
+            case "$inst" in *" $n "*) i=" [installed]" ;; *) i="" ;; esac
+            printf '%s  %s%s\n    %s\n' "$n" "$v" "$i" "$(echo "$d" | cut -c1-120)"
+        done << EOL
+$res
+EOL
+    fi
+}
+
+pkg_add() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    pkg_name_ok "$PKG" || error_exit "That isn't a package name: $PKG"
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    if pkg_installed "$PKG"; then info "$PKG is already installed."; return 0; fi
+    info "Installing $PKG..."
+    fresh_lists
+    /opt/bin/opkg install "$PKG" || error_exit "$PKG didn't install. Check the name, the TV's internet connection and free space."
+    pkg_installed "$PKG" || error_exit "$PKG didn't install."
+    post_install_action "$PKG"
+    success "$PKG is installed."
+}
+
+pkg_remove() {
+    [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
+    pkg_name_ok "$PKG" || error_exit "That isn't a package name: $PKG"
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    pkg_installed "$PKG" || { info "$PKG isn't installed."; return 0; }
+    pkg_base "$PKG" && error_exit "$PKG is part of Entware or its shell setup, so it stays."
+    by=$(installed_lines | awk -v p="$PKG" '$1 == p && $4 != "-" {print $4}' | sed 's/,/, /g')
+    [ -z "$by" ] || error_exit "$PKG is needed by $by.  Remove those first."
+    # locate's settings and hourly job go with it
+    if [ "$PKG" = mlocate ]; then addon_find locate && addon_remove locate; return; fi
+    confirm "Remove $PKG?" || { info "Kept $PKG."; return 0; }
+    /opt/bin/opkg remove "$PKG" || error_exit "$PKG didn't uninstall cleanly. See: ent list"
+    pkg_installed "$PKG" && error_exit "$PKG is still installed."
+    success "Removed $PKG."
+}
+
+# === Logs: the boot log and the TV app's recent tasks ===
+LOG_DIR="/opt/var/log/webos-entware"
+# Keeps a finished task's log, with when it ran and how it ended (last 10)
+archive_job() {
+    [ -f "$JOB_DIR/exit" ] && [ -f "$JOB_DIR/log" ] || return 0
+    opt_ours || return 0
+    s=$(cat "$JOB_DIR/started" 2>/dev/null); e=$(cat "$JOB_DIR/exit" 2>/dev/null)
+    n=$(tr -c 'A-Za-z0-9._+-' '_' < "$JOB_DIR/name" 2>/dev/null | sed 's/_*$//')
+    case "$s$e" in ''|*[!0-9]*) return 0 ;; esac
+    mkdir -p "$LOG_DIR" 2>/dev/null || return 0
+    f="$LOG_DIR/$s-$e-${n:-task}.log"
+    [ -e "$f" ] || cp "$JOB_DIR/log" "$f" 2>/dev/null
+    # shellcheck disable=SC2012  # names are ours: digits, dashes and safe characters
+    ls -1 "$LOG_DIR" 2>/dev/null | sort -rn | sed -n '11,$p' | while read -r old; do rm -f "$LOG_DIR/$old"; done
+}
+log_id_ok() { case "$1" in ''|*[!A-Za-z0-9._+-]*) return 1 ;; esac; return 0; }
+
+logs_list() {
+    archive_job
+    if [ "$JSON" = 1 ]; then
+        printf '{"boot":'
+        tail -n 40 "$BOOT_LOG" 2>/dev/null | json_lines
+        printf ',"current":%s,"tasks":[' "$(json_str "$(job_state)")"
+        first=1
+        # shellcheck disable=SC2012
+        ls -1 "$LOG_DIR" 2>/dev/null | sort -rn | while read -r f; do
+            s=${f%%-*}; r=${f#*-}; e=${r%%-*}; n=${r#*-}; n=${n%.log}
+            [ "$first" = 1 ] || printf ','
+            first=0
+            printf '{"id":%s,"name":%s,"when":%s,"exit":%s}' "$(json_str "${f%.log}")" \
+                "$(json_str "$(echo "$n" | tr '_' ' ')")" "$(json_str "$(date -d "@$s" '+%Y-%m-%d %H:%M' 2>/dev/null)")" "$(json_num "$e")"
+        done
+        printf ']}\n'
+        return 0
+    fi
+    log "$CYAN" "Boot log ($BOOT_LOG)"
+    if [ -s "$BOOT_LOG" ]; then sed 's/^/  /' "$BOOT_LOG"; else echo "  Nothing yet this boot."; fi
+    echo
+    log "$CYAN" "Recent tasks from the TV app ($LOG_DIR)"
+    # shellcheck disable=SC2012
+    ls -1 "$LOG_DIR" 2>/dev/null | sort -rn | while read -r f; do
+        s=${f%%-*}; r=${f#*-}; e=${r%%-*}; n=${r#*-}; n=${n%.log}
+        printf '  %s  %-20s %s\n' "$(date -d "@$s" '+%Y-%m-%d %H:%M' 2>/dev/null)" "$(echo "$n" | tr '_' ' ')" \
+            "$( [ "$e" = 0 ] && echo "done" || echo "failed ($e)")"
+    done
+}
+
+log_show() {
+    log_id_ok "$LOG_ID" || error_exit "That isn't a log name: $LOG_ID"
+    f="$LOG_DIR/$LOG_ID.log"
+    [ -f "$f" ] || error_exit "No log called $LOG_ID.  See: webos-entware logs"
+    if [ "$JSON" = 1 ]; then
+        printf '{"id":%s,"log":' "$(json_str "$LOG_ID")"
+        tail -n 300 "$f" | json_lines
+        printf '}\n'
+    else
+        cat "$f"
+    fi
+}
+
 # === Mount Entware on every boot ===
 install_boot_script() {
     if [ ! -d /var/lib/webosbrew ]; then
@@ -2881,6 +3105,18 @@ elif [ "$1" = add ] || [ "$1" = remove ]; then
     [ -n "$ADDON" ] || error_exit "Name an add-on, e.g. webos-entware $1 htop. See: webos-entware addons"
     shift 2
 fi
+case "$1" in
+    search|pkg-add|pkg-remove|log)
+        [ -n "${2:-}" ] || error_exit "$1 needs a name, e.g. webos-entware $1 htop"
+        case "$1" in search) TERM_ARG=$2 ;; log) LOG_ID=$2 ;; *) PKG=$2 ;; esac
+        ACTION=$1
+        MOVE_TO=-    # so no other action can follow
+        shift 2 ;;
+esac
+if [ "$1" = job-archive ]; then
+    archive_job
+    exit 0
+fi
 if [ "$1" = job-status ]; then
     [ "$2" = --json ] && JSON=1
     job_status
@@ -2888,7 +3124,7 @@ if [ "$1" = job-status ]; then
 fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates)
+        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates|installed|logs)
             # add and remove take only options after the name
             [ -z "$ADDON" ] && [ -z "$MOVE_TO" ] || { usage; exit 1; }
             case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
@@ -2955,7 +3191,7 @@ if [ -z "$ACTION" ]; then
 fi
 
 case "$ACTION" in
-    install|uninstall|locate|upgrade|add|remove|move|app-update)
+    install|uninstall|locate|upgrade|add|remove|move|app-update|pkg-add|pkg-remove)
         take_lock
         trap 'release_lock' EXIT
         trap 'exit 1' INT TERM HUP ;;
@@ -2972,6 +3208,12 @@ case "$ACTION" in
     remove) addon_remove "$ADDON" ;;
     move) move_entware "$MOVE_TO" ;;
     app-update) app_update ;;
+    installed) installed_list ;;
+    search) search_list ;;
+    pkg-add) pkg_add ;;
+    pkg-remove) pkg_remove ;;
+    logs) logs_list ;;
+    log) log_show ;;
     updates) [ "$REFRESH" = 1 ] && take_lock && trap 'release_lock' EXIT
         check_updates ;;
 esac

@@ -49,8 +49,8 @@ td:first-child { color: #7d8ba1; width: 34%; }
 
 .btn {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 28px; font-weight: 600; padding: 10px 30px; border-radius: 18px;
-  background: #142036; margin-bottom: 9px; border: 3px solid transparent; outline: none;
+  font-size: 28px; font-weight: 600; padding: 6px 30px; border-radius: 18px;
+  background: #142036; margin-bottom: 7px; border: 3px solid transparent; outline: none;
 }
 .btn small { display: block; font-size: 19px; color: #7d8ba1; font-weight: 500; margin-top: 3px; }
 .btn:focus, .btn.focus { border-color: #4cc3ff; background: #16304d; box-shadow: 0 0 0 6px rgba(76, 195, 255, .15); }
@@ -103,3 +103,12 @@ footer .right { margin: 0 0 0 auto; }
 .list-head { font-size: 23px; color: #c9d6e8; margin: -4px 0 18px; }
 .list-head .dim { display: block; font-size: 19px; margin-top: 4px; }
 .btn-attn small { color: #4cc3ff; font-weight: 700; }
+
+/* Packages: the search field sits in the list as its first row */
+.pkg-q { width: 100%; font: inherit; font-size: 26px; color: #e8eef7; background: #0b1322; border: 2px solid #2a3a55;
+  border-radius: 12px; padding: 12px 18px; outline: none; }
+.pkg-q:focus { border-color: #4cc3ff; }
+.addon.focus .pkg-q { border-color: #4cc3ff; }
+.panel-title .dim { font-size: 21px; font-weight: 500; color: #7d8ba1; margin-left: 12px; }
+.whatsnew { margin: 0; padding: 0 0 0 30px; font-size: 23px; line-height: 1.45; color: #c9d6e8; }
+.whatsnew li { margin-bottom: 12px; }

@@ -31,6 +31,7 @@ It never changes the system partitions, opens ports, or sends anything about you
 ## The TV app
 
 - It runs the installer bundled inside it through the Homebrew Channel's root service.  Every command it runs is fixed in the app's code.  Nothing typed, received or downloaded is ever passed to the shell.
+- On the Packages screen, the app only sends a package name or a search word made of letters, numbers, dots, dashes, underscores and plus signs.  The app checks that before running anything, and the installer checks it again before it reaches `opkg`.  Packages Entware or the shell setup needs can't be removed from the app.
 - Add-ons are a list fixed in the installer.  The app only sends an add-on's short name, which the installer checks against that list before anything reaches `opkg`, so it can't be used to install or remove anything else.
 - It only talks to GitHub.  It reads the latest release number from the GitHub API, to say when an update is out.  When you choose **Update**, the installer downloads that release's `SHA256SUMS` and app over HTTPS from this repository's release page, checks the app against the checksum and that its package is `org.ohmybahgosh.entware` at the expected version, and only then installs it.  The download URLs are built from the version number alone, which must look like `1.2.3`.  The Homebrew Channel offers the same updates, checked against its manifest.
 - The bug report QR code holds the output of `doctor` (TV model, versions, what's installed).  It's only sent if you scan it and submit the report yourself.

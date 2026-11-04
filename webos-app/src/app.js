@@ -7,7 +7,7 @@
  * service of its own. Every command is a fixed string: nothing typed or
  * received is ever passed to the shell.
  *
- * Install, repair, uninstall, locate, add-ons and package updates run as background
+ * Install, repair, uninstall, locate, add-ons, packages and package updates run as background
  * tasks (the script's "job" command), detached from the app, so closing the
  * app can't stop one halfway. The app follows the task's log while it runs,
  * and picks it up again if it's reopened.
@@ -28,7 +28,7 @@
 
     var state = null;        // last status --json
     var latest = null;       // newest release on GitHub, if newer than this app
-    var overlayMode = null;  // null, 'busy', 'message', 'confirm', 'addons', 'updates', 'report'
+    var overlayMode = null;  // null, 'busy', 'message', 'confirm', or a list: 'addons', 'updates', 'report', 'packages', 'logs'
     var onConfirm = null;
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
@@ -209,6 +209,7 @@
             (n === 0 ? 'all up to date' + (s.updatesChecked ? ' · list from ' + s.updatesChecked.split(' ')[0] : '') : 'see what can be updated');
         document.querySelector('[data-action="upgrade"]').className = 'btn' + (n > 0 ? ' btn-attn' : '');
         show('addons', s.installed && s.mounted);
+        show('packages', s.installed && s.mounted);
         show('move', canMove(s));
         show('uninstall', s.installed);
         show('update', !!latest);
@@ -256,13 +257,14 @@
         if (backTo) {
             var b = backTo;
             backTo = '';
-            if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); } else { openAddons(); }
+            if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); }
+            else if (b === 'packages') { openPackages(); } else if (b === 'logs') { openLogs(); } else { openAddons(); }
             return;
         }
         focusCurrent();
     }
     function confirmThen(title, text, fn) {
-        backTo = (overlayMode === 'addons' || overlayMode === 'updates') ? overlayMode : ''; // BACK returns to the list
+        backTo = /^(addons|updates|packages|logs)$/.test(overlayMode || '') ? overlayMode : ''; // BACK returns to the list
         onConfirm = fn;
         overlay('confirm', esc(title), esc(text), 'Press OK to go ahead, or BACK to cancel.');
     }
@@ -284,6 +286,8 @@
     function jobTitle(name) {
         var u = /^upgrade (.+)$/.exec(name || '');
         if (u) { return 'Update ' + u[1]; }
+        var pk = /^pkg-(add|remove) (.+)$/.exec(name || '');
+        if (pk) { return (pk[1] === 'add' ? 'Install ' : 'Remove ') + pk[2]; }
         var m = /^(add|remove) ([a-z0-9]+)$/.exec(name || '');
         if (m) {
             var a = addonById(m[2]);
@@ -300,7 +304,7 @@
 
     // Start a task in the background, then follow it
     function startJob(name) {
-        if (busy || !/^(install|uninstall|locate|upgrade|app-update|upgrade [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
+        if (busy || !/^(install|uninstall|locate|upgrade|app-update|(upgrade|pkg-add|pkg-remove) [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -339,7 +343,7 @@
                 }
                 busy = false;
                 var jn = j.name || name;
-                backTo = /^(add|remove) /.test(jn) ? 'addons' : (/^upgrade/.test(jn) ? 'updates' : '');
+                backTo = /^(add|remove) /.test(jn) ? 'addons' : (/^upgrade/.test(jn) ? 'updates' : (/^pkg-/.test(jn) ? 'packages' : ''));
                 var good = j.state === 'done' && j.exit === 0;
                 var heading = good ? title + ': done' : (j.state === 'lost' ? title + ' stopped before finishing' : title + ': something went wrong');
                 overlay('message', '<span class="' + (good ? 'result-ok' : 'result-bad') + '">' + esc(heading) + '</span>', logHtml(log),
@@ -527,6 +531,7 @@
         },
         upgrade: function () { listIndex = 0; openUpdates(!!(state && (state.updatesAgeHours === null || state.updatesAgeHours >= 24))); },
         addons: function () { listIndex = 0; openAddons(); },
+        packages: function () { listIndex = 0; pkgQuery = ''; openPackages(); },
         move: function () {
             if (!state) { return; }
             confirmThen('Move Entware to app storage?',
@@ -543,15 +548,7 @@
                 'This can\'t be undone, but you can install again any time.',
                 function () { startJob('uninstall'); });
         },
-        doctor: function () {
-            if (busy) { return; }
-            busy = true;
-            overlay('busy', '<span class="spinner"></span>Full check', logHtml(['Checking…']), '');
-            runScript('status', function (ok, out) {
-                busy = false;
-                overlay('message', 'Full check', logHtml(plain(out).trim().split('\n')), 'Use ▲ ▼ to scroll.  Press OK or BACK to close.');
-            });
-        },
+        doctor: function () { listIndex = 0; openLogs(); },
         report: function () {
             if (busy) { return; }
             busy = true;
@@ -570,6 +567,230 @@
                 function () { startJob('app-update'); });
         }
     };
+
+    // ------------------------------------------------------------------ packages
+
+    // One screen for every Entware package: what's installed (with Remove),
+    // or, after a search, what matches (with Install).  Names and search words
+    // are checked here and again by the installer.
+    var PKG_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
+    var SEARCH_WORD = /^[A-Za-z0-9._+-]{1,40}$/;
+    var pkgQuery = '';       // last search, '' for the installed list
+    var pkgList = [];        // installed --json, or search --json
+    var pkgInstalled = {};   // installed packages by name, for the search view
+    var pkgRows = [];        // rows under the search field
+
+    function listJson(out) {
+        var i = (out || '').indexOf('[');
+        try { return i >= 0 ? JSON.parse(out.slice(i)) : null; } catch (e) { return null; }
+    }
+    // A long description, cut at a word so it fits on two lines
+    function short(t, n) {
+        t = String(t || '');
+        if (t.length <= n) { return t; }
+        t = t.slice(0, n);
+        return t.slice(0, Math.max(t.lastIndexOf(' '), n - 20)).replace(/[\s,.;:(]+$/, '') + '…';
+    }
+    function kb(n) { return n >= 1024 ? (Math.round(n / 102.4) / 10) + ' MB' : (n || 0) + ' KB'; }
+
+    function openPackages() {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', '<span class="spinner"></span>Packages', logHtml([pkgQuery ? 'Searching for ' + pkgQuery + '…' : 'Reading what\'s installed…']), '');
+        runScript('installed --json', function (ok, out) {
+            var inst = listJson(out);
+            if (!inst) {
+                busy = false;
+                overlay('message', '<span class="result-bad">Couldn\'t list the packages</span>', logHtml(plain(out).trim().split('\n')), 'Press OK or BACK to close.');
+                return;
+            }
+            pkgInstalled = {};
+            inst.forEach(function (p) { pkgInstalled[p.name] = p; });
+            if (!pkgQuery) {
+                busy = false;
+                pkgList = inst;
+                renderPackages();
+                return;
+            }
+            runScript('search ' + pkgQuery + ' --json', function (ok2, out2) {
+                busy = false;
+                pkgList = listJson(out2);
+                if (!pkgList) {
+                    overlay('message', '<span class="result-bad">The search didn\'t work</span>', logHtml(plain(out2).trim().split('\n')), 'Press OK or BACK to go back.');
+                    pkgQuery = '';
+                    backTo = 'packages';
+                    return;
+                }
+                renderPackages();
+            });
+        });
+    }
+
+    function pkgRow(p) {
+        var i = pkgInstalled[p.name];
+        if (!pkgQuery) {
+            var why = p.base ? 'part of Entware, so it stays' :
+                (p.neededBy ? 'needed by ' + p.neededBy : (p.addon ? 'from the ' + p.addon + ' add-on' : ''));
+            return { name: p.name, title: p.name, sub: p.version + '  ·  ' + kb(p.sizeKB) + (why ? '  ·  ' + why : ''),
+                pill: p.base || p.neededBy ? '' : 'Remove', cls: 'pill-warn', installed: true };
+        }
+        return { name: p.name, title: p.name + '  ' + p.version, sub: short(p.description, 110),
+            pill: i ? 'Installed' : 'Install', cls: i ? 'pill-ok' : 'pill-add', installed: !!i };
+    }
+
+    function renderPackages() {
+        pkgRows = pkgList.map(pkgRow);
+        var head = pkgQuery ?
+            (pkgList.length ? esc(pkgList.length + (pkgList.length === 60 ? '+' : '') + ' packages match "' + pkgQuery + '"') :
+                'Nothing matches "' + esc(pkgQuery) + '".  Try a shorter word.') +
+                '  <span class="dim">Press OK on the search to change it, or clear it to see what\'s installed.</span>' :
+            esc(pkgList.length + ' packages installed') + '  <span class="dim">Search for more, or press OK on one to remove it.</span>';
+        var html = '<div class="list-head">' + head + '</div><div class="addons" id="addon-list">' +
+            '<div class="addon" data-i="0"><input id="pkg-q" class="pkg-q" type="text" maxlength="40" autocomplete="off" spellcheck="false" ' +
+            'placeholder="Search Entware\'s packages, like htop or python" value="' + esc(pkgQuery) + '"></div>' +
+            pkgRows.map(function (r, i) {
+                return '<div class="addon" data-i="' + (i + 1) + '"><div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
+                    (r.pill ? '<span class="pill ' + r.cls + '">' + esc(r.pill) + '</span>' : '') + '</div>';
+            }).join('') + '</div>';
+        overlay('packages', 'Packages', html, 'OK on the search field types a word.  OK on a package installs or removes it.  BACK to close.');
+        var q = $('pkg-q');
+        q.addEventListener('keydown', function (e) {
+            var k = e.keyCode;
+            if (k === KEY.ENTER) { e.preventDefault(); e.stopPropagation(); q.blur(); runSearch(q.value); }
+            else if (k === KEY.DOWN || k === KEY.BACK || k === KEY.ESC) { e.preventDefault(); e.stopPropagation(); q.blur(); if (k === KEY.DOWN) { focusAddon(1); } }
+            else { e.stopPropagation(); }
+        });
+        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { if (document.activeElement !== q) { focusAddon(parseInt(row.getAttribute('data-i'), 10)); } });
+            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); choosePackage(); });
+        });
+        focusAddon(Math.min(listIndex, pkgRows.length));
+    }
+
+    function runSearch(v) {
+        v = String(v || '').replace(/^\s+|\s+$/g, '');
+        if (v && !SEARCH_WORD.test(v)) {
+            $('overlay-hint').textContent = 'Search for one word: letters, numbers, dots, dashes, underscores or plus signs.';
+            return;
+        }
+        pkgQuery = v;
+        listIndex = v ? 1 : 0;
+        openPackages();
+    }
+
+    function choosePackage() {
+        if (listIndex === 0) { $('pkg-q').focus(); return; }
+        var r = pkgRows[listIndex - 1];
+        if (!r || !PKG_NAME.test(r.name)) { return; }
+        var p = pkgInstalled[r.name];
+        backTo = 'packages';
+        if (!r.installed) {
+            var found = pkgList[listIndex - 1] || {};
+            confirmThen('Install ' + r.name + '?', (found.description ? found.description + '  ' : '') +
+                'Installs version ' + (found.version || '') + ' and anything it needs from Entware, and sets it up for webOS where that\'s needed.  Needs internet.',
+                function () { startJob('pkg-add ' + r.name); });
+            backTo = 'packages';
+            return;
+        }
+        if (p && p.base) {
+            overlay('message', esc(r.name), esc(r.name + ' is part of Entware or its shell setup, so it stays installed.'), 'Press OK or BACK to go back.');
+            return;
+        }
+        if (p && p.neededBy) {
+            overlay('message', esc(r.name), esc(r.name + ' is needed by ' + p.neededBy + ', so remove ' + (p.neededBy.indexOf(',') >= 0 ? 'those' : 'that') + ' first.'), 'Press OK or BACK to go back.');
+            return;
+        }
+        confirmThen('Remove ' + r.name + '?', 'Uninstalls ' + r.name + (p ? ' (' + kb(p.sizeKB) + ')' : '') +
+            '.  Packages it needed stay, since others may use them.  You can install it again any time.',
+            function () { startJob('pkg-remove ' + r.name); });
+        backTo = 'packages';
+    }
+
+    // ------------------------------------------------------------------ logs
+
+    // The full check, the boot log and the app's recent tasks
+    var logRows = [];
+    var logData = null;
+    function openLogs() {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', '<span class="spinner"></span>Full check and logs', logHtml(['Reading the logs…']), '');
+        runScript('logs --json', function (ok, out) {
+            busy = false;
+            logData = parseJson(out) || { boot: [], tasks: [] };
+            var boot = logData.boot || [];
+            logRows = [{ kind: 'check', title: 'Full check', sub: 'everything doctor looks at, checked now', pill: 'Run' },
+                { kind: 'boot', title: 'Boot log', sub: boot.length ? boot.length + ' lines this boot, last: ' + boot[boot.length - 1] : 'nothing yet this boot', pill: 'View' }];
+            (logData.tasks || []).forEach(function (t) {
+                logRows.push({ kind: 'task', id: t.id, title: jobTitle(t.name), sub: (t.when || '') + '  ·  ' + (t.exit === 0 ? 'done' : 'something went wrong'),
+                    pill: 'View', bad: t.exit !== 0 });
+            });
+            if (logRows.length === 2) { logRows.push({ kind: 'none', title: 'No tasks yet', sub: 'installs, add-ons and updates you run from this app show up here', pill: '' }); }
+            if (listIndex >= logRows.length) { listIndex = 0; }
+            var html = '<div class="addons" id="addon-list">' + logRows.map(function (r, i) {
+                return '<div class="addon" data-i="' + i + '"><div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
+                    (r.pill ? '<span class="pill ' + (r.bad ? 'pill-warn' : 'pill-add') + '">' + esc(r.pill) + '</span>' : '') + '</div>';
+            }).join('') + '</div>';
+            overlay('logs', 'Full check and logs', html, 'OK opens one.  BACK to close.');
+            Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+                row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
+                row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseLog(); });
+            });
+            focusAddon(listIndex);
+        });
+    }
+
+    function chooseLog() {
+        var r = logRows[listIndex];
+        if (!r || r.kind === 'none') { return; }
+        backTo = 'logs';
+        if (r.kind === 'check') { runFullCheck(); return; }
+        if (r.kind === 'boot') {
+            overlay('message', 'Boot log', logHtml((logData.boot && logData.boot.length) ? logData.boot : ['Nothing yet this boot.']), 'Use ▲ ▼ to scroll.  Press OK or BACK to go back.');
+            return;
+        }
+        if (!/^[A-Za-z0-9._+-]+$/.test(r.id) || busy) { return; }
+        busy = true;
+        runScript('log ' + r.id + ' --json', function (ok, out) {
+            busy = false;
+            var j = parseJson(out);
+            overlay('message', esc(r.title) + '  <span class="dim">' + esc(r.sub) + '</span>',
+                logHtml(j && j.log && j.log.length ? j.log : plain(out).trim().split('\n')), 'Use ▲ ▼ to scroll.  Press OK or BACK to go back.');
+            $('log').scrollTop = $('log').scrollHeight;
+        });
+    }
+
+    function runFullCheck() {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', '<span class="spinner"></span>Full check', logHtml(['Checking…']), '');
+        runScript('status', function (ok, out) {
+            busy = false;
+            overlay('message', 'Full check', logHtml(plain(out).trim().split('\n')), 'Use ▲ ▼ to scroll.  Press OK or BACK to close.');
+        });
+    }
+
+    // ------------------------------------------------------------------ what's new
+
+    // After the app updates, its changelog shows once.  The notes are built
+    // into the app (whatsnew.js) from CHANGELOG.md.
+    function store(k, v) {
+        try {
+            if (v === undefined) { return window.localStorage.getItem(k); }
+            window.localStorage.setItem(k, v);
+        } catch (e) { /* no storage: just don't remember */ }
+        return null;
+    }
+    function maybeWhatsNew() {
+        var n = window.ENTWARE_NOTES;
+        if (!n || !n.version) { return; }
+        var seen = store('entware.seenVersion');
+        store('entware.seenVersion', n.version);
+        if (!seen || seen === n.version || !n.notes || !n.notes.length || overlayMode || busy) { return; }
+        overlay('message', 'What\'s new in v' + esc(n.version),
+            '<ul class="whatsnew">' + n.notes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>',
+            'Press OK or BACK to close.');
+    }
 
     // Pre-filled GitHub issues, as QR codes to scan with a phone: a compatibility
     // report when it works, a bug report when something went wrong
@@ -711,11 +932,11 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
-        if (overlayMode === 'addons' || overlayMode === 'updates' || overlayMode === 'report') {
+        if (/^(addons|updates|report|packages|logs)$/.test(overlayMode || '')) {
             if (k === KEY.UP) { focusAddon(listIndex - 1); }
             else if (k === KEY.DOWN) { focusAddon(listIndex + 1); }
             else if (k === KEY.ENTER) {
-                if (overlayMode === 'updates') { chooseUpdate(); } else if (overlayMode === 'report') { chooseReport(); } else { chooseAddon(); }
+                ({ updates: chooseUpdate, report: chooseReport, packages: choosePackage, logs: chooseLog }[overlayMode] || chooseAddon)();
             }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
             e.preventDefault();
@@ -762,5 +983,5 @@
     setInterval(function () { if (state) { checkUpdate(state.version); } }, 6 * 3600 * 1000);
 
     focusCurrent();
-    refresh(function (s) { if (s) { checkUpdate(s.version); autoCheckUpdates(s); } });
+    refresh(function (s) { if (s) { checkUpdate(s.version); autoCheckUpdates(s); maybeWhatsNew(); } });
 }());

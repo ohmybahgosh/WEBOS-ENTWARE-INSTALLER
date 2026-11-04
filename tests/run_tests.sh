@@ -48,6 +48,8 @@ case "$1" in
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
             echo "$p" >> $DB
             mkdir -p /opt/lib/opkg/info; touch /opt/lib/opkg/info/$p.control
+            { echo "Package: $p"; echo "Version: 1.0-1"; [ "$p" = git-http ] && echo "Depends: libc, git (>= 2.0)"
+              echo "Status: install user installed"; echo; } >> /opt/lib/opkg/status
             case "$p" in
                 entware-opt) mkdir -p /opt/etc/init.d
                     printf '#!/bin/sh\necho "$1" >> /tmp/rc.unslung.log\n' > /opt/etc/init.d/rc.unslung
@@ -77,6 +79,7 @@ case "$1" in
             echo "$p" >> /tmp/opkg-removed.log
             grep -vx "$p" $DB > $DB.new; mv $DB.new $DB
             rm -f /opt/lib/opkg/info/$p.control
+            awk -v p="$p" 'BEGIN { RS = ""; ORS = "\n\n" } $2 != p' /opt/lib/opkg/status > /opt/lib/opkg/status.new && mv /opt/lib/opkg/status.new /opt/lib/opkg/status
             [ "$p" = mlocate ] && rm -f /opt/bin/updatedb /opt/bin/locate
             [ "$p" = ca-bundle ] && rm -f /opt/etc/ssl/certs/ca-certificates.crt
         done
@@ -85,7 +88,8 @@ case "$1" in
     search) for l in /opt/lib/opkg/info/*.list; do
             [ -f "$l" ] && grep -qx "$2" "$l" && { n=${l##*/}; echo "${n%.list} - 1"; }
         done ;;
-    list) echo "bash - 5.3 - The GNU Bourne Again SHell"; echo "nano-full - 8.7 - An enhanced clone of Pico" ;;
+    list) if [ -f /opt/lib/opkg/fake-list ]; then cat /opt/lib/opkg/fake-list
+        else echo "bash - 5.3 - The GNU Bourne Again SHell"; echo "nano-full - 8.7 - An enhanced clone of Pico"; fi ;;
     *) echo "fake opkg: $*" ;;
 esac
 F
@@ -859,6 +863,64 @@ rm -f "$W/rel/neofetch"
 ! run add banner -y
 ok "add banner says when GitHub can't be reached" 'grep -q "Couldn.t download neofetch" "$W/out" && [ ! -e $BANNER/login.sh ]'
 cp "$W/installer.orig" "$W/installer.sh"
+run uninstall -y
+
+echo "== [$SH] 36. packages: installed, search, add and remove one, and logs"
+rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock
+run install -y
+printf '%s\n' "htop - 3.4.1-1 - Interactive processes viewer" "btop - 1.4.5-1 - Resource monitor" "tmux - 3.5a-1 - Terminal multiplexer" "git - 2.51.0-1 - Version control" "git-http - 2.51.0-1 - Git HTTP support" "nethogs - 0.8.7-1 - Shows bandwidth per process, like top" > /opt/lib/opkg/fake-list
+run installed --json
+ok "installed --json lists packages, marking the ones Entware needs" 'python3 -c "
+import json,sys; d={p[\"name\"]: p for p in json.load(open(sys.argv[1]))}
+assert d[\"bash\"][\"base\"] is True and d[\"bash\"][\"version\"] == \"1.0-1\" and isinstance(d[\"bash\"][\"sizeKB\"], int), d[\"bash\"]
+assert d[\"nano-full\"][\"addon\"] == \"nano\", d[\"nano-full\"]
+" "$W/out"'
+run search top --json
+ok "search puts name matches first, then the description, and marks what's installed" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1])); n=[p[\"name\"] for p in d]
+assert n == [\"btop\", \"htop\", \"nethogs\"], n
+assert d[1][\"installed\"] is False and d[1][\"version\"] == \"3.4.1-1\", d
+" "$W/out"'
+! run search "x;reboot" --json
+ok "search refuses anything that isn't a plain word" 'grep -q "Search for a word" "$W/out"'
+run pkg-add htop -y
+ok "pkg-add installs a package" 'grep -q "htop is installed" "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
+run installed --json
+ok "and it shows up as installed, not part of Entware" 'python3 -c "
+import json,sys; d={p[\"name\"]: p for p in json.load(open(sys.argv[1]))}
+assert d[\"htop\"][\"base\"] is False and d[\"htop\"][\"neededBy\"] == \"\", d[\"htop\"]
+" "$W/out"'
+run search htop --json
+ok "search then marks it installed" 'grep -q "\"name\":\"htop\",\"version\":\"3.4.1-1\",\"description\":\"Interactive processes viewer\",\"installed\":true" "$W/out"'
+! run pkg-add "../etc" -y
+ok "pkg-add refuses something that isn't a package name" 'grep -q "isn.t a package name" "$W/out"'
+run pkg-add git -y; run pkg-add git-http -y
+! run pkg-remove git -y
+ok "pkg-remove says what still needs a package" 'grep -q "git is needed by git-http" "$W/out" && [ -f /opt/lib/opkg/info/git.control ]'
+! run pkg-remove bash -y
+ok "pkg-remove keeps what Entware and the shell need" 'grep -q "bash is part of Entware" "$W/out" && [ -x /opt/bin/bash ]'
+run pkg-remove htop -y
+ok "pkg-remove removes a package" 'grep -q "Removed htop" "$W/out" && [ ! -f /opt/lib/opkg/info/htop.control ]'
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job pkg-add tmux) > "$W/out" 2>&1
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+sleep 1
+ok "job pkg-add runs in the background" '[ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && grep -q "tmux is installed" /tmp/webos-entware-job/log'
+run logs --json
+ok "logs --json lists the boot log and the task that just ran" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"current\"] == \"done\" and isinstance(d[\"boot\"], list), d
+t=d[\"tasks\"][0]; assert t[\"name\"] == \"pkg-add tmux\" and t[\"exit\"] == 0 and t[\"when\"], t
+open(\"/tmp/logid\",\"w\").write(t[\"id\"])
+" "$W/out"'
+run log "$(cat /tmp/logid)" --json
+ok "log <id> shows that task's log" 'grep -q "tmux is installed" "$W/out"'
+! run log "../../etc/passwd" --json
+ok "log refuses a name that isn't a log" 'grep -q "isn.t a log name" "$W/out"'
+run logs
+ok "logs reads well for people too" 'grep -q "Boot log" "$W/out" && grep -q "pkg-add tmux *done" "$W/out"'
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job pkg-add "x y") > "$W/out" 2>&1
+ok "job pkg-add refuses names that aren't packages" 'grep -q "isn.t a package name" "$W/out"'
+rm -f /opt/lib/opkg/fake-list /tmp/logid
 run uninstall -y
 
 echo "== [$SH] $PASS passed, $FAIL failed"

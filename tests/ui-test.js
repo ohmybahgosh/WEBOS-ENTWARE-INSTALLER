@@ -48,6 +48,17 @@ function demo(scenario) {
     if (scenario === 'update') { window.ENTWARE_LATEST = '9.9.9'; }
     if (scenario === 'fresh') { Object.assign(base, { installed: false, mounted: false, opkg: false, packages: null, diskUsed: '' }); }
     let job = null;
+    const INSTALLED = [
+        { name: 'bash', version: '5.3-2', sizeKB: 1217, auto: false, neededBy: '', base: true, addon: '' },
+        { name: 'libncurses', version: '6.4-3', sizeKB: 300, auto: true, neededBy: 'bash, htop', base: false, addon: '' },
+        { name: 'tmux', version: '3.5a-1', sizeKB: 812, auto: false, neededBy: '', base: false, addon: 'tmux' }
+    ];
+    const ALL = [
+        { name: 'btop', version: '1.4.5-1', description: 'Resource monitor' },
+        { name: 'htop', version: '3.4.1-1', description: 'Interactive processes viewer' },
+        { name: 'tmux', version: '3.5a-1', description: 'Terminal multiplexer' }
+    ];
+    const TASKS = [{ id: '1762200000-0-install', name: 'install', when: '2026-11-03 20:00', exit: 0 }];
     window.ENTWARE_CALLS = [];
     window.ENTWARE_DEMO = function (args, cb) {
         window.ENTWARE_CALLS.push(args);
@@ -58,7 +69,13 @@ function demo(scenario) {
             return reply(JSON.stringify({ checked: '2026-11-02 20:58', ageHours: 0, refreshFailed: false, packages: UPDATES }));
         }
         if (args === 'status') { return reply('Entware status\n  Everything looks right.\n'); }
-        let m = /^job (add|remove|move|upgrade) ([A-Za-z0-9._+-]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
+        if (args === 'installed --json') { return reply(JSON.stringify(INSTALLED)); }
+        let s = /^search ([A-Za-z0-9._+-]+) --json$/.exec(args);
+        if (s) { return reply(JSON.stringify(ALL.filter((x) => x.name.indexOf(s[1]) >= 0 || x.description.toLowerCase().indexOf(s[1]) >= 0).map((x) => Object.assign({ installed: !!INSTALLED.find((i) => i.name === x.name) }, x)))); }
+        if (args === 'logs --json') { return reply(JSON.stringify({ boot: ['20:00:01 boot script started', '20:00:02 mounted /opt'], current: 'none', tasks: TASKS })); }
+        s = /^log ([A-Za-z0-9._+-]+) --json$/.exec(args);
+        if (s) { return reply(JSON.stringify({ id: s[1], log: ['[INFO] Installing...', '[SUCCESS] Entware installed successfully!'] })); }
+        let m = /^job (add|remove|move|upgrade|pkg-add|pkg-remove) ([A-Za-z0-9._+-]+)$/.exec(args) || /^job (install|uninstall|locate|upgrade|app-update)$/.exec(args);
         if (m) {
             job = { name: m[2] ? m[1] + ' ' + m[2] : m[1], state: 'running', polls: 0 };
             return reply('Started: ' + job.name + '.');
@@ -73,6 +90,9 @@ function demo(scenario) {
                 if (up) { UPDATES = up[1] ? UPDATES.filter((x) => x.name !== up[1]) : []; }
                 const a = /^(add|remove) (.*)$/.exec(job.name);
                 if (a) { ADDONS.find((x) => x.id === a[2]).state = a[1] === 'add' ? 'installed' : 'notInstalled'; }
+                const pk = /^pkg-(add|remove) (.*)$/.exec(job.name);
+                if (pk && pk[1] === 'add') { INSTALLED.push({ name: pk[2], version: '3.4.1-1', sizeKB: 400, auto: false, neededBy: '', base: false, addon: '' }); }
+                if (pk && pk[1] === 'remove') { INSTALLED.splice(INSTALLED.findIndex((x) => x.name === pk[2]), 1); }
                 if (job.name === 'move appstore') { Object.assign(base, { location: 'appstore', userFreeMB: 181, appFreeMB: 1639, freeMB: 1639 }); }
             }
             return reply(JSON.stringify({ state: job.state, name: job.name, exit: job.state === 'done' ? 0 : null, started: 1, log }));
@@ -266,9 +286,27 @@ function check(name, cond) {
     await press(page, 'ArrowUp', 10);
     await press(page, 'ArrowDown', order2.indexOf('doctor'));
     await press(page, 'Enter');
+    await page.waitForFunction(() => /Full check and logs/.test(document.getElementById('overlay-title').textContent));
+    check('Full check and logs lists the check, the boot log and recent tasks', await page.$$eval('.addon', (rs) => rs.length === 3 && /Full check/.test(rs[0].textContent) && /Boot log/.test(rs[1].textContent) && /Install and repair/.test(rs[2].textContent)));
+    await page.screenshot({ path: path.join(OUT, '12-logs.png') });
+    await press(page, 'Enter');
     await page.waitForFunction(() => /Full check/.test(document.getElementById('overlay-title').textContent) && /Everything/.test(document.getElementById('overlay-body').textContent));
     check('Full check shows the report', true);
     await page.screenshot({ path: path.join(OUT, '7-full-check.png') });
+    await press(page, 'Escape');
+    await page.waitForSelector('.addon.focus');
+    check('BACK returns to the logs list', /Full check and logs/.test(await overlayTitle(page)));
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    check('the boot log shows', /Boot log/.test(await overlayTitle(page)) && /mounted \/opt/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Escape');
+    await page.waitForSelector('.addon.focus');
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /Install and repair/.test(document.getElementById('overlay-title').textContent));
+    check('a recent task shows its log', /installed successfully/.test(await page.textContent('#overlay-body')) && (await page.evaluate(() => window.ENTWARE_CALLS)).includes('log 1762200000-0-install --json'));
+    await press(page, 'Escape');
+    await page.waitForSelector('.addon.focus');
     await press(page, 'Escape');
 
     console.log('== Report for GitHub');
@@ -290,6 +328,69 @@ function check(name, cond) {
     await press(page, 'Escape');
     await press(page, 'Escape');
     check('BACK again closes it', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
+
+    console.log('== Packages');
+    await press(page, 'ArrowUp', 10);
+    await press(page, 'ArrowDown', order2.indexOf('packages'));
+    await press(page, 'Enter');
+    await page.waitForSelector('#pkg-q');
+    check('Packages opens with a search field and what\'s installed', /3 packages installed/.test(await page.textContent('#overlay-body')) && (await page.$$('.addon')).length === 4);
+    check('a package Entware needs, or that others need, has no Remove', await page.$$eval('.addon', (rs) => !/Remove/.test(rs[1].textContent) && /part of Entware/.test(rs[1].textContent) && !/Remove/.test(rs[2].textContent) && /needed by bash, htop/.test(rs[2].textContent) && /Remove/.test(rs[3].textContent)));
+    await page.screenshot({ path: path.join(OUT, '13-packages.png') });
+    await press(page, 'Enter');
+    check('OK on the search field puts the cursor in it', await page.evaluate(() => document.activeElement && document.activeElement.id === 'pkg-q'));
+    await page.keyboard.type('top');
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /match "top"/.test(document.getElementById('overlay-body').textContent));
+    check('searching lists what matches, marking what\'s installed', await page.$$eval('.addon', (rs) => rs.length === 3 && /btop/.test(rs[1].textContent) && /Install/.test(rs[1].textContent) && /htop/.test(rs[2].textContent)));
+    check('and the first result has focus', /btop/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    await page.screenshot({ path: path.join(OUT, '14-packages-search.png') });
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    check('asks before installing', /Install htop\?/.test(await overlayTitle(page)) && /Interactive processes viewer/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
+    check('installs it as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job pkg-add htop') && /Install htop: done/.test(await overlayTitle(page)));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /match "top"/.test(document.getElementById('overlay-body').textContent));
+    check('closing the result returns to the search, with htop installed', await page.$$eval('.addon', (rs) => /htop/.test(rs[2].textContent) && /Installed/.test(rs[2].textContent)));
+    await press(page, 'ArrowUp', 5);
+    await press(page, 'Enter');
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /4 packages installed/.test(document.getElementById('overlay-body').textContent));
+    check('clearing the search goes back to what\'s installed', true);
+    await press(page, 'ArrowDown', 3);
+    await press(page, 'Enter');
+    check('asks before removing a package', /Remove tmux\?/.test(await overlayTitle(page)));
+    await press(page, 'Escape');
+    await page.waitForSelector('#pkg-q');
+    await press(page, 'ArrowUp', 5);
+    await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    check('bash says it stays', /part of Entware/.test(await page.textContent('#overlay-body')));
+    await press(page, 'Escape');
+    await page.waitForSelector('#pkg-q');
+    await press(page, 'Escape');
+    check('BACK closes Packages', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
+    check('no page errors', errors.length === 0);
+    if (errors.length) { console.log(errors.join('\n')); }
+    await page.close();
+
+    console.log('== What\'s new');
+    ({ page, errors } = await open('ready'));
+    check('nothing shows the first time, or when the version hasn\'t changed', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
+    await page.evaluate(() => window.localStorage.setItem('entware.seenVersion', '1.0.0'));
+    await page.reload();
+    await page.waitForFunction(() => /What's new/.test(document.getElementById('overlay-title').textContent));
+    const notes = await page.evaluate(() => window.ENTWARE_NOTES);
+    check('after an update, what\'s new in this version shows once', notes && notes.notes.length > 0 && (await page.$$('.whatsnew li')).length === notes.notes.length);
+    await page.screenshot({ path: path.join(OUT, '15-whats-new.png') });
+    await page.reload();
+    await page.waitForFunction(() => !/Checking/.test(document.getElementById('headline').textContent));
+    await page.waitForTimeout(300);
+    check('and not again', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
     check('no page errors', errors.length === 0);
     if (errors.length) { console.log(errors.join('\n')); }
 

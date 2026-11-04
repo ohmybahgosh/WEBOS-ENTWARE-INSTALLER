@@ -2,6 +2,18 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.11.0] - 2026-11-04
+
+### Added
+
+- **Packages in the TV app:** a new screen for every Entware package.  It opens on what's installed, with each package's version and size, and **Remove** on the ones you can take off: packages Entware or the shell setup needs, and ones other packages need, say why they stay.  The search field at the top opens the TV's keyboard: type a word like htop or python to see what matches (names first), then press OK on one to install it, with the same webOS setup `ent install` does.  Over SSH: `webos-entware installed`, `webos-entware search <word>`, `webos-entware pkg-add <name>` and `webos-entware pkg-remove <name>`.
+- **Full check and logs** (it was **Full check**) lists the full check, this boot's log from the boot script, and the last 10 tasks the app ran, each with its full log.  Over SSH: `webos-entware logs` and `webos-entware log <name>`.  Task logs are kept in `/opt/var/log/webos-entware`.
+- **What's new:** after the app updates, it shows that version's changes once.
+
+### Changed
+
+- The app's buttons are a little shorter, so all of them still fit with Packages added.
+
 ## [2.10.1] - 2026-11-03
 
 ### Added
