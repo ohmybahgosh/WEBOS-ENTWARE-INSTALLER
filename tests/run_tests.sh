@@ -1121,7 +1121,7 @@ run add find -y
 ok "and only the missing packages of one are" 'grep -q "Already installed: ripgrep. Installing: fd fzf" "$W/out"'
 run remove find -y
 run addons --json
-ok "addons --json says when webOS already has a command, and BusyBox's don't count" 'jq_ok "d[[a[\"id\"] for a in d].index(\"python\")][\"system\"] == \"$(PATH=/usr/sbin:/usr/bin:/sbin:/bin; command -v python3)\" and d[[a[\"id\"] for a in d].index(\"htop\")][\"system\"] == \"\" and d[[a[\"id\"] for a in d].index(\"samba\")][\"password\"] is True"'
+ok "addons --json says when webOS already has a command, and which have a password" 'jq_ok "d[[a[\"id\"] for a in d].index(\"python\")][\"system\"] == \"$(PATH=/usr/sbin:/usr/bin:/sbin:/bin; command -v python3)\" and d[[a[\"id\"] for a in d].index(\"htop\")][\"system\"] == \"$(PATH=/usr/sbin:/usr/bin:/sbin:/bin; command -v htop)\" and d[[a[\"id\"] for a in d].index(\"samba\")][\"password\"] is True"'
 
 if [ -x "$W/bin/node" ]; then
     rm -rf /tmp/web; cp -R "$HERE/../webos-app/web" /tmp/web
