@@ -2,11 +2,11 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.11.1] - 2026-11-04
 
 ### Changed
 
-- The TV app now asks the installer on the TV whether a newer release is out (`webos-entware app-update --check`), the same way LG-USB-2-ETH0 does, instead of only asking GitHub's API from the app.  When one is out, **Update to vX** shows at the top of the list with the version you have, and OK downloads it, checks it against the release's checksums and installs it.  If the installer can't answer, the app still asks GitHub directly.
+- The TV app checks for a newer release through the installer on the TV, like LG-USB-2-ETH0.  It runs `webos-entware app-update --check` instead of only asking GitHub's API from the app.  When one is out, **Update to vX** shows at the top of the list with the version you have, and OK downloads it, checks it against the release's checksums and installs it.  If the installer can't answer, the app still asks GitHub directly.
 
 ### Fixed
 
