@@ -163,7 +163,9 @@
 
     // Copies without the clipboard API, which browsers only give https pages
     function copy(text, btn) {
-        var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 2000); };
+        var label = btn.getAttribute('data-label') || btn.textContent;
+        btn.setAttribute('data-label', label);
+        var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = label; }, 2000); };
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(text).then(done, function () { copyOld(text, done); });
             return;
@@ -181,21 +183,32 @@
         document.body.removeChild(t);
     }
 
+    // The service's user and password: each on its own line, with its
+    // buttons right under it
     function loginBox(a, info) {
         var box = el('div', 'login');
-        var u = el('div'); u.appendChild(el('span', '', 'User')); u.appendChild(el('code', '', info.user));
-        var p = el('div'); p.appendChild(el('span', '', 'Password'));
-        var code = el('code', '', reveal[a.id] ? info.password : '••••••••••••');
-        p.appendChild(code);
-        box.appendChild(u); box.appendChild(p);
-        var tools = el('div', 'login-tools');
-        tools.appendChild(button(reveal[a.id] ? 'Hide' : 'Show', 'link', function (e) {
+        var uf = el('div', 'field');
+        uf.appendChild(el('label', '', 'User'));
+        var uv = el('div', 'value');
+        uv.appendChild(el('code', '', info.user));
+        uv.appendChild(button('Copy', 'chip', function (e) { copy(info.user, e.target); }, true));
+        uf.appendChild(uv);
+        var pf = el('div', 'field');
+        pf.appendChild(el('label', '', 'Password'));
+        var pv = el('div', 'value');
+        var code = el('code', 'pw', reveal[a.id] ? info.password : '••••••••••••');
+        pv.appendChild(code);
+        pf.appendChild(pv);
+        var chips = el('div', 'chips');
+        var eye = button(reveal[a.id] ? 'Hide password' : 'Show password', 'chip', function () {
             reveal[a.id] = !reveal[a.id];
             code.textContent = reveal[a.id] ? info.password : '••••••••••••';
-            e.target.textContent = reveal[a.id] ? 'Hide' : 'Show';
-        }, true));
-        tools.appendChild(button('Copy', 'link', function (e) { copy(info.password, e.target); }, true));
-        box.appendChild(tools);
+            eye.textContent = reveal[a.id] ? 'Hide password' : 'Show password';
+        }, true);
+        chips.appendChild(eye);
+        chips.appendChild(button('Copy password', 'chip', function (e) { copy(info.password, e.target); }, true));
+        pf.appendChild(chips);
+        box.appendChild(uf); box.appendChild(pf);
         return box;
     }
 
@@ -305,7 +318,9 @@
         if (a.state === 'notInstalled') {
             card.appendChild(el('p', '', a.about + '.'));
         } else {
-            (info.lines || []).forEach(function (l) { card.appendChild(el('p', '', l)); });
+            // The installer's wording is for the TV; on the phone, the link is right here
+            var lines = a.id === 'tailscale' && info.url ? ['Not signed in yet.  Tap Sign in to Tailscale, sign in, and the TV joins your tailnet.'] : (info.lines || []);
+            lines.forEach(function (l) { card.appendChild(el('p', '', l)); });
             if (info.user) { card.appendChild(loginBox(a, info)); }
             if (done[a.id]) { card.appendChild(el('p', 'msg ok', done[a.id])); delete done[a.id]; }
         }

@@ -40,11 +40,15 @@ input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 .pill-ok { color: var(--green); background: rgba(52, 211, 153, .12); }
 .pill-warn { color: var(--amber); background: rgba(251, 191, 36, .12); }
 .pill-off { color: var(--dim); background: rgba(138, 153, 176, .12); }
-.login { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: #0e1727; font-size: 15px; }
-.login div { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
-.login span { color: var(--dim); width: 74px; flex: none; }
-.login code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; word-break: break-all; flex: 1; user-select: all; }
-.login-tools { display: flex; justify-content: flex-end; gap: 4px; margin-top: 2px; }
+.login { margin: 12px 0; border-radius: 12px; background: #0e1727; border: 1px solid var(--line); }
+.field { padding: 12px 14px; }
+.field + .field { border-top: 1px solid var(--line); }
+.field label { display: block; color: var(--dim); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+.field .value { display: flex; align-items: center; gap: 10px; }
+.field code { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 18px; color: var(--text); word-break: break-all; user-select: all; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+button.chip { min-height: 36px; padding: 6px 12px; font-size: 14px; font-weight: 600; border-radius: 999px; background: transparent; color: var(--blue); border: 1px solid #23476b; }
+button.chip:active { background: #10243a; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pwform { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .pwform input { margin-bottom: 8px; }

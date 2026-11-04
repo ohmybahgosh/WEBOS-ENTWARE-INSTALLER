@@ -260,13 +260,16 @@
         if (backTo) {
             var b = backTo;
             backTo = '';
+            // A list just shown is drawn again as it was; it's read again
+            // from the TV only after a task may have changed it
             if (b === 'updates') { openUpdates(false); } else if (b === 'report') { openReportMenu(); }
-            else if (b === 'packages') { openPackages(); } else if (b === 'logs') { openLogs(); }
+            else if (b === 'packages') { if (fresh.packages && pkgList) { renderPackages(); } else { openPackages(); } }
+            else if (b === 'logs') { if (fresh.logs && logData) { renderLogs(); } else { openLogs(); } }
             else if (b === 'addoninfo' && addonInfo && addonInfo.addon) { openAddonInfo(addonInfo.addon); }
             else {
                 // Back on the add-on that was open
                 if (addonInfo) { listIndex = addonInfo.index; addonInfo = null; }
-                openAddons();
+                if (fresh.addons && addons.length) { renderAddons(); } else { openAddons(); }
             }
             return;
         }
@@ -312,8 +315,13 @@
     }
 
     // Start a task in the background, then follow it
+    // Lists read from the TV that are still current, until a task runs
+    var fresh = { addons: false, packages: false, logs: false };
+    function stale() { fresh.addons = fresh.packages = fresh.logs = false; }
+
     function startJob(name) {
         if (busy || !/^(install|uninstall|locate|upgrade|app-update|(upgrade|pkg-add|pkg-remove) [A-Za-z0-9][A-Za-z0-9._+-]*|(add|remove|password) [a-z0-9]+|move (user|appstore))$/.test(name)) { return; }
+        stale();
         busy = true;
         overlay('busy', '<span class="spinner"></span>' + esc(jobTitle(name)), logHtml(['Starting…']), 'You can leave the app open, or press BACK later.  The task keeps going either way.');
         runScript('job ' + name, function (ok, out) {
@@ -386,6 +394,7 @@
                 return;
             }
             addons = list;
+            fresh.addons = true;
             if (listIndex > addons.length) { listIndex = 0; }
             renderAddons();
         });
@@ -676,7 +685,7 @@
         },
         upgrade: function () { listIndex = 0; openUpdates(!!(state && (state.updatesAgeHours === null || state.updatesAgeHours >= 24))); },
         addons: function () { listIndex = 0; openAddons(); },
-        packages: function () { listIndex = 0; pkgQuery = ''; openPackages(); },
+        packages: function () { listIndex = 0; pkgQuery = ''; pkgList = null; openPackages(); },
         move: function () {
             if (!state) { return; }
             confirmThen('Move Entware to app storage?',
@@ -754,6 +763,7 @@
             if (!pkgQuery) {
                 busy = false;
                 pkgList = inst;
+                fresh.packages = true;
                 renderPackages();
                 return;
             }
@@ -766,6 +776,7 @@
                     backTo = 'packages';
                     return;
                 }
+                fresh.packages = true;
                 renderPackages();
             });
         });
@@ -863,26 +874,30 @@
         runScript('logs --json', function (ok, out) {
             busy = false;
             logData = parseJson(out) || { boot: [], tasks: [] };
-            var boot = logData.boot || [];
-            logRows = [{ kind: 'check', title: 'Full check', sub: 'everything doctor looks at, checked now', pill: 'Run' },
-                { kind: 'boot', title: 'Boot log', sub: boot.length ? boot.length + ' lines this boot, last: ' + boot[boot.length - 1] : 'nothing yet this boot', pill: 'View' }];
-            (logData.tasks || []).forEach(function (t) {
-                logRows.push({ kind: 'task', id: t.id, title: jobTitle(t.name), sub: (t.when || '') + '  ·  ' + (t.exit === 0 ? 'done' : 'something went wrong'),
-                    pill: 'View', bad: t.exit !== 0 });
-            });
-            if (logRows.length === 2) { logRows.push({ kind: 'none', title: 'No tasks yet', sub: 'installs, add-ons and updates you run from this app show up here', pill: '' }); }
-            if (listIndex >= logRows.length) { listIndex = 0; }
-            var html = '<div class="addons" id="addon-list">' + logRows.map(function (r, i) {
-                return '<div class="addon" data-i="' + i + '"><div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
-                    (r.pill ? '<span class="pill ' + (r.bad ? 'pill-warn' : 'pill-add') + '">' + esc(r.pill) + '</span>' : '') + '</div>';
-            }).join('') + '</div>';
-            overlay('logs', 'Full check and logs', html, 'OK opens one.  BACK to close.');
-            Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
-                row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
-                row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseLog(); });
-            });
-            focusAddon(listIndex);
+            fresh.logs = true;
+            renderLogs();
         });
+    }
+    function renderLogs() {
+        var boot = logData.boot || [];
+        logRows = [{ kind: 'check', title: 'Full check', sub: 'everything doctor looks at, checked now', pill: 'Run' },
+            { kind: 'boot', title: 'Boot log', sub: boot.length ? boot.length + ' lines this boot, last: ' + boot[boot.length - 1] : 'nothing yet this boot', pill: 'View' }];
+        (logData.tasks || []).forEach(function (t) {
+            logRows.push({ kind: 'task', id: t.id, title: jobTitle(t.name), sub: (t.when || '') + '  ·  ' + (t.exit === 0 ? 'done' : 'something went wrong'),
+                pill: 'View', bad: t.exit !== 0 });
+        });
+        if (logRows.length === 2) { logRows.push({ kind: 'none', title: 'No tasks yet', sub: 'installs, add-ons and updates you run from this app show up here', pill: '' }); }
+        if (listIndex >= logRows.length) { listIndex = 0; }
+        var html = '<div class="addons" id="addon-list">' + logRows.map(function (r, i) {
+            return '<div class="addon" data-i="' + i + '"><div><b>' + esc(r.title) + '</b><small>' + esc(r.sub) + '</small></div>' +
+                (r.pill ? '<span class="pill ' + (r.bad ? 'pill-warn' : 'pill-add') + '">' + esc(r.pill) + '</span>' : '') + '</div>';
+        }).join('') + '</div>';
+        overlay('logs', 'Full check and logs', html, 'OK opens one.  BACK to close.');
+        Array.prototype.slice.call(document.querySelectorAll('.addon')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { focusAddon(parseInt(row.getAttribute('data-i'), 10)); });
+            row.addEventListener('click', function (e) { e.stopPropagation(); focusAddon(parseInt(row.getAttribute('data-i'), 10)); chooseLog(); });
+        });
+        focusAddon(listIndex);
     }
 
     function chooseLog() {

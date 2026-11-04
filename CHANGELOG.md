@@ -11,6 +11,8 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 ### Changed
 
 - **Passwords can have symbols:** any 12 to 64 characters you can type, with no spaces and not starting with -.  Before, only a few symbols were allowed.
+- **The phone dashboard's logins read better:** the user and the password each have their own line, with **Copy** next to the user and **Show password** and **Copy password** right under the password.
+- **Back to a list is instant in the TV app:** backing out of a package, an add-on or a log shows the list again as it was, without reading it from the TV again.  It's read again only after a task may have changed it.
 - **Clearer password choices:** on the phone dashboard, **Change password** opens one place with **Make a random one for me** or your own, with **Show** to see what you typed.  On the TV, the choice is **New random password**.
 
 ## [2.13.0] - 2026-11-04

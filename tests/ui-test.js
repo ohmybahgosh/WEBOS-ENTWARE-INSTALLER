@@ -214,6 +214,7 @@ function check(name, cond) {
     await press(page, 'Escape');
     await page.waitForSelector('.addon.focus');
     check('BACK on the question returns to the list, same row', /htop/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
+    check('without reading the add-ons again', (await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'addons --json').length)) === 1);
 
     // Add it for real
     await press(page, 'Enter');
@@ -371,8 +372,10 @@ function check(name, cond) {
     await press(page, 'ArrowDown');
     await press(page, 'Enter');
     check('the boot log shows', /Boot log/.test(await overlayTitle(page)) && /mounted \/opt/.test(await page.textContent('#overlay-body')));
+    const logReads = await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'logs --json').length);
     await press(page, 'Escape');
     await page.waitForSelector('.addon.focus');
+    check('and BACK shows the list again without reading the logs again', (await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'logs --json').length)) === logReads);
     await press(page, 'ArrowDown');
     await press(page, 'Enter');
     await page.waitForFunction(() => /Install and repair/.test(document.getElementById('overlay-title').textContent));
@@ -436,8 +439,11 @@ function check(name, cond) {
     await press(page, 'ArrowDown', 3);
     await press(page, 'Enter');
     check('asks before removing a package', /Remove tmux\?/.test(await overlayTitle(page)));
+    const reads = await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length);
     await press(page, 'Escape');
     await page.waitForSelector('#pkg-q');
+    check('BACK on the question shows the list again straight away, without reading it again',
+        await page.evaluate(() => window.ENTWARE_CALLS.filter((c) => c === 'installed --json').length) === reads && /tmux/.test(await page.$eval('.addon.focus', (r) => r.textContent)));
     await press(page, 'ArrowUp', 5);
     await press(page, 'ArrowDown');
     await press(page, 'Enter');
