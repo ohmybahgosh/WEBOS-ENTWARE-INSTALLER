@@ -2033,7 +2033,14 @@ ent_du() {
 # Entware's services: the init scripts, by name without their S00 prefix
 svc_names() { for f in "$INITD"/S*; do [ -f "$f" ] && b=${f##*/} && b=${b#S[0-9][0-9]} && printf '%s\n' "$b"; done | grep -v '^$' ; }
 svc_file() { for f in "$INITD"/S[0-9][0-9]"$1"; do [ -f "$f" ] && { echo "$f"; return 0; }; done; return 1; }
-svc_proc() { p=$(sed -n 's/^PROCS=\([^ ]*\).*/\1/p' "$(svc_file "$1")" 2>/dev/null | tr -d '"'); [ -n "$p" ] && echo "$p" || echo "$1"; }
+# The program a service runs: its script's PROCS= line, or else the first
+# program it starts as a daemon (Samba's script has no PROCS and runs smbd -D)
+svc_proc() {
+    f=$(svc_file "$1")
+    p=$(sed -n 's/^PROCS=\([^ ]*\).*/\1/p' "$f" 2>/dev/null | tr -d '"')
+    [ -n "$p" ] || p=$(sed -n 's/^[[:space:]]*\([A-Za-z0-9_.-]*\) -D\([[:space:]].*\)\{0,1\}$/\1/p' "$f" 2>/dev/null | head -n 1)
+    [ -n "$p" ] && echo "$p" || echo "$1"
+}
 svc_running() { pidof "$(svc_proc "$1")" > /dev/null 2>&1; }
 svc_enabled() { f=$(svc_file "$1") && [ -x "$f" ] && ! grep -q '^ENABLED=no' "$f"; }
 svc_cmd() {
@@ -2065,7 +2072,7 @@ svc_cmd() {
         disable) sed -i 's/^ENABLED=yes/ENABLED=no/' "$f"; chmod 644 "$f"; say "$n won't start at boot.  ent svc stop $n stops it now." ;;
         logs)
             found=0
-            for l in /opt/var/log/"$n"*.log /opt/var/log/"$(svc_proc "$n")"*.log; do
+            for l in /opt/var/log/"$n"*.log /opt/var/log/"$(svc_proc "$n")"*.log /opt/var/log/*/log."$(svc_proc "$n")"; do
                 [ -f "$l" ] && { head1 "$l"; tail -n 30 "$l"; found=1; }
             done
             if [ -r /var/log/messages ]; then

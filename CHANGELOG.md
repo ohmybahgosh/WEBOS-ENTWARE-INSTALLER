@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`ent svc` said Samba was stopped when it was running:** Samba's service script doesn't name its program the way the others do, so `ent svc` and the `tv` and `ent` overviews looked for a program called smb instead of smbd.  They now find the program a script starts when it doesn't say, and `ent svc logs smb` finds Samba's logs in their own folder.
+
 ## [2.15.0] - 2026-11-05
 
 ### Added

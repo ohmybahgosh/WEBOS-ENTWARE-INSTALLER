@@ -1450,6 +1450,15 @@ entr svc enable cron
 ok "ent svc enable turns it back on" '[ -x /opt/etc/init.d/S10cron ]'
 ! entr svc start nosuch
 ok "a service that isn't there says so" 'grep -q "no service called nosuch" "$W/out"'
+# Samba's script has no PROCS= line: it runs smbd -D
+printf '#!/bin/sh\nstart() {\n    smbd -D\n    nmbd -D\n}\n' > /opt/etc/init.d/S91smb; chmod 755 /opt/etc/init.d/S91smb
+cp "$(command -v sleep)" "$W/smbd"; "$W/smbd" 30 & SMBD=$!
+mkdir -p /opt/var/log/samba; echo "smbd version 4.22.7 started." > /opt/var/log/samba/log.smbd
+entr svc
+ok "ent svc finds a service by the program its script starts, when it has no PROCS line" 'grep -q "smb .*running, starts at boot" "$W/out"'
+entr svc logs smb
+ok "and finds its logs in their own folder" 'grep -q "smbd version 4.22.7 started" "$W/out"'
+kill "$SMBD" 2>/dev/null; wait "$SMBD" 2>/dev/null; rm -f /opt/etc/init.d/S91smb "$W/smbd"; rm -rf /opt/var/log/samba
 
 echo "== [$SH] 38c. tv: autostart, SSH keys and done"
 tvr autostart
