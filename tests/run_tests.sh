@@ -240,6 +240,8 @@ login() { $SH -l -c true < /dev/null > /dev/null 2>&1; }
 echo "== [$SH] 1. fresh install, with your own .bashrc already there"
 echo "export MINE=1" > /home/root/.bashrc
 run install -y; ok "install succeeds" 'grep -q "Entware installed successfully" "$W/out"'
+# When the very first install fails, everything after it does too: show why
+grep -q "Entware installed successfully" "$W/out" || { echo "---- install output ----"; sed 's/\x1b\[[0-9;]*m//g' "$W/out" | tail -n 40; echo "----"; }
 ok "/opt mounted" 'mounted'
 ok "boot script written and parses" '[ -x /var/lib/webosbrew/init.d/S99entware ] && sh -n /var/lib/webosbrew/init.d/S99entware'
 ok "your .bashrc backed up" 'grep -q MINE /home/root/.bashrc.pre-entware'
