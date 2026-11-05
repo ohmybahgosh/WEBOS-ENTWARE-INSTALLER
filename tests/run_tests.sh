@@ -1528,7 +1528,7 @@ ok "ent where says where a command comes from" 'grep -q "/bin/sh .*webOS" "$W/ou
 ! entr where nosuchcommand
 ok "and when there isn't one" 'grep -q "no nosuchcommand on the TV" "$W/out"'
 printf '#!/bin/sh\nprintf "sshfs  3.7.2-4\\n    Mount remote system over sftp.\\nsshguard  2.5.1-1 [installed]\\n    Protects hosts.\\n"\n' > "$W/fakemgr"; chmod +x "$W/fakemgr"
-! (cd /tmp && TV_MGR="$W/fakemgr" $SH /opt/bin/ent where ssh) > "$W/out" 2>&1
+! (cd /tmp && TV_MGR="$W/fakemgr" $SH /opt/bin/ent where nosuchtool) > "$W/out" 2>&1
 ok "and names what Entware has, one line each" 'grep -q "^  Entware has sshfs$" "$W/out" && grep -q "^  Entware has sshguard$" "$W/out" && ! grep -q "Mount" "$W/out"'
 entr list nosuchpkg
 ok "ent list with no match says so" 'grep -q "Nothing installed matches nosuchpkg" "$W/out"'
