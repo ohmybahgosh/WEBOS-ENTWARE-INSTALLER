@@ -185,7 +185,7 @@ cat > "$W/bin/luna-send" << 'F'
 echo "$*" >> /tmp/luna.log
 case "$*" in
     *createToast*) echo '{"returnValue": true}' ;;
-    *audio/getVolume*) echo '{"returnValue": true, "volume": 12, "muted": false}' ;;
+    *audio/getVolume*) echo '{"returnValue": true, "muteStatus": false, "volume": 12, "scenario": ""}' ;;
     *audio/setVolume*|*audio/volumeUp*|*audio/volumeDown*|*audio/setMuted*) echo '{"returnValue": true}' ;;
     *eim/getAllInputStatus*) echo '{"returnValue": true, "devices": [{"hdmiPlugIn": true, "connected": true, "label": "HDMI 1", "id": "HDMI_1", "subList": [{"id": "SIMPLINK", "portId": 1}, {"id": "URCU", "connectedInput": "HDMI_1"}], "appId": "com.webos.app.hdmi1"}, {"hdmiPlugIn": false, "connected": true, "id": "HDMI_2", "label": "Xbox", "subList": [], "appId": "com.webos.app.hdmi2"}]}' ;;
     *getForegroundAppInfo*) echo '{"returnValue": true, "appId": "com.webos.app.hdmi1"}' ;;
@@ -1488,7 +1488,7 @@ echo "== [$SH] 38d. tv: the screen, apps and settings (with a fake webOS)"
 tvr volume
 ok "tv volume reads it" 'grep -q "^Volume 12$" "$W/out"'
 tvr volume 30; tvr volume up; tvr mute
-ok "and sets it, turns it up and mutes" 'grep -q "audio/setVolume {\"volume\":30}" /tmp/luna.log && grep -q "audio/volumeUp" /tmp/luna.log && grep -q "setMuted {\"muted\":true}" /tmp/luna.log'
+ok "and sets it, turns it up, and tv mute on its own mutes when it's not muted" 'grep -q "audio/setVolume {\"volume\":30}" /tmp/luna.log && grep -q "audio/volumeUp" /tmp/luna.log && grep -q "setMuted {\"muted\":true}" /tmp/luna.log'
 ! tvr volume 300
 ok "a volume over 100 is refused" 'grep -q "0 to 100" "$W/out"'
 tvr input

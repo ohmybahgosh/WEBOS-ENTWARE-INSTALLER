@@ -11,6 +11,7 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 - **Back up and restore:** `tv backup` saves Entware's settings (with your add-ons' passwords), your crontab, SSH keys, boot scripts and the lists of packages and add-ons you installed, to a USB drive if one's plugged in.  `tv restore` reinstalls them and puts the settings back.
 - **More for the TV:** `tv keys add <github-user>` adds SSH keys from GitHub; `tv autostart` manages boot scripts; `tv ports`, `tv top`, `tv temp`, `tv space`, `tv net test`, `tv usb eject`, `tv wake`, `tv serve` (share a folder with a QR code) and `tv done` (a toast when a long command finishes).
 - **More for Entware:** `ent show` reads like the TV app's package page (size, what else it installs, its commands, its add-on, and whether webOS or the Homebrew Channel already has it); `ent browse` lists packages by category; `ent why` says what needs a package; `ent cleanup` removes packages nothing needs; `ent addon` and `ent svc` add add-ons and start, stop and turn off any Entware service; `ent share` lists every address; `ent where` says where a command comes from.
+- **SSH commands in the TV app:** a new screen lists every `tv` and `ent` command with what it does, and your TV's SSH address.  LEFT and RIGHT switch between them.
 - **`webos-entware helpers`** writes `tv`, `ent`, the webOS helpers and Tab completion again.  Updating the app does this too, so you get them without repairing.
 
 ### Changed

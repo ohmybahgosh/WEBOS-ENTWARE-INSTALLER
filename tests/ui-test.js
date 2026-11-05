@@ -395,6 +395,36 @@ function check(name, cond) {
     check('updates as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job app-update') && /Update the app: done/.test(await overlayTitle(page)));
     await press(page, 'Enter');
 
+    console.log('== SSH commands');
+    const order5 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
+    check('SSH commands shows once Entware is installed', order5.includes('commands'));
+    await press(page, 'ArrowUp', 10);
+    await press(page, 'ArrowDown', order5.indexOf('commands'));
+    await press(page, 'Enter');
+    await page.waitForFunction(() => /SSH commands/.test(document.getElementById('overlay-title').textContent));
+    check('it opens on tv, with the TV\'s groups', /tv: the TV/.test(await page.textContent('.ctab.on')) &&
+        (await page.$$eval('.cgroup', (g) => g.map((x) => x.textContent).join('|'))) === 'Overview|Apps|The screen|System|Files|Automation');
+    check('the commands fit the panel', !(await overflows(page)));
+    await page.screenshot({ path: path.join(OUT, '20-commands-tv.png') });
+    const top0 = await page.$eval('.cmdref', (d) => d.scrollTop);
+    await press(page, 'ArrowDown', 2);
+    check('DOWN scrolls the list', (await page.$eval('.cmdref', (d) => d.scrollTop)) > top0);
+    await press(page, 'ArrowRight');
+    check('RIGHT switches to ent', /ent: Entware/.test(await page.textContent('.ctab.on')) && /ent install/.test(await page.textContent('.cmdref')));
+    await page.screenshot({ path: path.join(OUT, '21-commands-ent.png') });
+    await press(page, 'ArrowLeft');
+    check('LEFT goes back to tv', /tv: the TV/.test(await page.textContent('.ctab.on')));
+    await press(page, 'Escape');
+    check('BACK closes it', await page.$eval('#overlay', (o) => o.classList.contains('hidden')));
+    // Every command in tv help and ent help is on the screen
+    {
+        const sh = fs.readFileSync(path.join(ROOT, 'webos-entware-installer.sh'), 'utf8');
+        const listed = await page.evaluate(() => [].concat(...['tv', 'ent'].map((t) => window.ENTWARE_COMMANDS[t].groups.map((g) => g[1].map((r) => r[0])).flat())));
+        const want = (sh.match(/^ {2}(tv|ent) [a-z]+/gm) || []).map((l) => l.trim());
+        const missing = [...new Set(want)].filter((w) => !listed.some((c) => c === w || c.startsWith(w + ' ')));
+        check('every command in tv help and ent help is on the SSH commands screen' + (missing.length ? ': missing ' + missing.join(', ') : ''), want.length > 40 && missing.length === 0);
+    }
+
     console.log('== Full check');
     const order2 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
     await press(page, 'ArrowUp', 10);

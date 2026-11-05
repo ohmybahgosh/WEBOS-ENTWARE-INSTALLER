@@ -1574,7 +1574,7 @@ ${C}The screen${N}
   tv toast <message>    Show a notification on the TV
   tv shot [file]        Screenshot what's on screen
   tv volume [up|down|0-100]
-  tv mute [on|off]
+  tv mute [on|off]      Mute or unmute (on its own, like the remote's button)
   tv input [list|hdmi1-4]
   tv screen off|on      Turn the picture off or on, with the TV still running
   tv power off          Turn the TV off
@@ -2163,7 +2163,8 @@ volume() {
     A=luna://com.webos.audio
     case "$1" in
         '') r=$(luna "$A/getVolume" '{}'); v=$(jval "$r" volume); [ -n "$v" ] || die "Couldn't read the volume: $(err "$r")"
-            m=$(jval "$r" muted); [ "$m" = true ] && say "Volume $v (muted)" || say "Volume $v" ;;
+            m=$(jval "$r" muteStatus); [ -n "$m" ] || m=$(jval "$r" muted)
+            [ "$m" = true ] && say "Volume $v (muted)" || say "Volume $v" ;;
         up|down) r=$(luna "$A/volume$( [ "$1" = up ] && echo Up || echo Down)" '{}'); ok "$r" || die "It didn't change: $(err "$r")"; volume ;;
         *) num_ok "$1" && [ "$1" -le 100 ] || die "Volume is 0 to 100, or up or down."
             r=$(luna "$A/setVolume" "{\"volume\":$1}"); ok "$r" || die "It didn't change: $(err "$r")"; say "Volume $1" ;;
@@ -2171,7 +2172,13 @@ volume() {
 }
 mute() {
     need_luna
-    case "${1:-on}" in on) m=true ;; off) m=false ;; *) die "tv mute on or tv mute off" ;; esac
+    case "$1" in
+        on) m=true ;; off) m=false ;;
+        # On its own it works like the remote's mute button
+        '') r=$(luna luna://com.webos.audio/getVolume '{}'); m=$(jval "$r" muteStatus); [ -n "$m" ] || m=$(jval "$r" muted)
+            [ "$m" = true ] && m=false || m=true ;;
+        *) die "tv mute, tv mute on or tv mute off" ;;
+    esac
     r=$(luna luna://com.webos.audio/setMuted "{\"muted\":$m}")
     ok "$r" || die "It didn't change: $(err "$r")"
     [ "$m" = true ] && say "Muted." || say "Sound on."

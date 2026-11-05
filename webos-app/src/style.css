@@ -49,10 +49,10 @@ td:first-child { color: #7d8ba1; width: 34%; }
 
 .btn {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 28px; font-weight: 600; padding: 6px 30px; border-radius: 18px;
-  background: #142036; margin-bottom: 7px; border: 3px solid transparent; outline: none;
+  font-size: 27px; font-weight: 600; padding: 3px 30px; border-radius: 18px;
+  background: #142036; margin-bottom: 6px; border: 3px solid transparent; outline: none;
 }
-.btn small { display: block; font-size: 19px; color: #7d8ba1; font-weight: 500; margin-top: 3px; }
+.btn small { display: block; font-size: 19px; color: #7d8ba1; font-weight: 500; margin-top: 1px; }
 .btn:focus, .btn.focus { border-color: #4cc3ff; background: #16304d; box-shadow: 0 0 0 6px rgba(76, 195, 255, .15); }
 .btn-primary { background: #133251; }
 .btn-primary #install-title { color: #9be7ff; }
@@ -219,3 +219,15 @@ footer .right { margin: 0 0 0 auto; }
 .sbtn.focus { border-color: #4cc3ff; background: #16304d; box-shadow: 0 0 0 6px rgba(76, 195, 255, .15); }
 .s-foot { height: 74px; flex: none; display: flex; align-items: center; gap: 34px; font-size: 21px; color: #7d8ba1; border-top: 1px solid #1c2a42; margin-top: 8px; }
 .s-foot > span { white-space: nowrap; }
+
+/* SSH commands */
+.ctabs { display: flex; gap: 14px; margin-bottom: 18px; }
+.ctab { padding: 8px 22px; border-radius: 999px; background: #18243a; color: #9fb0c8; font-size: 23px; font-weight: 700; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; cursor: pointer; }
+.ctab.on { background: #2f7de1; color: #fff; }
+.clead { margin: 0 0 14px; font-size: 23px; color: #9fb0c8; }
+.cmdref { max-height: 540px; overflow: hidden; }
+.cgroup { font-size: 21px; font-weight: 800; color: #6fb4ff; text-transform: uppercase; letter-spacing: 2px; margin: 18px 0 6px; }
+.cgroup:first-child { margin-top: 0; }
+.crow { display: flex; align-items: baseline; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+.crow code { flex: none; width: 500px; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 21px; color: #e8eef7; padding-right: 24px; }
+.crow span { font-size: 21px; color: #9fb0c8; }

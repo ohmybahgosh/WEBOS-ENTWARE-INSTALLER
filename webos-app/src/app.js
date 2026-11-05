@@ -28,7 +28,7 @@
 
     var state = null;        // last status --json
     var latest = null;       // newest release on GitHub, if newer than this app
-    var overlayMode = null;  // null, 'busy', 'loading', 'message', 'confirm', or a list: 'addons', 'report', 'logs', 'addoninfo'
+    var overlayMode = null;  // null, 'busy', 'loading', 'message', 'confirm', 'commands', or a list: 'addons', 'report', 'logs', 'addoninfo'
     var onConfirm = null;
     var jobTimer = null;
     var busy = false;        // a status call or task is in flight
@@ -209,6 +209,7 @@
         document.querySelector('[data-action="upgrade"]').className = 'btn' + (n > 0 ? ' btn-attn' : '');
         show('addons', s.installed && s.mounted);
         show('packages', s.installed && s.mounted);
+        show('commands', s.installed && s.mounted);
         show('move', canMove(s));
         show('uninstall', s.installed);
         show('update', !!latest);
@@ -287,10 +288,35 @@
         closeOverlay();
         fn();
     }
-    // Scroll a long log or report in the open panel
+    // Scroll a long log, report or command list in the open panel
     function scrollPanel(by) {
-        var pre = $('overlay-body').querySelector('pre');
+        var pre = $('overlay-body').querySelector('pre, .cmdref');
         if (pre) { pre.scrollTop += by; }
+    }
+
+    // ------------------------------------------------------------------ SSH commands
+
+    // tv and ent, the commands Entware adds for SSH, with LEFT and RIGHT to switch
+    var cmdTab = 'tv';
+    function openCommands(tab) {
+        var C = window.ENTWARE_COMMANDS;
+        if (!C) { return; }
+        cmdTab = C[tab] ? tab : 'tv';
+        var c = C[cmdTab], ip = state && state.ip;
+        var tabs = ['tv', 'ent'].map(function (t) {
+            return '<span class="ctab' + (t === cmdTab ? ' on' : '') + '" data-tab="' + t + '">' + esc(C[t].title) + '</span>';
+        }).join('');
+        var body = '<div class="ctabs">' + tabs + '</div><p class="clead">' + esc(c.lead) + '</p><div class="cmdref">' +
+            c.groups.map(function (g) {
+                return '<div class="cgroup">' + esc(g[0]) + '</div>' + g[1].map(function (r) {
+                    return '<div class="crow"><code>' + esc(r[0]) + '</code><span>' + esc(r[1]) + '</span></div>';
+                }).join('');
+            }).join('') + '</div>';
+        overlay('commands', 'SSH commands' + (ip ? '<span class="dim">ssh root@' + esc(ip) + '</span>' : ''), body,
+            '◀ ▶ tv or ent  ·  ▲ ▼ scroll  ·  BACK closes.  Over SSH, tv help and ent help list these, and Tab completes.');
+        Array.prototype.slice.call($('overlay-body').querySelectorAll('.ctab')).forEach(function (el) {
+            el.addEventListener('click', function (e) { e.stopPropagation(); openCommands(el.getAttribute('data-tab')); });
+        });
     }
 
     // ------------------------------------------------------------------ tasks
@@ -621,6 +647,7 @@
         upgrade: function () { openStore('updates'); },
         addons: function () { listIndex = 0; openAddons(); },
         packages: function () { openStore('browse'); },
+        commands: function () { openCommands('tv'); },
         move: function () {
             if (!state) { return; }
             confirmThen('Move Entware to app storage?',
@@ -1687,6 +1714,11 @@
                 ({ report: chooseReport, logs: chooseLog, addoninfo: chooseAddonInfo, web: chooseWeb }[overlayMode] || chooseAddon)();
             }
             else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeOverlay(); }
+            e.preventDefault();
+            return;
+        }
+        if (overlayMode === 'commands' && (k === KEY.LEFT || k === KEY.RIGHT)) {
+            openCommands(cmdTab === 'tv' ? 'ent' : 'tv');
             e.preventDefault();
             return;
         }

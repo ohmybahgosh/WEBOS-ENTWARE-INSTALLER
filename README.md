@@ -103,6 +103,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Uninstall Entware**, with a confirmation before anything is removed.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check and logs:** everything `doctor` looks at, on screen, plus this boot's log from the boot script and the logs of the last 10 tasks the app ran.
+- **SSH commands:** every [`tv` and `ent` command](#the-tv-and-ent-commands) on one screen, with your TV's SSH address.  LEFT and RIGHT switch between `tv` (the TV) and `ent` (Entware).
 - **What's new:** after the app updates, it shows what changed, once.
 - **Report for GitHub:** a QR code that opens a report on your phone with your TV, version, build and the full check already filled in.  **It works on my TV** opens a compatibility report, and **Something went wrong** a bug report.
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
@@ -111,7 +112,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 <p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, showing the Manage from your phone QR code and sign-in code, adding the Login banner and watching it install, then opening Package updates"></p>
 
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, Full check and logs, Report for GitHub and Uninstall Entware">
+  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, SSH commands, Full check and logs, Report for GitHub and Uninstall Entware">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen at the network services: Tailscale asking you to sign in, and Samba, File Browser, the DLNA media server, Transmission and Syncthing running">
 </p>
 <p align="center">
@@ -126,7 +127,10 @@ The easiest way in.  It runs the same installer underneath, as root through the 
   <img src="images/app-updates.png" width="49%" alt="The Updates tab: Update all 2 packages, curl and nmap with their current and new versions, each with Update, and Check again">
   <img src="images/app-logs.png" width="49%" alt="Full check and logs: the full check, this boot's log, and recent tasks like Install htop and Add banner, each with View">
 </p>
-<p align="center"><img src="images/app-report.gif" width="49%" alt="Animated: Report for GitHub offers It works on my TV and Something went wrong, each showing a QR code with the TV's details filled in"></p>
+<p align="center">
+  <img src="images/app-commands.png" width="49%" alt="SSH commands: the tv tab, with the TV's SSH address, then tv and tv info, and the Apps commands like tv apps, tv launch, tv open and tv youtube, each with what it does">
+  <img src="images/app-report.gif" width="49%" alt="Animated: Report for GitHub offers It works on my TV and Something went wrong, each showing a QR code with the TV's details filled in">
+</p>
 
 **Get it:** [from the Homebrew Channel](#from-the-homebrew-channel-recommended), in four steps with screenshots.
 
@@ -347,7 +351,7 @@ Two commands cover everything over SSH, each with Tab completion for its command
 - **`tv`** works the TV: apps, the screen, the system, files and automation.
 - **`ent`** works Entware: packages, add-ons and services.  Anything it doesn't know goes straight to `opkg`, so `ent list-installed` works too.
 
-`tv` on its own shows how the TV is doing and what's on screen, with one line about Entware.  `ent` on its own shows how Entware is doing.  `tv help` and `ent help` list everything, and `tv help <command>` gives examples.  If you type a package command after `tv`, like `tv install htop`, it tells you the `ent` command instead.
+The TV app lists them too, under **SSH commands**.  `tv` on its own shows how the TV is doing and what's on screen, with one line about Entware.  `ent` on its own shows how Entware is doing.  `tv help` and `ent help` list everything, and `tv help <command>` gives examples.  If you type a package command after `tv`, like `tv install htop`, it tells you the `ent` command instead.
 
 The older commands all keep working: `entwrap` (the same as `ent`), `webos-entware`, `webos-tv`, `toast`, `launch`, `close`, `apps`, `applog`, `tvshot` and the `entup`, `entlist` and `entfix` shortcuts.  `tv` and `ent` hand off to them where they already do the job.
 
@@ -386,7 +390,7 @@ The older commands all keep working: `entwrap` (the same as `ent`), `webos-entwa
 | The screen | |
 |:--|:--|
 | `tv toast <message>`, `tv shot [file]` | A notification on the TV, or a screenshot |
-| `tv volume [up\|down\|0-100]`, `tv mute [on\|off]` | The volume |
+| `tv volume [up\|down\|0-100]`, `tv mute [on\|off]` | The volume, and mute.  `tv mute` on its own works like the remote's mute button |
 | `tv input [list\|hdmi1-4]` | The inputs, with what's plugged in, and switching between them |
 | `tv screen off\|on` | Turn the picture off or on, with the TV still running |
 | `tv power off`, `tv reboot` | Turn the TV off, or restart it (both ask first) |
