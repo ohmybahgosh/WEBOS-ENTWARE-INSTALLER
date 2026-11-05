@@ -1389,8 +1389,8 @@ ok "webos-tv and apps still run" 'grep -q "webOS helpers" "$W/out" && grep -q "N
 ok "webos-entware still runs" 'grep -q "A two-pane file manager" "$W/out"'
 tvr help
 ok "tv help lists every group" 'for g in Overview Packages "Add-ons and services" Apps "The screen" System Files Automation; do grep -q "^$g" "$W/out" || exit 1; done && grep -q "ent, webos-entware, webos-tv" "$W/out"'
-tvr help cron
-ok "tv help cron gives examples" 'grep -q "every 15 minutes" "$W/out" && grep -q "tv cron add \"daily 3am\"" "$W/out"'
+tvr help keys
+ok "tv help <command> gives examples" 'grep -q "tv keys add octocat" "$W/out"'
 tvr
 ok "tv on its own shows how the TV and Entware are doing" 'grep -q "^Entware .* packages" "$W/out" && grep -q "tv help lists everything" "$W/out"'
 ! tvr nonsense
@@ -1398,7 +1398,7 @@ ok "an unknown command says so" 'grep -q "tv nonsense isn.t a command" "$W/out"'
 # Tab completion, as bash would ask for it
 comp() { bash -c '. /opt/etc/bash_completion.d/entwrap; COMP_WORDS=($1); COMP_CWORD=$((${#COMP_WORDS[@]} - 1)); [ "${1: -1}" = " " ] && { COMP_WORDS+=(""); COMP_CWORD=$((COMP_CWORD + 1)); }; _tv; echo "${COMPREPLY[*]}"' _ "$1"; }
 ok "Tab completes tv's commands" '[ "$(comp "tv sv")" = svc ] && [ "$(comp "tv -y rem")" = remove ]'
-ok "and what each takes" '[ "$(comp "tv svc st")" = "status start stop" ] && [ "$(comp "tv input h")" = "hdmi1 hdmi2 hdmi3 hdmi4" ] && [ "$(comp "tv cron r")" = "run remove" ] && [ "$(comp "tv addon add ht")" = htop ]'
+ok "and what each takes" '[ "$(comp "tv svc st")" = "status start stop" ] && [ "$(comp "tv input h")" = "hdmi1 hdmi2 hdmi3 hdmi4" ] && [ "$(comp "tv keys r")" = remove ] && [ "$(comp "tv addon add ht")" = htop ]'
 ok "package names, from the package list" '[ "$(comp "tv install nano-f")" = nano-full ] && comp "tv remove ba" | grep -qw bash'
 
 printf '%s\n' "htop - 3.4.1-1 - Interactive processes viewer" > /opt/lib/opkg/fake-list
@@ -1432,43 +1432,6 @@ tvr svc enable cron
 ok "tv svc enable turns it back on" '[ -x /opt/etc/init.d/S10cron ]'
 ! tvr svc start nosuch
 ok "a service that isn't there says so" 'grep -q "no service called nosuch" "$W/out"'
-
-echo "== [$SH] 38b. tv cron: plain-English schedules"
-tvr cron
-ok "with no jobs, tv cron says how to add one" 'grep -q "No scheduled jobs" "$W/out"'
-tvr cron when "weekdays 7:30am"
-ok "tv cron when says what a time means" 'grep -q "weekdays at 7:30 AM" "$W/out" && grep -q "cron: 30 7 \* \* 1-5" "$W/out"'
-for w in "daily 3am|0 3 * * *" "every 15 minutes|*/15 * * * *" "every 2 hours|0 */2 * * *" "mon,wed,fri 18:00|0 18 * * 1,3,5" "every sunday at 4am|0 4 * * 0" "monthly 15th 2am|0 2 15 * *" "monthly|0 0 1 * *" "at boot|@reboot" "daily 12am|0 0 * * *" "daily noon|0 12 * * *" "*/10 * * * *|*/10 * * * *"; do
-    tvr cron when "${w%%|*}"
-    grep -qF "(cron: ${w#*|})" "$W/out" || { echo "  ($w) $(cat "$W/out")"; BADW=1; }
-done
-ok "plain words become the right cron times" '[ -z "${BADW:-}" ]'
-! tvr cron when "daily 13pm"
-ok "a time it doesn't understand is refused, not guessed" 'grep -q "isn.t a time tv understands" "$W/out"'
-tvr cron add -y "daily 3am" echo hello there
-ok "tv cron add saves a job, tagged in plain English" 'grep -q "^0 3 \* \* \* /opt/bin/tv cron exec [0-9a-z]* # tv: echo hello there$" /tmp/fake-crontab && ls /opt/etc/tv/cron/*.sh > /dev/null'
-tvr cron add --toast -y "every 15 minutes" false
-echo "5 4 * * * /bin/true" >> /tmp/fake-crontab
-NO_COLOR=1 tvr cron
-ok "tv cron lists jobs in plain English, with your own lines too" 'grep -q "^1\. every day at 3:00 AM" "$W/out" && grep -q "echo hello there" "$W/out" && grep -q "^2\. every 15 minutes" "$W/out" && grep -q "^3\. every day at 4:05 AM" "$W/out" && grep -q "your own line" "$W/out"'
-tvr cron run 1
-ok "tv cron run runs one now, with its output" 'grep -q "^hello there$" "$W/out" && grep -q "It worked" "$W/out" && [ -f /opt/var/log/tv-cron/*.last ] 2>/dev/null || ls /opt/var/log/tv-cron/*.last > /dev/null'
-: > /tmp/luna.log
-! tvr cron run 2
-ok "a failing job says so, and --toast pops it up on the TV" 'grep -q "It failed (exit 1)" "$W/out" && grep -q "createToast.*Failed: false" /tmp/luna.log'
-NO_COLOR=1 tvr cron
-ok "the list shows how each last ran" 'grep -q "last ran .*worked" "$W/out" && grep -q "last ran .*failed (exit 1)" "$W/out"'
-tvr cron off 1
-ok "tv cron off pauses a job" 'grep -q "^#off# 0 3 \* \* \*" /tmp/fake-crontab && NO_COLOR=1 $SH /opt/bin/tv cron | grep -q "(paused)"'
-tvr cron on 1
-ok "tv cron on resumes it" 'grep -q "^0 3 \* \* \*" /tmp/fake-crontab && ! grep -q "^#off#" /tmp/fake-crontab'
-tvr cron log 1
-ok "tv cron log shows what it printed" 'grep -q "hello there" "$W/out"'
-id2=$(sed -n 's|.*/opt/bin/tv cron exec \([0-9a-z]*\) # tv: false$|\1|p' /tmp/fake-crontab)
-tvr cron remove 2 -y
-ok "tv cron remove deletes a job and its files" '! grep -q "# tv: false" /tmp/fake-crontab && [ ! -f /opt/etc/tv/cron/$id2.sh ] && grep -q "/bin/true" /tmp/fake-crontab'
-! tvr cron run 9
-ok "a job that isn't there says so" 'grep -q "no job 9" "$W/out"'
 
 echo "== [$SH] 38c. tv: autostart, SSH keys and done"
 tvr autostart
@@ -1560,13 +1523,13 @@ tvr space clean -y
 ok "tv space clean clears old screenshots and caches" '[ ! -e /tmp/tvshot-old.png ] && grep -q "tvshot-old.png" "$W/out"'
 tvr qr hello
 ok "tv qr shows text, even without a QR library" 'grep -q "hello" "$W/out"'
-crontab -l > /dev/null 2>&1 && cp /tmp/fake-crontab "$W/cron.before"
+echo "5 4 * * * /bin/true" > /tmp/fake-crontab
 tvr backup /tmp/bk
 BK=$(ls /tmp/bk/tv-backup-*.tar.gz 2>/dev/null | head -n 1)
 ok "tv backup saves settings, keys and lists, privately" '[ -n "$BK" ] && [ "$(stat -c %a "$BK")" = 600 ] && tar -tzf "$BK" | grep -q "^meta/packages" && tar -tzf "$BK" | grep -q "root/opt/etc/" && tar -tzf "$BK" | grep -q "root/home/root/.ssh/authorized_keys"'
 rm -f /home/root/.ssh/authorized_keys /tmp/fake-crontab
 tvr restore "$BK" -y
-ok "tv restore puts keys and cron jobs back" 'grep -q GITHUBONE /home/root/.ssh/authorized_keys && grep -q "/bin/true" /tmp/fake-crontab && grep -q "Restored" "$W/out"'
+ok "tv restore puts keys and the crontab back" 'grep -q GITHUBONE /home/root/.ssh/authorized_keys && grep -q "/bin/true" /tmp/fake-crontab && grep -q "Restored" "$W/out"'
 ! tvr restore /etc/hostname -y
 ok "and refuses a file that isn't a backup" 'grep -q "isn.t a tv backup" "$W/out"'
 

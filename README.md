@@ -147,7 +147,7 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 - ✅ **Checks the result** when it finishes and prints a summary.
 - ✅ **Survives reboots** with a Homebrew Channel boot script that remounts `/opt` and starts Entware services, plus a backup remount at SSH login if the boot script didn't run.
 - ✅ **`doctor` check** that shows what's installed and says exactly what to fix.
-- ✅ **One `tv` command** for everything over SSH: packages, add-ons, services, apps, volume and inputs, cron jobs in plain English, backups, SSH keys and more, with Tab completion throughout.
+- ✅ **One `tv` command** for everything over SSH: packages, add-ons, services, apps, volume and inputs, backups, SSH keys and more, with Tab completion throughout.
 - ✅ **`ent` helper** for searching, installing and checking packages, with Tab completion for `ent`, `opkg` and package names. `opkg` itself is never replaced.
 - ✅ **Saves itself as `webos-entware`**, so status, repair and uninstall work any time, even after a reboot wipes `/tmp`.
 - ✅ **Optional bash shell** with nano, colors, a neon prompt and handy aliases, plus a safe fallback to the stock shell if bash is ever missing or broken.
@@ -343,7 +343,7 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 
 ## The tv command
 
-`tv` puts everything in one place, with Tab completion for its commands and what each one takes: package names, add-ons, services, app IDs, inputs, settings, cron jobs and more.  `tv` on its own shows how the TV and Entware are doing, and `tv help <command>` gives examples.
+`tv` puts everything in one place, with Tab completion for its commands and what each one takes: package names, add-ons, services, app IDs, inputs, settings and more.  `tv` on its own shows how the TV and Entware are doing, and `tv help <command>` gives examples.
 
 The older commands all keep working: `ent`, `entwrap`, `webos-entware`, `webos-tv`, `toast`, `launch`, `close`, `apps`, `applog`, `tvshot` and the `entup`, `entlist` and `entfix` shortcuts.  `tv` hands off to them where they already do the job.
 
@@ -385,17 +385,13 @@ The older commands all keep working: `ent`, `entwrap`, `webos-entware`, `webos-t
 | `tv usb [eject <drive>]` | USB drives, and unmounting one safely |
 | `tv logs [boot\|tasks\|text]`, `tv report` | The logs, and what to put in a GitHub issue |
 | `tv serve [folder] [port]`, `tv qr <text>` | Share a folder over HTTP with a QR code for your phone, or show any text as a QR code |
-| `tv backup [where]`, `tv restore <file>` | Your settings, add-ons, packages, cron jobs, SSH keys and boot scripts, in one file.  It goes to a USB drive if one's plugged in.  It holds your add-ons' passwords, so keep it private |
+| `tv backup [where]`, `tv restore <file>` | Your settings, add-ons, packages, crontab, SSH keys and boot scripts, in one file.  It goes to a USB drive if one's plugged in.  It holds your add-ons' passwords, so keep it private |
 
 | Automation | |
 |:--|:--|
-| `tv cron add "<when>" <command>` | A scheduled job, with the time in plain words (below) |
-| `tv cron [list\|run\|on\|off\|remove\|log] <n>` | Your jobs in plain English, with when each runs next and how it last went |
 | `tv autostart [list\|add\|on\|off\|remove\|show]` | Scripts the Homebrew Channel runs when the TV starts |
 | `tv keys [list\|add\|remove]` | Who can log in over SSH.  `tv keys add <github-user>` adds their keys from GitHub |
 | `tv done <command>` | Run something long, then pop up on the TV when it's done |
-
-**Cron in plain words.**  `tv cron add "daily 3am" rclone copy gdrive:Photos /opt/files/Media/Photos` reads the time back in plain English and asks before saving.  It understands `every 15 minutes`, `every 2 hours`, `hourly`, `daily 3am`, `every day at 6:30pm`, `weekdays 7am`, `weekends 9:30am`, `mon,wed,fri 18:00`, `sunday 4am`, `weekly`, `monthly`, `monthly 15th 2am`, `at boot`, or a cron line like `"*/10 * * * *"`.  `tv cron when "<time>"` checks one without saving anything, and `--toast` pops up on the TV when the job finishes.  Jobs go in root's crontab, tagged with their description, so `crontab -e` still works.  It needs Entware's `cron` package, and offers to install it.
 
 Anything that changes or removes something asks first.  `-y` answers yes, and without a terminal to ask on, `tv` doesn't go ahead.
 

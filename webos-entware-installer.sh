@@ -1182,7 +1182,6 @@ _tv_list_addons() {
 _tv_list_svcs() { local f; for f in /opt/etc/init.d/S*; do [ -f "$f" ] && f=${f##*/} && echo "${f#S[0-9][0-9]}"; done; }
 _tv_list_apps() { local c=/tmp/.webos-tv-apps; [ -s "$c" ] || webos-tv apps --ids > "$c" 2>/dev/null; cat "$c" 2>/dev/null; }
 _tv_count() { local n=${1:-0} i; for ((i = 1; i <= n; i++)); do echo "$i"; done; }
-_tv_cron_jobs() { crontab -l 2>/dev/null | awk '/^#off# / { n++; next } /^#/ || /^ *$/ || /^[A-Za-z_][A-Za-z0-9_]*=/ { next } { n++ } END { print n + 0 }'; }
 _tv_settings_keys() {
     case "$1" in
         picture) echo "backlight brightness contrast color sharpness tint pictureMode energySaving eyeComfortMode dynamicContrast peakBrightness gamma colorGamut truMotionMode noiseReduction superResolution" ;;
@@ -1198,7 +1197,7 @@ _tv() {
     COMPREPLY=()
     local all="info search show install remove browse list files owns why du cleanup update upgrade upgradable
         addon svc share apps launch close running app open youtube toast shot volume mute input screen power reboot
-        settings top temp space ports where logs net wake usb report serve qr backup restore cron autostart keys done help doctor"
+        settings top temp space ports where logs net wake usb report serve qr backup restore autostart keys done help doctor"
     if [ "$pos" -le 0 ]; then
         words=$all
         COMPREPLY=( $(compgen -W "$words" -- "$cur") )
@@ -1229,8 +1228,6 @@ _tv() {
         usb) if [ "$pos" -eq 1 ]; then words="eject"; else words=$(ls -d /tmp/usb/*/* 2>/dev/null | sed 's#.*/##'); fi ;;
         serve|backup) compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -d -- "$cur") ); return 0 ;;
         restore|shot) compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -f -- "$cur") ); return 0 ;;
-        cron) if [ "$pos" -eq 1 ]; then words="list add run on off remove log when"
-              elif [ "$pos" -eq 2 ]; then case "$sub" in run|on|off|remove|log) words=$(_tv_count "$(_tv_cron_jobs)") ;; add) words="--toast" ;; esac; fi ;;
         autostart|boot) if [ "$pos" -eq 1 ]; then words="list add on off remove show"
                         elif [ "$pos" -eq 2 ] && [ "$sub" != add ]; then words=$(ls /var/lib/webosbrew/init.d 2>/dev/null); fi ;;
         keys|key) if [ "$pos" -eq 1 ]; then words="list add remove"
@@ -1670,9 +1667,6 @@ KEYS=${TV_KEYS:-/home/root/.ssh/authorized_keys}
 USB=${TV_USB:-/tmp/usb}
 THERMAL=${TV_THERMAL:-/sys/class/thermal}
 APPS_ROOT=${TV_APPS_ROOT:-/media/developer/apps/usr/palm/applications}
-TVDIR=/opt/etc/tv
-CRONDIR=$TVDIR/cron
-CRONLOG=/opt/var/log/tv-cron
 FILES=/opt/files
 SAM=luna://com.webos.applicationManager
 YES=0
@@ -1792,10 +1786,6 @@ ${C}Files${N}
   tv restore <file>     Put a backup back
 
 ${C}Automation${N}
-  tv cron [list]        Scheduled jobs, in plain English
-  tv cron add "<when>" <command>   e.g. tv cron add "daily 3am" rclone sync ...
-  tv cron run|on|off|remove|log <n>
-  tv cron when "<when>"  What a time means, without saving anything
   tv autostart [list]   Scripts that run when the TV starts
   tv autostart add <name> <command>
   tv autostart on|off|remove|show <name>
@@ -1811,27 +1801,6 @@ EOF
 # Examples for one command
 help_for() {
     case "$1" in
-        cron) cat << 'EOF'
-tv cron add "<when>" <command>
-  when, in plain words:
-    every 15 minutes, every 2 hours, hourly
-    daily, daily 3am, every day at 6:30pm
-    weekdays 7am, weekends 9:30am, mon,wed,fri 18:00, sunday 4am
-    weekly, monthly, monthly 15th 2am
-    at boot
-    or a cron line, like "*/10 * * * *"
-  --toast pops up on the TV when the job finishes.
-Examples:
-  tv cron add "daily 3am" rclone copy gdrive:Photos /opt/files/Media/Photos
-  tv cron add --toast "sunday 4am" tv cleanup -y
-  tv cron when "weekdays 7:30am"   check what a time means first
-  tv cron                 list them, with when each runs next
-  tv cron run 1           run job 1 now
-  tv cron off 1           pause it (tv cron on 1 to resume)
-  tv cron log 1           what it printed
-  tv cron remove 1
-EOF
-            ;;
         autostart) cat << 'EOF'
 Scripts in /var/lib/webosbrew/init.d run when the TV starts (the Homebrew Channel runs them).
   tv autostart                       list them
@@ -1855,7 +1824,7 @@ EOF
   tv backup /tmp/usb/sda/sda1
   tv restore /tmp/usb/sda/sda1/tv-backup-20261104-2100.tar.gz
 A backup has Entware's settings (/opt/etc, with your add-ons' passwords),
-your cron jobs, autostart scripts, SSH keys and shell files, and the lists of
+your crontab, autostart scripts, SSH keys and shell files, and the lists of
 packages and add-ons you installed.  restore reinstalls those, then puts the
 settings back.  Keep backups somewhere private: they hold passwords.
 EOF
@@ -2545,7 +2514,7 @@ backup() {
     tar -czf "$file" -C "$work" meta root 2>/dev/null || { rm -f "$file"; die "The backup failed.  Is there room on $(dirname "$file")?"; }
     chmod 600 "$file"
     say "Saved $file ($(kb "$(du -k "$file" | cut -f1)"))"
-    say "It has $(grep -c . "$work/meta/packages") packages you installed, $(grep -c . "$work/meta/addons") add-ons, Entware's settings, cron jobs, SSH keys and boot scripts."
+    say "It has $(grep -c . "$work/meta/packages") packages you installed, $(grep -c . "$work/meta/addons") add-ons, Entware's settings, SSH keys and boot scripts."
     say "${Y}It holds your add-ons' passwords, so keep it private.${N}  Put it back with: tv restore $file"
 }
 restore() {
@@ -2558,254 +2527,16 @@ restore() {
     say "Backup from $(cat "$work/meta/when" 2>/dev/null):"
     say "  packages: $(tr '\n' ' ' < "$work/meta/packages")"
     say "  add-ons:  $(tr '\n' ' ' < "$work/meta/addons")"
-    say "  and Entware's settings, cron jobs, SSH keys and boot scripts"
+    say "  and Entware's settings, SSH keys and boot scripts"
     confirm "Put it all back?  Settings in the backup replace the ones here." || { say "Nothing changed."; exit 1; }
     need_mgr
     while read -r a; do [ -n "$a" ] || continue; if "$MGR" add "$a" -y > /dev/null 2>&1; then say "Added the $a add-on"; else say "${Y}Couldn't add $a${N}"; fi; done < "$work/meta/addons"
     while read -r p; do pkg_ok "$p" || continue; if "$MGR" pkg-add "$p" > /dev/null 2>&1; then say "Installed $p"; else say "${Y}Couldn't install $p${N}"; fi; done < "$work/meta/packages"
     [ -d "$work/root" ] && cp -a "$work/root/." / && say "Put back Entware's settings, SSH keys and boot scripts."
-    if [ -s "$work/meta/crontab" ] && have crontab; then crontab "$work/meta/crontab" && say "Put back the cron jobs."; fi
+    if [ -s "$work/meta/crontab" ] && have crontab; then crontab "$work/meta/crontab" && say "Put back your crontab."; fi
     [ -f "$KEYS" ] && chmod 600 "$KEYS"
     for s in $(svc_names); do svc_enabled "$s" && svc_cmd restart "$s" > /dev/null 2>&1; done
     say "${G}Restored.${N}  Services restarted with their settings."
-}
-
-# ---------------------------------------------------------------- automation: cron
-
-# "3am", "3:30pm", "15:30", "noon", "midnight" -> "M H"
-parse_time() {
-    t=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/^ *at //; s/ //g')
-    case "$t" in
-        ''|midnight) echo "0 0"; return ;;
-        noon) echo "0 12"; return ;;
-    esac
-    case "$t" in *am) ap=am; t=${t%am} ;; *pm) ap=pm; t=${t%pm} ;; *) ap="" ;; esac
-    case "$t" in *:*) h=${t%%:*} m=${t#*:}; [ ${#m} -eq 2 ] || return 1 ;; *) h=$t m=0 ;; esac
-    num_ok "$h" && num_ok "$m" && [ ${#h} -le 2 ] || return 1
-    h=$(echo "$h" | sed 's/^0\([0-9]\)/\1/') m=$(echo "$m" | sed 's/^0\([0-9]\)/\1/')
-    case "$ap" in
-        am) [ "$h" -ge 1 ] && [ "$h" -le 12 ] || return 1; [ "$h" = 12 ] && h=0 ;;
-        pm) [ "$h" -ge 1 ] && [ "$h" -le 12 ] || return 1; [ "$h" != 12 ] && h=$((h + 12)) ;;
-        *) [ "$h" -le 23 ] || return 1 ;;
-    esac
-    [ "$m" -le 59 ] || return 1
-    echo "$m $h"
-}
-day_num() {
-    case "$1" in sun|sunday|sundays) echo 0 ;; mon|monday|mondays) echo 1 ;; tue|tues|tuesday|tuesdays) echo 2 ;;
-        wed|wednesday|wednesdays) echo 3 ;; thu|thur|thurs|thursday|thursdays) echo 4 ;; fri|friday|fridays) echo 5 ;;
-        sat|saturday|saturdays) echo 6 ;; *) return 1 ;; esac
-}
-# Plain words -> a cron schedule (5 fields, or @reboot)
-cron_when() {
-    w=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/^ *//; s/ *$//; s/  */ /g; s/, */,/g; s/ at / /; s/^every day/daily/; s/^each day/daily/; s/^on //')
-    case "$w" in
-        "at boot"|boot|reboot|"at startup"|startup|@reboot) echo "@reboot"; return ;;
-        "every minute") echo "* * * * *"; return ;;
-        hourly|"every hour") echo "0 * * * *"; return ;;
-        weekly) echo "0 0 * * 0"; return ;;
-    esac
-    # A cron line already
-    if printf '%s' "$w" | grep -qE '^[0-9*/,-]+( [0-9*/,a-z-]+){4}$'; then echo "$w"; return; fi
-    case "$w" in
-        "every "*" minute"|"every "*" minutes"|"every "*" min"|"every "*" mins")
-            n=$(echo "$w" | cut -d' ' -f2); num_ok "$n" && [ "$n" -ge 1 ] && [ "$n" -le 59 ] || return 1
-            echo "*/$n * * * *"; return ;;
-        "every "*" hour"|"every "*" hours")
-            n=$(echo "$w" | cut -d' ' -f2); num_ok "$n" && [ "$n" -ge 1 ] && [ "$n" -le 23 ] || return 1
-            echo "0 */$n * * *"; return ;;
-        daily|"daily "*)
-            mh=$(parse_time "${w#daily}") || return 1; echo "$mh * * *"; return ;;
-        weekdays*|"every weekday"*)
-            mh=$(parse_time "$(echo "$w" | sed 's/^every weekday//; s/^weekdays//')") || return 1; echo "$mh * * 1-5"; return ;;
-        weekends*|"every weekend"*)
-            mh=$(parse_time "$(echo "$w" | sed 's/^every weekend//; s/^weekends//')") || return 1; echo "$mh * * 0,6"; return ;;
-        monthly|"monthly "*)
-            r=${w#monthly}; r=$(echo "$r" | sed 's/^ *on the //; s/^ *on //; s/^ *//')
-            d=$(echo "$r" | sed -E -n 's/^([0-9]{1,2})(st|nd|rd|th)?( .*)?$/\1/p')
-            if [ -n "$d" ]; then r=$(echo "$r" | sed -E 's/^[0-9]+(st|nd|rd|th)? *//'); else d=1; fi
-            [ "$d" -ge 1 ] && [ "$d" -le 28 ] || return 1
-            mh=$(parse_time "$r") || return 1; echo "$mh $d * *"; return ;;
-    esac
-    # Days of the week: "sunday 4am", "every mon,wed,fri 18:00", "mon-fri 7am"
-    w=${w#every }
-    days=${w%% *} rest=""
-    [ "$days" = "$w" ] || rest=${w#* }
-    out=""
-    for part in $(echo "$days" | tr ',' ' '); do
-        case "$part" in
-            *-*) a=$(day_num "${part%-*}") && b=$(day_num "${part#*-}") || return 1; out="$out${out:+,}$a-$b" ;;
-            *) a=$(day_num "$part") || return 1; out="$out${out:+,}$a" ;;
-        esac
-    done
-    [ -n "$out" ] || return 1
-    mh=$(parse_time "$rest") || return 1
-    echo "$mh * * $out"
-}
-# A cron schedule -> plain words
-cron_say() {
-    [ "$1" = "@reboot" ] && { echo "when the TV starts"; return; }
-    set -f
-    # shellcheck disable=SC2086
-    set -- $1
-    set +f
-    mi=$1 hr=$2 dom=$3 mon=$4 dow=$5
-    at() { awk -v h="$1" -v m="$2" 'BEGIN { ap = h < 12 ? "AM" : "PM"; h12 = h % 12; if (h12 == 0) h12 = 12; printf "%d:%02d %s", h12, m, ap }'; }
-    dayname() { echo "$1" | sed 's/0/Sunday/; s/1/Monday/; s/2/Tuesday/; s/3/Wednesday/; s/4/Thursday/; s/5/Friday/; s/6/Saturday/; s/7/Sunday/'; }
-    if [ "$mi $hr $dom $mon $dow" = "* * * * *" ]; then echo "every minute"; return; fi
-    case "$mi" in \*/*) [ "$hr $dom $mon $dow" = "* * * *" ] && { echo "every ${mi#*/} minutes"; return; } ;; esac
-    if num_ok "$mi" && [ "$hr $dom $mon $dow" = "* * * *" ]; then [ "$mi" = 0 ] && echo "every hour" || echo "every hour at $mi minutes past"; return; fi
-    case "$hr" in \*/*) num_ok "$mi" && [ "$dom $mon $dow" = "* * *" ] && { echo "every ${hr#*/} hours"; return; } ;; esac
-    if num_ok "$mi" && num_ok "$hr" && [ "$mon" = "*" ]; then
-        t=$(at "$hr" "$mi")
-        if [ "$dom $dow" = "* *" ]; then echo "every day at $t"; return; fi
-        if [ "$dom" = "*" ]; then
-            case "$dow" in
-                1-5) echo "weekdays at $t" ;; 0,6|6,0) echo "weekends at $t" ;;
-                *[!0-9,-]*) echo "cron: $mi $hr $dom $mon $dow" ;;
-                *) echo "$(dayname "$dow" | sed 's/,/, /g; s/-/ to /g') at $t" ;;
-            esac
-            return
-        fi
-        if num_ok "$dom" && [ "$dow" = "*" ]; then
-            sfx=th; case "$dom" in 1|21|31) sfx=st ;; 2|22) sfx=nd ;; 3|23) sfx=rd ;; esac
-            echo "monthly on the $dom$sfx at $t"; return
-        fi
-    fi
-    echo "cron: $mi $hr $dom $mon $dow"
-}
-cron_need() {
-    have crontab && return 0
-    say "Scheduled jobs need Entware's cron."
-    confirm "Install it now?" || exit 1
-    need_mgr
-    "$MGR" pkg-add cron || die "cron didn't install."
-    [ -x "$INITD/S10cron" ] && { if have setsid; then setsid "$INITD/S10cron" start; else "$INITD/S10cron" start; fi; } < /dev/null > /dev/null 2>&1
-}
-cron_lines() { crontab -l 2>/dev/null | grep -v '^# DO NOT EDIT\|^# (' ; }
-# Numbered jobs: ours (tagged), and your own lines
-cron_jobs() { cron_lines | awk '/^#off# / { print; next } /^#/ || /^ *$/ || /^[A-Za-z_][A-Za-z0-9_]*=/ { next } { print }'; }
-cron_job() { cron_jobs | sed -n "${1}p"; }
-cron_id_of() { printf '%s' "$1" | sed -n 's|.* /opt/bin/tv cron exec \([0-9a-z]*\).*|\1|p'; }
-cron_desc() { printf '%s' "$1" | sed -n 's/.*# tv: //p'; }
-next_run() { # schedule -> "Tue 3:00 AM", with node
-    [ "$1" = "@reboot" ] && { echo "at the next start"; return; }
-    have node || return 0
-    CRON="$1" node -e '
-        const f = process.env.CRON.split(" "), lim = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
-        const set = (s, i) => { const [lo, hi] = lim[i], out = new Set();
-            for (const part of s.split(",")) { let [r, step] = part.split("/"); step = +step || 1;
-                let [a, b] = r === "*" ? [lo, hi] : r.split("-").map(Number); if (b === undefined) b = step > 1 ? hi : a;
-                for (let x = a; x <= b; x += step) out.add(i === 4 && x === 7 ? 0 : x); }
-            return out; };
-        const S = f.map(set), d = new Date(); d.setSeconds(0, 0);
-        for (let i = 0; i < 366 * 24 * 60; i++) { d.setMinutes(d.getMinutes() + 1);
-            if (S[0].has(d.getMinutes()) && S[1].has(d.getHours()) && S[3].has(d.getMonth() + 1) &&
-                (f[2] === "*" || f[4] === "*" ? S[2].has(d.getDate()) && S[4].has(d.getDay()) : S[2].has(d.getDate()) || S[4].has(d.getDay()))) {
-                const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], h = d.getHours();
-                const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                console.log(days[d.getDay()] + " " + mon[d.getMonth()] + " " + d.getDate() + ", " + ((h % 12) || 12) + ":" + String(d.getMinutes()).padStart(2, "0") + (h < 12 ? " AM" : " PM")); break; } }' 2>/dev/null
-}
-cron_cmd() {
-    sub=${1:-list}; [ $# -gt 0 ] && shift
-    case "$sub" in
-        list)
-            have crontab || { say "No scheduled jobs (Entware's cron isn't installed).  tv help cron shows how to add one."; return 0; }
-            jobs=$(cron_jobs)
-            [ -n "$jobs" ] || { say "No scheduled jobs.  Add one: tv cron add \"daily 3am\" <command>   (tv help cron)"; return 0; }
-            say "TV time is now $(now_str)."
-            i=0
-            printf '%s\n' "$jobs" | while IFS= read -r line; do
-                i=$((i + 1))
-                off=0
-                case "$line" in "#off# "*) off=1; line=${line#\#off\# } ;; esac
-                case "$line" in @*) sched=${line%% *} ;; *) sched=$(printf '%s' "$line" | cut -d' ' -f1-5) ;; esac
-                id=$(cron_id_of "$line")
-                if [ -n "$id" ]; then what=$(cron_desc "$line"); else what=$(printf '%s' "$line" | cut -d' ' -f"$( [ "${sched#@}" != "$sched" ] && echo 2 || echo 6)"-); fi
-                printf '%s\n' "${B}$i.${N} $(cron_say "$sched")$( [ "$off" = 1 ] && echo "  ${Y}(paused)${N}")"
-                printf '   %s\n' "$what"
-                [ -z "$id" ] && printf '   %s\n' "${D}(your own line, not added by tv)${N}"
-                if [ "$off" = 0 ]; then nr=$(next_run "$sched"); [ -n "$nr" ] && printf '   %s\n' "${D}next: $nr${N}"; fi
-                if [ -n "$id" ] && [ -f "$CRONLOG/$id.last" ]; then
-                    read -r day clock code < "$CRONLOG/$id.last"
-                    [ "$code" = 0 ] && st="${G}worked${N}" || st="${R}failed (exit $code)${N}"
-                    printf '   %s\n' "${D}last ran $day $clock:${N} $st"
-                fi
-            done ;;
-        add)
-            toast=0
-            while :; do case "$1" in --toast) toast=1; shift ;; -y|--yes) YES=1; shift ;; *) break ;; esac; done
-            [ $# -ge 2 ] || { help_for cron; exit 1; }
-            sched=$(cron_when "$1") || die "\"$1\" isn't a time tv understands.  Try: daily 3am, every 15 minutes, weekdays 7:30am, sunday 4am, monthly 1st 2am, at boot"
-            shift
-            cmd=$*
-            cron_need
-            id=$(date +%s | tail -c 7)$$
-            mkdir -p "$CRONDIR" "$CRONLOG"
-            desc=$(printf '%s' "$cmd" | tr '\n' ' ' | cut -c1-120)
-            say "Runs $(cron_say "$sched") (TV time is now $(now_str)):"
-            say "  $cmd"
-            confirm "Save it?" || { say "Not saved."; exit 1; }
-            printf '#!/bin/sh\n# %s\n%s\n' "$(cron_say "$sched")" "$cmd" > "$CRONDIR/$id.sh"
-            [ "$toast" = 1 ] && touch "$CRONDIR/$id.toast"
-            # Read it all first: writing while it's being read could empty it
-            cur=$(cron_lines)
-            { [ -n "$cur" ] && printf '%s\n' "$cur"; printf '%s /opt/bin/tv cron exec %s # tv: %s\n' "$sched" "$id" "$(printf '%s' "$desc" | tr '%' ' ')"; } | crontab - ||
-                die "Couldn't save it to cron."
-            say "${G}Saved.${N}  tv cron lists your jobs; tv cron run $(cron_jobs | wc -l | tr -d ' ') tries it now." ;;
-        when)
-            [ -n "$1" ] || die "Try a time, e.g. tv cron when \"weekdays 7am\""
-            sched=$(cron_when "$*") || die "\"$*\" isn't a time tv understands.  tv help cron lists what works."
-            say "\"$*\" means: $(cron_say "$sched")  ${D}(cron: $sched)${N}"
-            nr=$(next_run "$sched"); [ -n "$nr" ] && say "Next: $nr" ;;
-        exec)
-            # Run by cron: the job, its log, and how it went
-            id=$1
-            case "$id" in ''|*[!0-9a-z]*) exit 1 ;; esac
-            [ -f "$CRONDIR/$id.sh" ] || exit 1
-            mkdir -p "$CRONLOG"
-            start=$(date +%s)
-            { echo "== $(date '+%Y-%m-%d %H:%M:%S')"; PATH="/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin" HOME=/home/root sh "$CRONDIR/$id.sh" 2>&1; echo "$?" > "$CRONLOG/$id.code"; } >> "$CRONLOG/$id.log"
-            code=$(cat "$CRONLOG/$id.code" 2>/dev/null); rm -f "$CRONLOG/$id.code"
-            echo "$(date '+%Y-%m-%d %H:%M') ${code:-1}" > "$CRONLOG/$id.last"
-            tail -n 300 "$CRONLOG/$id.log" > "$CRONLOG/$id.log.new" && mv "$CRONLOG/$id.log.new" "$CRONLOG/$id.log"
-            if [ -f "$CRONDIR/$id.toast" ] && have luna-send; then
-                [ "${code:-1}" = 0 ] && msg="Done: $(sed -n 3p "$CRONDIR/$id.sh" | cut -c1-60)" || msg="Failed: $(sed -n 3p "$CRONDIR/$id.sh" | cut -c1-60)"
-                luna -a webosbrew luna://com.webos.notification/createToast "{\"sourceId\":\"webosbrew\",\"message\":\"$(json_text "$msg ($(($(date +%s) - start))s)")\"}" > /dev/null
-            fi
-            exit "${code:-1}" ;;
-        run|on|off|remove|log)
-            n=$1
-            num_ok "$n" || die "Name a job by its number: tv cron lists them."
-            line=$(cron_job "$n")
-            [ -n "$line" ] || die "There's no job $n.  tv cron lists them."
-            id=$(cron_id_of "$line")
-            case "$sub" in
-                run)
-                    [ -n "$id" ] || { cmd=$(printf '%s' "${line#\#off\# }" | cut -d' ' -f6-); say "Running: $cmd"; sh -c "$cmd"; exit $?; }
-                    say "Running job $n: $(cron_desc "$line")"
-                    before=$(cat "$CRONLOG/$id.log" 2>/dev/null | wc -l)
-                    "$0" cron exec "$id"; code=$?
-                    tail -n +"$((before + 2))" "$CRONLOG/$id.log"
-                    [ "$code" = 0 ] && say "${G}It worked.${N}" || say "${R}It failed (exit $code).${N}"
-                    exit "$code" ;;
-                log)
-                    [ -n "$id" ] || die "Job $n is your own line, so tv doesn't keep its output."
-                    [ -s "$CRONLOG/$id.log" ] && tail -n 60 "$CRONLOG/$id.log" || say "Job $n hasn't run yet." ;;
-                on|off|remove)
-                    lnum=$(cron_lines | grep -n -F -x -- "$line" | head -n 1 | cut -d: -f1)
-                    case "$sub" in
-                        off) case "$line" in "#off# "*) say "Job $n is already paused."; exit 0 ;; esac; new="#off# $line" ;;
-                        on) new=${line#\#off\# } ;;
-                        remove) confirm "Remove job $n ($(cron_desc "$line"))?" || { say "Kept it."; exit 1; }; new="" ;;
-                    esac
-                    cur=$(cron_lines)
-                    printf '%s\n' "$cur" | awk -v n="$lnum" -v new="$new" 'NR == n { if (new != "") print new; next } { print }' | crontab - || die "Couldn't change cron."
-                    if [ "$sub" = remove ] && [ -n "$id" ]; then rm -f "$CRONDIR/$id.sh" "$CRONDIR/$id.toast" "$CRONLOG/$id.log" "$CRONLOG/$id.last"; fi
-                    case "$sub" in off) say "Paused job $n.  tv cron on $n resumes it." ;; on) say "Job $n runs again." ;; remove) say "Removed job $n." ;; esac ;;
-            esac ;;
-        *) help_for cron; exit 1 ;;
-    esac
 }
 
 # ---------------------------------------------------------------- automation: autostart and keys
@@ -2924,7 +2655,7 @@ cmd=${1:-}
 strip=1
 case "$cmd" in
     done|toast|launch|serve|qr|settings|setting) strip=0 ;;
-    cron|autostart|boot) [ "${1:-}" = add ] && strip=0 ;;
+    autostart|boot) [ "${1:-}" = add ] && strip=0 ;;
 esac
 if [ "$strip" = 1 ]; then
     n=$#
@@ -2995,7 +2726,6 @@ case "$cmd" in
     backup) backup "$1" ;;
     restore) restore "$1" ;;
     # Automation
-    cron) cron_cmd "$@" ;;
     autostart|boot) [ "$1" = add ] && case "$2" in -y|--yes) YES=1; n=$3; shift 3; set -- add "$n" "$@" ;; esac; autostart "$@" ;;
     keys|key) keys "$@" ;;
     done) done_cmd "$@" ;;
