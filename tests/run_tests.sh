@@ -1423,7 +1423,7 @@ rm -f /opt/lib/opkg/fake-list
 
 run pkg-add cron -y
 tvr svc
-ok "tv svc lists Entware's services" 'grep -q "cron .*stopped" "$W/out"'
+ok "tv svc lists Entware's services" 'grep -q "cron .*\(running\|stopped\), starts at boot" "$W/out"'
 tvr svc disable cron
 ok "tv svc disable keeps one from starting at boot" '[ ! -x /opt/etc/init.d/S10cron ] && grep -q "won.t start at boot" "$W/out"'
 ! tvr svc start cron
