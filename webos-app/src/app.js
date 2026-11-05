@@ -676,6 +676,27 @@
         (c.names || '').split(' ').forEach(function (n) { if (n && !catNames[n]) { catNames[n] = c.id; } });
         if (c.match) { catRules.push([new RegExp(c.match), c.id]); }
     });
+    // Drawn icons for the categories: the TV's fonts don't have every symbol
+    var ICONS = {
+        start: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z',
+        shell: 'M4 5h16v14H4z M7.5 9.5l3 2.5-3 2.5 M12.5 15h4',
+        editors: 'M4 20h4L19 9l-4-4L4 16z M13 7l4 4',
+        files: 'M3 6.5h6l2 2h10V19H3z',
+        downloads: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+        media: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M10 8.5l5.5 3.5-5.5 3.5z',
+        network: 'M4 8h15 M15 4l4 4-4 4 M20 16H5 M9 12l-4 4 4 4',
+        vpn: 'M5 11h14v9H5z M8 11V8a4 4 0 0 1 8 0v3 M12 14.5v2',
+        servers: 'M4 4h16v7H4z M4 13h16v7H4z M8 7.5h.01 M8 16.5h.01',
+        dev: 'M9 4C7 4 6 5 6 7v2.5c0 1-1 2.5-2 2.5 1 0 2 1.5 2 2.5V17c0 2 1 3 3 3 M15 4c2 0 3 1 3 3v2.5c0 1 1 2.5 2 2.5-1 0-2 1.5-2 2.5V17c0 2-1 3-3 3',
+        system: 'M3 12h4l3-7 4 14 3-7h4',
+        games: 'M7 8h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8z M8.5 10.5v3 M7 12h3 M15 11h.01 M17 13h.01',
+        other: 'M5 12h.01 M12 12h.01 M19 12h.01',
+        libs: 'M12 3l9 5-9 5-9-5z M3 12.5l9 5 9-5 M3 17l9 5 9-5',
+        'libs-toggle': 'M4 7h9 M17 7h3 M15 5v4 M4 17h3 M11 17h9 M9 15v4'
+    };
+    function icon(id) {
+        return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + (ICONS[id] || ICONS.other) + '"/></svg>';
+    }
     var featuredRank = {};
     CAT.featured.forEach(function (n, i) { featuredRank[n] = i; });
 
@@ -720,7 +741,9 @@
         var v = installedFamily[family(n)];
         return v && v !== n ? v : null;
     }
-    function isInstalled(n) { return !!(installedMap[n] || haveVariant(n)); }
+    // Installed, another build of it is, or the Homebrew Channel ships it
+    // (webOS's own commands are often cut down, so those don't count)
+    function isInstalled(p) { return !!(installedMap[p.n] || haveVariant(p.n) || p.w === 2); }
     function blurb(p) { return CAT.blurbs[p.n] || p.d || ''; }
     function rank(p) { return p.n in featuredRank ? featuredRank[p.n] : (CAT.blurbs[p.n] ? 100 : 1000); }
     function byName(x, y) { return x.n < y.n ? -1 : (x.n > y.n ? 1 : 0); }
@@ -745,6 +768,7 @@
     function pkgPill(p) {
         if (installedMap[p.n]) { return updFor(p.n) ? ['Update', 'pill-warn'] : ['Installed', 'pill-ok']; }
         if (haveVariant(p.n)) { return ['Have ' + haveVariant(p.n), 'pill-ok']; }
+        if (p.w === 2) { return ['Homebrew has it', 'pill-ok']; }
         if (p.a) { return ['Add-on sets it up', 'pill-addon']; }
         if (p.w) { return ['webOS has one', 'pill-dim']; }
         return null;
@@ -871,12 +895,12 @@
         var list = shelf(), counts = {};
         list.forEach(function (p) { counts[p.c] = (counts[p.c] || 0) + 1; });
         var featured = CAT.featured.map(function (n) { return findPkg(n); }).filter(function (p) { return p; });
-        store.rail = [{ id: 'start', title: 'Start here', icon: '★', count: featured.length }];
-        CAT.cats.forEach(function (c) { if (counts[c.id]) { store.rail.push({ id: c.id, title: c.title, icon: c.icon, count: counts[c.id] }); } });
-        store.rail.push({ id: 'libs-toggle', title: 'Show libraries too', icon: '⚙', count: store.libs ? 'On' : 'Off' });
+        store.rail = [{ id: 'start', title: 'Start here', count: featured.length }];
+        CAT.cats.forEach(function (c) { if (counts[c.id]) { store.rail.push({ id: c.id, title: c.title, count: counts[c.id] }); } });
+        store.rail.push({ id: 'libs-toggle', title: 'Show libraries too', count: store.libs ? 'On' : 'Off' });
         var rail = '<div class="s-rail">' + store.rail.map(function (r, i) {
             return (i === 1 || r.id === 'libs-toggle' ? '<hr>' : '') + '<div class="rc' + (r.id === store.cat ? ' on' : '') + '" data-z="rail" data-i="' + i + '"><span><i>' +
-                esc(r.icon) + '</i>' + esc(r.title) + '</span><span class="cnt">' + esc(String(r.count)) + '</span></div>';
+                icon(r.id) + '</i>' + esc(r.title) + '</span><span class="cnt">' + esc(String(r.count)) + '</span></div>';
         }).join('') + '</div>';
         var main;
         if (store.cat === 'start') {
@@ -889,7 +913,7 @@
                 }).join('') + '</div></div>';
         } else {
             var c = catById[store.cat] || catById.other;
-            var rows = list.filter(function (p) { return p.c === c.id && !(store.hideInst && isInstalled(p.n)); });
+            var rows = list.filter(function (p) { return p.c === c.id && !(store.hideInst && isInstalled(p)); });
             rows.sort(store.sort === 'az' ? byName : (store.sort === 'small' ? function (x, y) { return (x.z - y.z) || byName(x, y); } :
                 function (x, y) { return (rank(x) - rank(y)) || byName(x, y); }));
             store.chips = [{ id: 'useful', title: 'Most useful', on: store.sort === 'useful' }, { id: 'az', title: 'A to Z', on: store.sort === 'az' },
@@ -1101,7 +1125,10 @@
             if (d.freeKB && d.freeKB < use) { tips.unshift('There isn\'t enough free space for it.  Free some up, or move Entware to app storage.'); }
             else if (use > 51200) { tips.push('It\'s big: about ' + kb(use) + ' once installed, with what it needs.'); }
             if (haveVariant(d.name)) { tips.unshift('You already have ' + haveVariant(d.name) + ', another build of the same program, so you don\'t need this one too.'); }
-            if (d.system) { tips.push('webOS already has its own ' + d.system + '.  Once this is installed, SSH logins use Entware\'s, which comes first on the PATH.'); }
+            if (d.system && !CAT.tips[d.name]) {
+                tips.push((d.system.indexOf('/org.webosbrew.hbchannel.service/') >= 0 ? 'The Homebrew Channel already has its own ' + d.system.replace(/.*\//, '') :
+                    'webOS already has its own ' + d.system) + '.  Once this is installed, SSH logins use Entware\'s, which comes first on the PATH.');
+            }
             if (addonOff) { tips.unshift('The ' + d.addonTitle + ' add-on installs this and sets it up for the TV.'); }
         } else {
             facts.push(['Installed', esc(d.installedVersion) + (u ? '  <span class="warn">(' + esc(u.available) + ' available)</span>' : '')]);

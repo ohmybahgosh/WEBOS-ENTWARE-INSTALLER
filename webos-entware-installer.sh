@@ -2987,7 +2987,9 @@ EOL
 # documentation or the single commands split out of a bigger package.
 # --all lists those too.  Each has its name, version, section, download
 # and installed size in KB, the start of its description, the add-on it
-# belongs to and whether webOS has a command with its name.
+# belongs to and whether the TV has it already: w is 2 when the Homebrew
+# Channel ships it (like dropbear and rsync), 1 when webOS has a command
+# by its name.
 CATALOG_KEEP=" python3-pip php8-cli php8-fpm mariadb-server mariadb-client node-npm nut-server nut-upsc collectd-mod-cpu git-http perl coreutils "
 catalog_json() {
     opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
@@ -2996,7 +2998,8 @@ catalog_json() {
     [ -n "$f" ] || error_exit "There's no package list yet. Check the TV's internet connection."
     cat=$(addon_catalog | awk -F'|' '$1 != "banner" { printf "%s|%s;", $1, $3 }')
     sys=" $(ls /bin /sbin /usr/bin /usr/sbin 2>/dev/null | tr '\n' ' ') "
-    lists_text "$f" | awk -v all="${ALL:-0}" -v cat="$cat" -v sys="$sys" -v keep="$CATALOG_KEEP" '
+    hbc=" $(ls "$HBC_DIR/bin" 2>/dev/null | tr '\n' ' ') "
+    lists_text "$f" | awk -v all="${ALL:-0}" -v cat="$cat" -v sys="$sys" -v hbc="$hbc" -v keep="$CATALOG_KEEP" '
         function js(x) { gsub(/\\/, "\\\\", x); gsub(/"/, "\\\"", x); gsub(/[\001-\037]/, " ", x); return "\"" x "\"" }
         function hidden(n, s) {
             if (index(keep, " " n " ")) return 0
@@ -3005,12 +3008,16 @@ catalog_json() {
             return n ~ /^(perl|perlbase|python3|ruby|node|php8|asterisk|collectd|freeradius3|nut|znc|rutorrent|erlang|boost|dejavu|strongswan|olsrd|siproxd|mariadb|gst1|golang|lua|luci|apache|qt5|icu|shadow|coreutils|procps-ng)-/
         }
         function kb(b) { return b ~ /^[0-9]+$/ ? int((b + 1023) / 1024) : 0 }
+        # The command a package gives, when it is not named after the package
+        function cmd(n) { return n == "openssh-sftp-server" ? "sftp-server" : n }
+        # 2: the Homebrew Channel ships it, 1: webOS has it, 0: neither
+        function onTV(n) { return index(hbc, " " cmd(n) " ") ? 2 : (index(sys, " " cmd(n) " ") ? 1 : 0) }
         function flush() {
             if (p != "" && (all == 1 || !hidden(p, sec))) {
                 gsub(/[ \t]+/, " ", d); sub(/^ /, "", d); sub(/ $/, "", d)
                 if (length(d) > 220) d = substr(d, 1, 220)
                 printf "%s{\"n\":%s,\"v\":%s,\"s\":%s,\"z\":%d,\"i\":%d,\"d\":%s,\"a\":%s,\"w\":%d}",
-                    (c++ ? "," : ""), js(p), js(v), js(sec), kb(z), kb(is), js(d), js(addon[p]), (index(sys, " " p " ") ? 1 : 0)
+                    (c++ ? "," : ""), js(p), js(v), js(sec), kb(z), kb(is), js(d), js(addon[p]), onTV(p)
             }
             p = ""; v = ""; sec = ""; z = ""; is = ""; d = ""; indesc = 0
         }
@@ -3045,7 +3052,8 @@ pkg_info_json() {
     a=$(pkg_addon "$PKG"); at=""; as=""
     if [ -n "$a" ] && addon_find "$a"; then at=$AD_TITLE; as=$(addon_state); fi
     sysp=""
-    for d in /usr/bin /bin /usr/sbin /sbin; do [ -x "$d/$PKG" ] && { sysp="$d/$PKG"; break; }; done
+    c=$PKG; [ "$c" = openssh-sftp-server ] && c=sftp-server
+    for d in "$HBC_DIR/bin" /usr/bin /bin /usr/sbin /sbin; do [ -x "$d/$c" ] && { sysp="$d/$c"; break; }; done
     cmds=""
     [ -f "/opt/lib/opkg/info/$PKG.list" ] && cmds=$(grep -E '^/opt/(s?bin|usr/s?bin)/[^/]+$' "/opt/lib/opkg/info/$PKG.list" | sed 's|.*/||' | sort -u | head -n 20 | tr '\n' ' ')
     free=$(df -kP /opt 2>/dev/null | awk 'NR == 2 { print $4 }')

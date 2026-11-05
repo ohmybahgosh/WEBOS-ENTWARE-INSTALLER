@@ -1105,11 +1105,31 @@ Version: 5.3-2
 Section: utils
 Size: 700000
 Description:  The GNU Bourne Again SHell
+
+Package: dropbear
+Version: 2025.88-1
+Section: net
+Size: 90000
+Description:  A small SSH server
+
+Package: openssh-sftp-server
+Version: 10.2p1-1
+Section: net
+Size: 40000
+Description:  The SFTP server
 L
+# The Homebrew Channel's own tools
+mkdir -p /media/developer && mount -t tmpfs tmpfs /media/developer
+HB=/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin
+mkdir -p "$HB" && printf '#!/bin/sh\n' > "$HB/dropbear" && cp "$HB/dropbear" "$HB/sftp-server" && chmod 755 "$HB/dropbear" "$HB/sftp-server"
 run catalog --json
 ok "catalog --json lists what a person would pick, not libraries or modules" 'python3 -c "
 import json,sys; d=json.load(open(sys.argv[1])); n=[p[\"n\"] for p in d]
-assert n == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\"], n
+assert n == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\", \"dropbear\", \"openssh-sftp-server\"], n
+" "$W/out"'
+ok "what the Homebrew Channel ships, like dropbear and its sftp-server, is marked as on the TV" 'python3 -c "
+import json,sys; d={p[\"n\"]: p for p in json.load(open(sys.argv[1]))}
+assert d[\"dropbear\"][\"w\"] == 2 and d[\"openssh-sftp-server\"][\"w\"] == 2 and d[\"rclone\"][\"w\"] == 0, d
 " "$W/out"'
 ok "each with its version, section, sizes in KB, description, add-on and whether webOS has it" 'python3 -c "
 import json,sys; d={p[\"n\"]: p for p in json.load(open(sys.argv[1]))}
@@ -1121,7 +1141,7 @@ assert d[\"myapp\"][\"d\"].startswith(\"An app that \\\"quotes\\\" \\\\ things\"
 " "$W/out"'
 run catalog --json --all
 ok "catalog --all lists libraries and modules too" 'python3 -c "
-import json,sys; d=json.load(open(sys.argv[1])); assert len(d) == 9 and \"libncurses\" in [p[\"n\"] for p in d], d
+import json,sys; d=json.load(open(sys.argv[1])); assert len(d) == 11 and \"libncurses\" in [p[\"n\"] for p in d], d
 " "$W/out"'
 run pkginfo htop --json
 ok "pkginfo --json: the whole description, sizes, and everything it would add, all the way down" 'python3 -c "
@@ -1147,6 +1167,8 @@ ok "an installed package says so, with its version and that Entware needs it" 'p
 import json,sys; d=json.load(open(sys.argv[1]))
 assert d[\"installed\"] is True and d[\"installedVersion\"] == \"1.0-1\" and d[\"base\"] is True and d[\"commands\"] == [\"bash\"], d
 " "$W/out"'
+run pkginfo dropbear --json
+ok "pkginfo names the Homebrew Channel's copy" 'grep -q "\"system\":\"/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear\"" "$W/out"'
 run pkg-add htop -y
 run pkginfo htop --json
 ok "after installing it, pkginfo says it's installed and adds nothing" 'python3 -c "
@@ -1161,11 +1183,12 @@ ok "pkginfo refuses something that isn't a package name" 'grep -q "isn.t a packa
 gzip -n /opt/var/opkg-lists/entware && mv /opt/var/opkg-lists/entware.gz /opt/var/opkg-lists/entware
 run catalog --json
 ok "the package list works gzipped too, as opkg keeps it on the TV" 'python3 -c "
-import json,sys; d=json.load(open(sys.argv[1])); assert [p[\"n\"] for p in d] == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\"], d
+import json,sys; d=json.load(open(sys.argv[1])); assert [p[\"n\"] for p in d][:5] == [\"htop\", \"rclone\", \"python3-pip\", \"myapp\", \"bash\"], d
 " "$W/out"'
 run pkginfo rclone --json
 ok "and pkginfo reads it" 'grep -q "\"sizeKB\":22905," "$W/out" && grep -q "Google Drive" "$W/out"'
 rm -f /opt/var/opkg-lists/entware
+umount /media/developer
 run uninstall -y
 
 echo "== [$SH] 36b. while another opkg holds its lock"

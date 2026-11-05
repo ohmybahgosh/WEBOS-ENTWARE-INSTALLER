@@ -7,6 +7,8 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 ### Fixed
 
 - **Another build of an installed program now counts as installed in Browse:** with nano-full installed, nano and nano-plus showed as not installed, and **Hide installed** kept them.  Builds of one program (like nano, nano-full and nano-plus, vim and vim-full, or wget-ssl and wget-nossl) now say **Have nano-full**, hide with what's installed, and their page says you don't need both.
+- **What the Homebrew Channel ships now shows as on the TV:** dropbear, rsync and sftp-server come with the Homebrew Channel, but Browse said they weren't installed.  They now say **Homebrew has it** and hide with what's installed.  Commands webOS has its own copy of still say **webOS has one**, since Entware's are usually fuller.
+- **Category icons on the TV:** some category symbols, like the one for Fun & games, aren't in the TV's fonts and showed as a broken box.  The categories now have drawn icons.
 
 ## [2.14.0] - 2026-11-04
 

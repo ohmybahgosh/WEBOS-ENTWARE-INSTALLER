@@ -158,6 +158,8 @@ footer .right { margin: 0 0 0 auto; }
 .rc { display: flex; justify-content: space-between; align-items: center; font-size: 23px; font-weight: 600; padding: 8px 22px; border-radius: 14px; color: #c9d6e8;
   border: 3px solid transparent; margin-bottom: 2px; white-space: nowrap; }
 .rc i { font-style: normal; display: inline-block; width: 40px; color: #7d8ba1; }
+.rc i svg { width: 26px; height: 26px; vertical-align: -5px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rc.on i, .rc.focus i { color: #4cc3ff; }
 .rc .cnt { font-size: 19px; color: #7d8ba1; font-weight: 500; }
 .rc.on { background: #16304d; color: #fff; }
 .rc.focus { border-color: #4cc3ff; }

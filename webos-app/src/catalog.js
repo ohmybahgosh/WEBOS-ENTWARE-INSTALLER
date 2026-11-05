@@ -4,49 +4,49 @@
 // matched by name first, then by Entware's section.
 window.ENTWARE_CATALOG = {
     cats: [
-        { id: 'shell', title: 'Shell & terminal', icon: '>_', lead: 'Shells, terminal helpers and everyday tools for SSH.',
+        { id: 'shell', title: 'Shell & terminal', lead: 'Shells, terminal helpers and everyday tools for SSH.',
             names: 'bash zsh fish tmux screen dtach abduco mc fzf bat tree less most dialog whiptail byobu ncdu eza lsd ripgrep fd the_silver_searcher sd ' +
                 'figlet toilet neofetch fastfetch zoxide direnv tldr watch pv moreutils parallel expect coreutils findutils grep sed gawk diffutils which ' +
                 'file bc dc units calc ccze colordiff multitail lnav jq yq xmlstarlet asciinema ttyd shellinabox rlwrap ncurses-utils tput hexyl xxd',
             match: '^(fish|hstr|fzy|column|colrm|rev$|look$|cal$|time$|script-utils|whereis|namei|entr$|task-spooler|taskwarrior|remind|pcal|chezmoi|highlight|jo$|jq-full|man-|groff|more$|wcd$|mcookie|uuidgen|logger|flock|daemonize|reptyr|qrencode|iconv|byobu)' },
-        { id: 'editors', title: 'Editors', icon: '✎', lead: 'Edit files and settings from the terminal.',
+        { id: 'editors', title: 'Editors', lead: 'Edit files and settings from the terminal.',
             names: 'nano nano-full nano-plus vim vim-full vim-fuller neovim micro joe joe-extras mg emacs jed zile dte vis ed elvis kakoune helix mle' },
-        { id: 'files', title: 'Files & backup', icon: '▤', lead: 'Copy, sync, compress and look after files and drives.',
+        { id: 'files', title: 'Files & backup', lead: 'Copy, sync, compress and look after files and drives.',
             names: 'rsync rclone borgbackup restic unison rdiff-backup rsnapshot 7-zip p7zip unzip zip unrar tar xz zstd bzip2 gzip pigz lz4 lzop cpio ' +
                 'e2fsprogs ntfs-3g ntfs-3g-utils exfat-fuse exfat-fsck exfat-mkfs dosfstools hdparm smartmontools fdisk cfdisk sfdisk parted lsblk blkid ' +
                 'mlocate findutils-locate duf gdu dufs filebrowser syncthing davfs2 sshfs curlftpfs nfs-utils nfs-kernel-server samba4-server samba4-client ' +
                 'samba4-utils wsdd2 vsftpd proftpd pure-ftpd minidlna mergerfs bindfs archivemount fuse3-utils fuse-utils badblocks f2fs-tools btrfs-progs ' +
                 'xfsprogs-mkfs xfsprogs-fsck mdadm squashfs-tools fio rmlint jdupes fdupes',
             match: '^(xfs-|xz|zipcmp|zipmerge|ziptool|squashfs|tune2fs|resize2fs|dumpe2fs|debugfs|e2freefrag|e4crypt|ext4magic|extundelete|f2fsck|mkf2fs|mkhfs|hfsfsck|gdisk|cgdisk|sgdisk|fixparts|partx|wipefs|losetup|fstrim|filefrag|fallocate|hardlink|rdfind|restic|kopia|tarsnap|urbackup|par2|hashdeep|rhash|xxhash|cksfv|chattr|lsattr|testdisk|dislocker|cryfs|gocryptfs|encfs|cryptsetup|lvm2|sdparm|sd-idle|smart|s3fs|simple-mtpfs|rar2fs|unionfs|fuse-convmvfs|loggedfs|nnn|vifm|far2l|dysk|dfc|mount-utils|swap-utils|nfusr|lrzsz|lzma|dos2unix|unix2dos|rename$|progress$)' },
-        { id: 'downloads', title: 'Downloads & torrents', icon: '↓', lead: 'Download files, videos and torrents to the TV or a USB drive.',
+        { id: 'downloads', title: 'Downloads & torrents', lead: 'Download files, videos and torrents to the TV or a USB drive.',
             match: '^(transmission|aria2|wget|curl$|yt-dlp|youtube|qbittorrent|rtorrent|deluge|axel|lftp|nzbget|sabnzbd|amule|gallery-dl|httrack)' },
-        { id: 'media', title: 'Media & audio', icon: '▶', lead: 'Convert, inspect, stream and share video, music and photos.', sections: 'multimedia sound',
+        { id: 'media', title: 'Media & audio', lead: 'Convert, inspect, stream and share video, music and photos.', sections: 'multimedia sound',
             match: '^(tesseract|zbar|poppler|qpdf|ghostscript|xpdf|tiff-utils|giflib|lcms|jbigkit|gnuplot|rtl|dump1090|view1090|ink$|sane-|hplip|gutenprint|splix|brlaser|airprint|airsane|ffmpeg|ffprobe|mediainfo|mkvtoolnix|imagemagick|graphicsmagick|exiv2|jhead|gerbera|icecast|mpd|mpc|shairport|owntone|go2rtc|mosquitto-client)' },
-        { id: 'network', title: 'Network tools', icon: '⇄', lead: 'Test, watch and troubleshoot your network.', sections: 'net',
+        { id: 'network', title: 'Network tools', lead: 'Test, watch and troubleshoot your network.', sections: 'net',
             match: '^(minicom|picocom|setserial|mbim|qmi-|smstools|gpsd|owfs|owshell|digitemp|sngrep|sipgrep|netflow|cnetflow|cnflegacy|csflow|goflow|resolveip|nmap|iperf|mtr|tcpdump|bind-|knot-|drill|ethtool|iftop|nload|bmon|vnstat|arp-|netcat|socat|whois|traceroute|iputils|speedtest|' +
                 'dnsmasq|unbound|adguardhome|stubby|dnscrypt|avahi|ngrep|darkstat|nethogs|net-tools|iproute2|ip-full|curl|httping|fping|hping|tcping|wakeonlan|etherwake)' },
-        { id: 'vpn', title: 'VPN & security', icon: '⚿', lead: 'Private networks, encryption, firewalls and SSH.',
+        { id: 'vpn', title: 'VPN & security', lead: 'Private networks, encryption, firewalls and SSH.',
             match: '^(certtool|gnutls-utils|nss-utils|mbedtls-util|pcsc|jose$|pinentry|tailscale|wireguard|openvpn|zerotier|strongswan|tor$|tor-|torsocks|i2pd|gnupg|gpg|openssl-util|pass$|fail2ban|iptables|ip6tables|ipset|' +
                 'nftables|dropbear|openssh|sudo|keepassxc|age$|crowdsec|stunnel|shadowsocks|xray|v2ray|sing-box|ocserv|softethervpn|nebula|netbird|headscale|' +
                 'cloudflared|frp|ngrok|autossh|sshpass|knock|pwgen|apg|oath-toolkit|nextdns|dnscrypt-proxy2|https-dns-proxy|vpnc|openconnect|sstp|pptp|xl2tpd)' },
-        { id: 'servers', title: 'Servers & web', icon: '☁', lead: 'Web servers, databases, mail and other services.', sections: 'mail',
+        { id: 'servers', title: 'Servers & web', lead: 'Web servers, databases, mail and other services.', sections: 'mail',
             match: '^(pgsql|goaccess|promlens|tang$|unixodbc|tidy-html5|xsltproc|nginx|lighttpd|apache|caddy|php8|mariadb|sqlite3|redis|postgresql|mosquitto$|node-red|homebridge|cups|squid|privoxy|tinyproxy|haproxy|' +
                 'uhttpd|cron|incron|monit|nut-|apcupsd|ttyd|shellinabox|webdav|radicale|dovecot|postfix|exim|msmtp|fetchmail|mutt|nail|memcached|' +
                 'influxdb|telegraf|grafana|prometheus|node-exporter|alertmanager|transmission-web|rutorrent|znc|ngircd|bitlbee|asterisk$|freeradius3$|' +
                 'tvheadend|xupnpd|udpxy|minissdpd|miniupnpd)' },
-        { id: 'dev', title: 'Programming', icon: '{}', lead: 'Languages, compilers and developer tools.', sections: 'lang devel',
+        { id: 'dev', title: 'Programming', lead: 'Languages, compilers and developer tools.', sections: 'lang devel',
             match: '^(python3|perl$|ruby$|node$|node-npm|nodejs|lua$|lua5|luajit|go$|golang$|gcc|make$|cmake|autoconf|automake|libtool-bin|pkg-config|' +
                 'binutils|gdb|strace|ltrace|git|subversion|mercurial|tig|lazygit|php8-cli|tcl|guile|erlang$|rust|openjdk|ccache|meson|ninja|patch|diffstat|' +
                 'quilt|bison|flex|m4|swig|upx|duktape|quickjs|tcc|nasm|yasm|valgrind)' },
-        { id: 'system', title: 'System & monitoring', icon: '▥', lead: 'See what the TV is doing and keep it healthy.', sections: 'admin',
+        { id: 'system', title: 'System & monitoring', lead: 'See what the TV is doing and keep it healthy.', sections: 'admin',
             match: '^(lscpu|lsns|lslocks|ipcs|prlimit|ionice|ioping|haveged|rng-tools|hwclock|fake-hwclock|kmod$|kexec|ldd$|ldconfig|dbus|setterm|wall$|nsenter|unshare|limitcpu|loadwatch|memtester|lmbench|procs$|saidar|statgrab|fatrace|inotify|keyd$|keyctl|keyutils|uuidd|sysfsutils|i2c-tools|gpioctl|usbids|pciids|pnpids|hub-ctrl|usbrelay|sispmctl|fxload|uvcdynctrl|v4l-utils|lirc|lcdproc|lcd4linux|rrdtool|rrdcgi|getopt|nonroot|empty$|shc$|smartd|htop|btop|bottom|atop|glances|nmon|iotop|lsof|sysstat|procps|psmisc|dstat|monit|collectd$|netdata|lm-sensors|usbutils|pciutils|' +
                 'util-linux|dmesg|logrotate|sysbench|stress|watchdog|syslog-ng|rsyslog|audit|uptimed|beszel|zabbix|nagios|ntopng|ncdu|dool|bmon|vmstat|' +
                 'cpulimit|nice|schedtool|taskset|at$|anacron)' },
-        { id: 'games', title: 'Fun & games', icon: '♞', lead: 'Terminal games and toys.', sections: 'games',
+        { id: 'games', title: 'Fun & games', lead: 'Terminal games and toys.', sections: 'games',
             match: '^(nyancat|cowsay|fortune|sl$|cmatrix|asciiquarium|nethack|angband|crawl|zork|gnuchess|vitetris|tty-solitaire|sudoku|minesweep|bastet|' +
                 'moon-buggy|ninvaders|2048|figlet|toilet|lolcat|ratatui|superstartrek|cavezofphear)' },
-        { id: 'other', title: 'Everything else', icon: '…', lead: 'Everything that doesn\'t fit the other categories.' },
-        { id: 'libs', title: 'Libraries & modules', icon: '⚙', lead: 'Libraries, plugins and modules that other packages use.  You rarely need to install these yourself.' }
+        { id: 'other', title: 'Everything else', lead: 'Everything that doesn\'t fit the other categories.' },
+        { id: 'libs', title: 'Libraries & modules', lead: 'Libraries, plugins and modules that other packages use.  You rarely need to install these yourself.' }
     ],
 
     // Shown first on Browse, in this order
