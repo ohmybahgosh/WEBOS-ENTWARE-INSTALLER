@@ -2,7 +2,7 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.15.1] - 2026-11-05
 
 ### Fixed
 
