@@ -495,7 +495,7 @@ run install -y
 ok "repair rewrites its own updatedb.conf without a message" '! grep -q "Kept your own" "$W/out"'
 
 echo "== [$SH] 21. removing mlocate leaves nothing that errors"
-(cd /tmp && $SH /opt/bin/entwrap remove mlocate) > /dev/null 2>&1
+(cd /tmp && /opt/bin/opkg remove mlocate) > /dev/null 2>&1
 ok "wrapper exits quietly" '/opt/bin/updatedb-webos < /dev/null > "$W/w" 2>&1 && [ ! -s "$W/w" ]'
 run status
 ok "doctor says not installed, nothing to fix" 'grep -q "locate (mlocate):   not installed" "$W/out" && grep -q "Everything looks right" "$W/out"'
@@ -538,7 +538,7 @@ ok "a package without OpenSSL doesn't pull in ca-bundle" '! grep -qx ca-bundle /
 ok "ent install wget-ssl adds ca-bundle" 'grep -qx ca-bundle /opt/lib/opkg/fake-installed && [ -s /opt/etc/ssl/certs/ca-certificates.crt ] && grep -q "HTTPS certificates installed" "$W/out"'
 run status
 ok "doctor shows certificates" 'grep -q "HTTPS certificates: .*yes" "$W/out" && grep -q "Everything looks right" "$W/out"'
-(cd /tmp && $SH /opt/bin/entwrap remove ca-bundle) > /dev/null 2>&1
+(cd /tmp && /opt/bin/opkg remove ca-bundle) > /dev/null 2>&1
 run status
 ok "doctor flags missing certificates" 'grep -q "HTTPS certificates are missing" "$W/out"'
 run install -y
@@ -1195,11 +1195,11 @@ import json,sys; d=json.load(open(sys.argv[1]))
 assert d[\"installed\"] is True and d[\"installedVersion\"] == \"1.0-1\" and d[\"base\"] is True and d[\"commands\"] == [\"bash\"], d
 " "$W/out"'
 run pkginfo htop
-ok "pkginfo without --json reads well: size, what it adds, the add-on and how to install" 'grep -q "^htop  3.4.1-1  (not installed)" "$W/out" && grep -q "Size .*130 KB to download, 290 KB installed" "$W/out" && grep -q "Also adds .*2 more (libncurses, terminfo), 313 KB" "$W/out" && grep -q "Add-on .*htop, not added yet.  tv addon add htop sets it up" "$W/out" && grep -q "^it allows to scroll the list.$" "$W/out" && grep -q "^tv install htop installs it.$" "$W/out"'
+ok "pkginfo without --json reads well: size, what it adds, the add-on and how to install" 'grep -q "^htop  3.4.1-1  (not installed)" "$W/out" && grep -q "Size .*130 KB to download, 290 KB installed" "$W/out" && grep -q "Also adds .*2 more (libncurses, terminfo), 313 KB" "$W/out" && grep -q "Add-on .*htop, not added yet.  ent addon add htop sets it up" "$W/out" && grep -q "^it allows to scroll the list.$" "$W/out" && grep -q "^ent install htop installs it.$" "$W/out"'
 run pkginfo myapp
 ok "pkginfo text keeps quotes and backslashes" 'grep -q "An app that \"quotes\" \\\\ things" "$W/out"'
 run pkginfo bash
-ok "pkginfo text for an installed package" 'grep -q "^bash  .*(installed" "$W/out" && grep -q "Commands .*bash" "$W/out" && grep -q "^tv remove bash removes it.$" "$W/out"'
+ok "pkginfo text for an installed package" 'grep -q "^bash  .*(installed" "$W/out" && grep -q "Commands .*bash" "$W/out" && grep -q "^ent remove bash removes it.$" "$W/out"'
 run pkginfo dropbear --json
 ok "pkginfo names the Homebrew Channel's copy" 'grep -q "\"system\":\"/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear\"" "$W/out"'
 run pkginfo dropbear
@@ -1387,7 +1387,9 @@ echo "== [$SH] 38. tv: one command, with the old ones still working"
 rm -rf /home/root/.[!.]* /home/root/* /tmp/webos-entware-job /tmp/webos-entware.lock /tmp/fake-crontab
 run install -y
 tvr() { (cd /tmp && $SH /opt/bin/tv "$@") > "$W/out" 2>&1; }
+entr() { (cd /tmp && $SH /opt/bin/ent "$@") > "$W/out" 2>&1; }
 ok "install adds tv, and keeps ent, entwrap, webos-entware, webos-tv and its commands" '[ -x /opt/bin/tv ] && for c in ent entwrap webos-entware webos-tv toast launch close apps applog tvshot; do [ -x /opt/bin/$c ] || exit 1; done'
+ok "tv, ent and entwrap are one script" '[ "$(readlink /opt/bin/tv)" = /opt/libexec/webos-entware-cli ] && [ "$(readlink /opt/bin/entwrap)" = /opt/libexec/webos-entware-cli ] && [ "$(readlink /opt/bin/ent)" = entwrap ]'
 ok "the old shortcuts are still there" 'grep -q "alias entup=" /opt/etc/webos-entware/bashrc && grep -q "alias entlist=" /opt/etc/webos-entware/bashrc && grep -q "alias entfix=" /opt/etc/webos-entware/bashrc'
 (cd /tmp && PATH="/opt/bin:$PATH" $SH /opt/bin/ent search bash) > "$W/out" 2>&1
 ok "ent search still runs" 'grep -q "^bash - 5.3" "$W/out"'
@@ -1396,49 +1398,57 @@ ok "webos-tv and apps still run" 'grep -q "webOS helpers" "$W/out" && grep -q "N
 (cd /tmp && $SH /opt/bin/webos-entware addons) > "$W/out" 2>&1
 ok "webos-entware still runs" 'grep -q "A two-pane file manager" "$W/out"'
 tvr help
-ok "tv help lists every group" 'for g in Overview Packages "Add-ons and services" Apps "The screen" System Files Automation; do grep -q "^$g" "$W/out" || exit 1; done && grep -q "ent, webos-entware, webos-tv" "$W/out"'
+ok "tv help lists the TV's groups, and points to ent for packages" 'for g in Overview Apps "The screen" System Files Automation; do grep -q "^$g" "$W/out" || exit 1; done && ! grep -qx "Packages" "$W/out" && grep -q "are ent: ent help" "$W/out"'
+entr help
+ok "ent help lists packages, add-ons, services and checks" 'for g in Packages "Add-ons and services" Checks; do grep -q "^$g" "$W/out" || exit 1; done && ! grep -q "^Apps" "$W/out" && grep -q "straight to opkg" "$W/out"'
+! tvr install htop
+ok "tv install points to ent" 'grep -q "That.s ent now: ent install htop" "$W/out" && [ ! -f /opt/lib/opkg/info/htop.control ]'
+entr
+ok "ent on its own shows how Entware is doing" 'grep -q "^Entware .* packages" "$W/out" && grep -q "ent help lists everything" "$W/out"'
+entr list-installed
+ok "ent passes anything else to opkg, as before" 'grep -q "^bash" "$W/out"'
+entr help svc
+ok "ent help <command> gives its lines" 'grep -q "ent svc start" "$W/out"'
 tvr help keys
 ok "tv help <command> gives examples" 'grep -q "tv keys add octocat" "$W/out"'
 tvr
-ok "tv on its own shows how the TV and Entware are doing" 'grep -q "^Entware .* packages" "$W/out" && grep -q "tv help lists everything" "$W/out"'
+ok "tv on its own shows the TV, what's on screen, and a line about Entware" 'grep -q "On screen: com.webos.app.hdmi1" "$W/out" && grep -q "^Entware .* packages" "$W/out" && grep -q "tv help lists everything" "$W/out"'
 ! tvr nonsense
 ok "an unknown command says so" 'grep -q "tv nonsense isn.t a command" "$W/out"'
 # Tab completion, as bash would ask for it
 comp() { bash -c '. /opt/etc/bash_completion.d/entwrap; COMP_WORDS=($1); COMP_CWORD=$((${#COMP_WORDS[@]} - 1)); [ "${1: -1}" = " " ] && { COMP_WORDS+=(""); COMP_CWORD=$((COMP_CWORD + 1)); }; _tv; echo "${COMPREPLY[*]}"' _ "$1"; }
-ok "Tab completes tv's commands" '[ "$(comp "tv sv")" = svc ] && [ "$(comp "tv -y rem")" = remove ]'
-ok "and what each takes" '[ "$(comp "tv svc st")" = "status start stop" ] && [ "$(comp "tv input h")" = "hdmi1 hdmi2 hdmi3 hdmi4" ] && [ "$(comp "tv keys r")" = remove ] && [ "$(comp "tv addon add ht")" = htop ]'
-ok "package names, from the package list" '[ "$(comp "tv install nano-f")" = nano-full ] && comp "tv remove ba" | grep -qw bash'
+ok "Tab completes tv's commands, and ent's" '[ "$(comp "tv sh")" = shot ] && [ "$(comp "tv -y reb")" = reboot ] && [ "$(comp "ent sv")" = svc ] && [ "$(comp "ent -y rem")" = remove ] && [ -z "$(comp "tv sv")" ]'
+ok "and what each takes" '[ "$(comp "ent svc st")" = "status start stop" ] && [ "$(comp "tv input h")" = "hdmi1 hdmi2 hdmi3 hdmi4" ] && [ "$(comp "tv keys r")" = remove ] && [ "$(comp "ent addon add ht")" = htop ]'
+ok "package names, from the package list" '[ "$(comp "ent install nano-f")" = nano-full ] && comp "ent remove ba" | grep -qw bash && [ "$(comp "entwrap show nano-f")" = nano-full ]'
 
 printf '%s\n' "htop - 3.4.1-1 - Interactive processes viewer" > /opt/lib/opkg/fake-list
-tvr install htop
-ok "tv install installs a package" 'grep -q "htop is installed" "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
-tvr why htop
-ok "tv why says nothing needs it, since you installed it" 'grep -q "You installed it yourself" "$W/out"'
-tvr why bash
+entr install htop
+ok "ent install installs a package" 'grep -q "htop is installed" "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
+entr why htop
+ok "ent why says nothing needs it, since you installed it" 'grep -q "You installed it yourself" "$W/out"'
+entr why bash
 ok "and when Entware needs one" 'grep -q "bash is part of Entware" "$W/out"'
-! (cd /tmp && $SH /opt/bin/tv remove htop < /dev/null) > "$W/out" 2>&1
-ok "tv remove asks first, and with no one to ask, doesn't" 'grep -q "Add -y" "$W/out" && [ -f /opt/lib/opkg/info/htop.control ]'
-tvr remove htop -y
-ok "with -y it removes it" 'grep -q "Removed htop" "$W/out" && [ ! -f /opt/lib/opkg/info/htop.control ]'
+entr remove htop
+ok "ent remove from a script removes it without asking, as ent always did" 'grep -q "Removed htop" "$W/out" && [ ! -f /opt/lib/opkg/info/htop.control ]'
 printf 'Package: libleft\nVersion: 1\nStatus: install user installed\nAuto-Installed: yes\nInstalled-Time: 1762200000\n\n' >> /opt/lib/opkg/status
 printf 'Package: libleft\nVersion: 1\nInstalled-Size: 2048\n' > /opt/lib/opkg/info/libleft.control
 echo libleft >> /opt/lib/opkg/fake-installed
-tvr cleanup -y
-ok "tv cleanup removes packages nothing needs any more" 'grep -q "libleft" "$W/out" && grep -q "Removed libleft" "$W/out" && ! grep -q "^Package: libleft" /opt/lib/opkg/status'
-tvr cleanup
+entr cleanup -y
+ok "ent cleanup removes packages nothing needs any more" 'grep -q "libleft" "$W/out" && grep -q "Removed libleft" "$W/out" && ! grep -q "^Package: libleft" /opt/lib/opkg/status'
+entr cleanup
 ok "and says when there's nothing to clean" 'grep -q "Nothing to clean up" "$W/out"'
 rm -f /opt/lib/opkg/fake-list
 
 run pkg-add cron -y
-tvr svc
-ok "tv svc lists Entware's services" 'grep -q "cron .*\(running\|stopped\), starts at boot" "$W/out"'
-tvr svc disable cron
-ok "tv svc disable keeps one from starting at boot" '[ ! -x /opt/etc/init.d/S10cron ] && grep -q "won.t start at boot" "$W/out"'
-! tvr svc start cron
-ok "and won't start it until it's enabled" 'grep -q "tv svc enable cron" "$W/out"'
-tvr svc enable cron
-ok "tv svc enable turns it back on" '[ -x /opt/etc/init.d/S10cron ]'
-! tvr svc start nosuch
+entr svc
+ok "ent svc lists Entware's services" 'grep -q "cron .*\(running\|stopped\), starts at boot" "$W/out"'
+entr svc disable cron
+ok "ent svc disable keeps one from starting at boot" '[ ! -x /opt/etc/init.d/S10cron ] && grep -q "won.t start at boot" "$W/out"'
+! entr svc start cron
+ok "and won't start it until it's enabled" 'grep -q "ent svc enable cron" "$W/out"'
+entr svc enable cron
+ok "ent svc enable turns it back on" '[ -x /opt/etc/init.d/S10cron ]'
+! entr svc start nosuch
 ok "a service that isn't there says so" 'grep -q "no service called nosuch" "$W/out"'
 
 echo "== [$SH] 38c. tv: autostart, SSH keys and done"
@@ -1513,15 +1523,15 @@ ok "and removes one that is" 'grep -q "appInstallService/dev/remove {\"id\":\"co
 umount /media/developer
 
 echo "== [$SH] 38e. tv: system, files, backup and restore"
-tvr where sh
-ok "tv where says where a command comes from" 'grep -q "/bin/sh .*webOS" "$W/out"'
-! tvr where nosuchcommand
+entr where sh
+ok "ent where says where a command comes from" 'grep -q "/bin/sh .*webOS" "$W/out"'
+! entr where nosuchcommand
 ok "and when there isn't one" 'grep -q "no nosuchcommand on the TV" "$W/out"'
 printf '#!/bin/sh\nprintf "sshfs  3.7.2-4\\n    Mount remote system over sftp.\\nsshguard  2.5.1-1 [installed]\\n    Protects hosts.\\n"\n' > "$W/fakemgr"; chmod +x "$W/fakemgr"
-! (cd /tmp && TV_MGR="$W/fakemgr" $SH /opt/bin/tv where ssh) > "$W/out" 2>&1
+! (cd /tmp && TV_MGR="$W/fakemgr" $SH /opt/bin/ent where ssh) > "$W/out" 2>&1
 ok "and names what Entware has, one line each" 'grep -q "^  Entware has sshfs$" "$W/out" && grep -q "^  Entware has sshguard$" "$W/out" && ! grep -q "Mount" "$W/out"'
-tvr list nosuchpkg
-ok "tv list with no match says so" 'grep -q "Nothing installed matches nosuchpkg" "$W/out"'
+entr list nosuchpkg
+ok "ent list with no match says so" 'grep -q "Nothing installed matches nosuchpkg" "$W/out"'
 tvr ports
 ok "tv ports lists what's listening" 'grep -q "^  PORT *TYPE *PROGRAM" "$W/out"'
 tvr top
@@ -1552,9 +1562,11 @@ run status
 ok "doctor notices tv is missing" 'grep -q "webos-entware helpers" "$W/out"'
 run helpers
 ok "webos-entware helpers writes tv and the others again" '[ -x /opt/bin/tv ] && [ -x /opt/bin/entwrap ] && [ -x /opt/bin/webos-tv ] && grep -q "complete -F _tv tv" /opt/etc/bash_completion.d/entwrap'
-echo "#!/bin/sh" > /opt/bin/tv
+rm -f /opt/bin/tv; echo "#!/bin/sh" > /opt/bin/tv
 run helpers
 ok "a tv that's something else is left alone" 'grep -q "Skipped the tv command" "$W/out" && [ "$(cat /opt/bin/tv)" = "#!/bin/sh" ]'
+(cd /tmp && $SH /opt/bin/ent help) > "$W/out" 2>&1
+ok "and ent still works" 'grep -q "^Packages" "$W/out"'
 rm -f /opt/bin/tv /tmp/fake-crontab /tmp/luna.log; rm -rf /tmp/bk
 run uninstall -y
 

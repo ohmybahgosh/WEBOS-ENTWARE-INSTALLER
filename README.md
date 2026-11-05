@@ -62,8 +62,7 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 - [Options](#options)
 - [After installing](#after-installing)
 - [Managing the install](#managing-the-install)
-- [The tv command](#the-tv-command)
-- [The ent helper](#the-ent-helper)
+- [The tv and ent commands](#the-tv-and-ent-commands)
 - [Shell setup and shortcuts](#shell-setup-and-shortcuts)
 - [webOS helpers](#webos-helpers)
 - [nano](#nano)
@@ -290,8 +289,8 @@ On a TV with a 32-bit kernel it recommends the 32-bit build, explains that this 
 
 ## After installing
 
-- SSH in again to get bash. Type `tv` to see how the TV is doing, and `tv help` for everything it can do.
-- Try `tv search htop`, then `tv install htop`.
+- SSH in again to get bash.  Type `tv` to see how the TV is doing, and `ent` for Entware.  `tv help` and `ent help` list everything.
+- Try `ent search htop`, then `ent install htop`.
 - Run `webos-entware doctor` any time to check everything.
 
 ---
@@ -341,27 +340,45 @@ If you piped the installer into sh, there's no file to copy, so it saves the pub
 
 ---
 
-## The tv command
+## The tv and ent commands
 
-`tv` puts everything in one place, with Tab completion for its commands and what each one takes: package names, add-ons, services, app IDs, inputs, settings and more.  `tv` on its own shows how the TV and Entware are doing, and `tv help <command>` gives examples.
+Two commands cover everything over SSH, each with Tab completion for its commands and what each one takes:
 
-The older commands all keep working: `ent`, `entwrap`, `webos-entware`, `webos-tv`, `toast`, `launch`, `close`, `apps`, `applog`, `tvshot` and the `entup`, `entlist` and `entfix` shortcuts.  `tv` hands off to them where they already do the job.
+- **`tv`** works the TV: apps, the screen, the system, files and automation.
+- **`ent`** works Entware: packages, add-ons and services.  Anything it doesn't know goes straight to `opkg`, so `ent list-installed` works too.
+
+`tv` on its own shows how the TV is doing and what's on screen, with one line about Entware.  `ent` on its own shows how Entware is doing.  `tv help` and `ent help` list everything, and `tv help <command>` gives examples.  If you type a package command after `tv`, like `tv install htop`, it tells you the `ent` command instead.
+
+The older commands all keep working: `entwrap` (the same as `ent`), `webos-entware`, `webos-tv`, `toast`, `launch`, `close`, `apps`, `applog`, `tvshot` and the `entup`, `entlist` and `entfix` shortcuts.  `tv` and `ent` hand off to them where they already do the job.
+
+### ent: packages, add-ons and services
 
 | Packages | |
 |:--|:--|
-| `tv search <word>`, `tv show <pkg>` | Search, and everything about one package: its description, size and what else it installs |
-| `tv install <pkg>`, `tv remove <pkg>` | Install or remove, with the webOS setup some need.  With `fzf` installed, leave the name out to pick from a list |
-| `tv browse [category]` | Packages by category, like the TV app's Browse |
-| `tv list`, `tv files`, `tv owns`, `tv du` | What's installed, a package's files, where a file came from, the biggest packages |
-| `tv why <pkg>` | What needs a package |
-| `tv cleanup` | Remove packages nothing needs any more |
-| `tv update`, `tv upgrade [pkg]`, `tv upgradable` | The package list and updates |
+| `ent search <word>` | Search packages by name or description.  Each result shows its version, whether it's installed, and its description cut to fit the screen.  Name matches come first |
+| `ent show <pkg>` | Everything about one package: its description, size, what else it installs, its commands, its add-on, and whether webOS or the Homebrew Channel already has it.  `ent info` does the same |
+| `ent install <pkg>`, `ent remove <pkg>` | Install or remove, with the webOS setup some need (nano colors, HTTPS certificates, locate).  `ent remove` won't remove what Entware or another package needs.  With `fzf` installed, leave the name out to pick from a list |
+| `ent browse [category]` | Packages by category, like the TV app's Browse |
+| `ent list [text]`, `ent files <pkg>`, `ent owns <file or command>` | What's installed, a package's files, and which package a file came from (or that it's part of webOS) |
+| `ent why <pkg>`, `ent du [count]` | What needs a package, and the biggest packages with free space |
+| `ent cleanup` | Remove packages nothing needs any more |
+| `ent update`, `ent upgrade [pkg]`, `ent upgradable` | The package list and updates |
+| `ent repair` | Reinstall Entware's core |
 
-| Add-ons, services and apps | |
+| Add-ons, services and checks | |
 |:--|:--|
-| `tv addon [list\|add\|remove\|info\|password] <name>` | The [add-ons](#add-ons) |
-| `tv svc [list\|start\|stop\|restart\|enable\|disable\|logs] <name>` | Every Entware service, whether it came from an add-on or not |
-| `tv share` | The addresses for File Browser, Samba, the media server and the rest |
+| `ent addon [list\|add\|remove\|info\|password] <name>` | The [add-ons](#add-ons) |
+| `ent svc [list\|start\|stop\|restart\|enable\|disable\|logs] <name>` | Every Entware service, whether it came from an add-on or not |
+| `ent share` | The addresses for File Browser, Samba, the media server and the rest |
+| `ent where <command>` | Where a command comes from (Entware, webOS or the Homebrew Channel) and which one runs |
+| `ent doctor` | Check Entware and the TV, and say what to fix (the same as `webos-entware doctor`) |
+
+<p align="center"><img src="images/term-ent.gif" width="760" alt="ent search top, animated: htop marked installed and btop, then ent owns htop"></p>
+
+### tv: the TV
+
+| Apps | |
+|:--|:--|
 | `tv apps`, `tv launch`, `tv close`, `tv running` | Apps, and what's on screen |
 | `tv app install <ipk or link>`, `tv app uninstall <id>` | Your own app packages |
 | `tv open <url>`, `tv youtube <link>` | Open a page in the TV's browser, or play a video in YouTube |
@@ -370,17 +387,16 @@ The older commands all keep working: `ent`, `entwrap`, `webos-entware`, `webos-t
 |:--|:--|
 | `tv toast <message>`, `tv shot [file]` | A notification on the TV, or a screenshot |
 | `tv volume [up\|down\|0-100]`, `tv mute [on\|off]` | The volume |
-| `tv input [list\|hdmi1-4]` | Switch inputs |
+| `tv input [list\|hdmi1-4]` | The inputs, with what's plugged in, and switching between them |
 | `tv screen off\|on` | Turn the picture off or on, with the TV still running |
 | `tv power off`, `tv reboot` | Turn the TV off, or restart it (both ask first) |
 | `tv settings get\|set <category> [key=value]` | Picture, sound and other settings, like `tv settings set picture backlight=40` |
 
 | System and files | |
 |:--|:--|
-| `tv info`, `tv top`, `tv temp` | The TV's details, what's busy, and how hot the chip is |
+| `tv info`, `tv top`, `tv temp` | The TV's details, what's busy, and how hot the chip is (on TVs that report it) |
 | `tv space [clean]` | What's using storage, and clearing caches, old logs and screenshots |
 | `tv ports` | What's listening on the network, and which program it is |
-| `tv where <command>` | Where a command comes from (Entware, webOS or the Homebrew Channel) and which one runs |
 | `tv net [test\|speed <host>]`, `tv wake <mac>` | Network details, a connection test, a speed test with iperf3, and Wake-on-LAN |
 | `tv usb [eject <drive>]` | USB drives, and unmounting one safely |
 | `tv logs [boot\|tasks\|text]`, `tv report` | The logs, and what to put in a GitHub issue |
@@ -393,36 +409,9 @@ The older commands all keep working: `ent`, `entwrap`, `webos-entware`, `webos-t
 | `tv keys [list\|add\|remove]` | Who can log in over SSH.  `tv keys add <github-user>` adds their keys from GitHub |
 | `tv done <command>` | Run something long, then pop up on the TV when it's done |
 
-Anything that changes or removes something asks first.  `-y` answers yes, and without a terminal to ask on, `tv` doesn't go ahead.
+Anything that changes or removes something asks first in a terminal, and `-y` answers yes.  Without a terminal to ask on, `tv` doesn't go ahead.  `ent install` and `ent remove` go ahead from scripts, as `ent` always has.
 
----
-
-## The ent helper
-
-`ent` (also called `entwrap`) is a separate helper command. Plain `opkg` keeps working as normal.
-
-| Command | What it does |
-|:--------|:-------------|
-| `ent search <text>` | Search available packages by name or description.  Each result shows its version, whether it's installed, and its description cut to fit the screen.  Name matches come first |
-| `ent install <pkg>` | Install packages, plus the webOS setup some need (nano colors, HTTPS certificates, locate) |
-| `ent remove <pkg>` | Remove packages |
-| `ent info <pkg>` | Show package details |
-| `ent files <pkg>` | List the files a package installed |
-| `ent owns <file or command>` | Show which package a file or command came from, or that it's part of webOS |
-| `ent du [count]` | Largest installed packages, Entware's total size and free space on the data partition |
-| `ent list` | List installed packages |
-| `ent update` | Refresh the package list |
-| `ent upgradable` | Show packages with updates |
-| `ent upgrade` | Refresh the list and upgrade everything |
-| `ent repair` | Reinstall the Entware core |
-| `ent doctor` | Same as `webos-entware doctor` |
-| `ent help` | Show all `ent` commands |
-
-Anything else is passed straight to `opkg`, so `ent list-installed` works too.
-
-<p align="center"><img src="images/term-ent.gif" width="760" alt="ent search top, animated: htop marked installed and btop, then ent owns htop"></p>
-
-**Tab completion** (in the bash shell): press Tab after `ent`, `opkg` or `webos-entware` to complete commands. After `install`, `info` or `search` it completes available package names. After `remove`, `files` or `upgrade` it completes installed ones.
+**Tab completion** (in the bash shell): press Tab after `tv`, `ent`, `opkg` or `webos-entware`.  After `ent install`, `show` or `search` it completes available package names, and after `ent remove`, `files` or `upgrade` installed ones.  It also completes add-ons, services, app IDs, inputs and settings.
 
 ---
 

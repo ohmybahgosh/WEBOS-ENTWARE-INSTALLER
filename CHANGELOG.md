@@ -6,11 +6,17 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 
 ### Added
 
-- **One `tv` command for everything over SSH:** packages, add-ons, services, apps, the screen and the system, with Tab completion for its commands and what each one takes (package names, add-ons, services, app IDs, inputs and settings).  `tv` on its own shows how the TV and Entware are doing, and `tv help` lists everything, in groups.  `ent`, `webos-entware`, `webos-tv` and their commands all keep working.
+- **`tv` for the TV and `ent` for Entware:** two commands for everything over SSH, with Tab completion for their commands and what each one takes (package names, add-ons, services, app IDs, inputs and settings).  `tv` works apps, the screen, the system, files and automation.  `ent` works packages, add-ons and services, and still passes anything else to `opkg`.  On its own, `tv` shows how the TV is doing and what's on screen, and `ent` shows how Entware is doing.  `tv help` and `ent help` list everything, in groups.  `entwrap`, `webos-entware`, `webos-tv`, their commands and the `entup`, `entlist` and `entfix` shortcuts all keep working.
+- **Control the TV from SSH:** `tv volume`, `tv mute`, `tv input` (with what's plugged into each port), `tv screen off`, `tv power off`, `tv reboot`, `tv open <url>` in the TV's browser, `tv youtube <link>` and `tv settings get|set` for picture and sound settings.
 - **Back up and restore:** `tv backup` saves Entware's settings (with your add-ons' passwords), your crontab, SSH keys, boot scripts and the lists of packages and add-ons you installed, to a USB drive if one's plugged in.  `tv restore` reinstalls them and puts the settings back.
-- **Control the TV from SSH:** `tv volume`, `tv mute`, `tv input hdmi2`, `tv screen off`, `tv power off`, `tv reboot`, `tv open <url>` in the TV's browser, `tv youtube <link>` and `tv settings get|set` for picture and sound settings.
-- **More from SSH:** `tv svc` starts, stops and turns off any Entware service; `tv keys add <github-user>` adds SSH keys from GitHub; `tv autostart` manages boot scripts; `tv cleanup` removes packages nothing needs; `tv ports`, `tv top`, `tv temp`, `tv space`, `tv where`, `tv net test`, `tv usb eject`, `tv wake`, `tv serve` (share a folder with a QR code) and `tv done` (a toast when a long command finishes).
-- **`webos-entware helpers`** writes `tv`, `ent`, the webOS helpers and Tab completion again.  Updating the app does this too, so you get `tv` without repairing.
+- **More for the TV:** `tv keys add <github-user>` adds SSH keys from GitHub; `tv autostart` manages boot scripts; `tv ports`, `tv top`, `tv temp`, `tv space`, `tv net test`, `tv usb eject`, `tv wake`, `tv serve` (share a folder with a QR code) and `tv done` (a toast when a long command finishes).
+- **More for Entware:** `ent show` reads like the TV app's package page (size, what else it installs, its commands, its add-on, and whether webOS or the Homebrew Channel already has it); `ent browse` lists packages by category; `ent why` says what needs a package; `ent cleanup` removes packages nothing needs; `ent addon` and `ent svc` add add-ons and start, stop and turn off any Entware service; `ent share` lists every address; `ent where` says where a command comes from.
+- **`webos-entware helpers`** writes `tv`, `ent`, the webOS helpers and Tab completion again.  Updating the app does this too, so you get them without repairing.
+
+### Changed
+
+- **`ent install` and `ent remove`** now go through the same steps as the TV app: `ent remove` stops a service first and won't remove what Entware or another package needs.  Both still work from scripts without asking, and options like `--force-reinstall` still go straight to `opkg`.
+- **`ent info`** shows the fuller package page, like `ent show`.
 
 ## [2.14.1] - 2026-11-04
 

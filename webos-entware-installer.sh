@@ -40,6 +40,7 @@ NANORC="/opt/etc/nanorc"
 TV_HELPER="/opt/bin/webos-tv"
 TV_COMMANDS="toast launch close apps applog tvshot"
 TV_CLI="/opt/bin/tv"
+CLI="/opt/libexec/webos-entware-cli"
 CA_FILE="/opt/etc/ssl/certs/ca-certificates.crt"
 BANNER_DIR="/opt/etc/webos-entware/banner"
 NEOFETCH_BIN="/opt/bin/neofetch"
@@ -952,176 +953,7 @@ setup_identity_files() {
 # === Install the ent helper, a saved copy of this script, and tab completion ===
 # ent is a separate command. opkg itself is never replaced or wrapped.
 install_entwrap() {
-    cat > /opt/bin/entwrap << 'ENTWRAP'
-#!/bin/sh
-# Entware helper for webOS (webos-entware-installer)
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-OPKG_BIN="/opt/bin/opkg"
-CACHE="/opt/tmp/entpkg-cache.txt"
-MANAGER="/opt/bin/webos-entware"
-unset LD_PRELOAD LD_LIBRARY_PATH
-
-print_usage() {
-    printf '%b\n' "${CYAN}ent${NC} - Entware package helper for webOS (plain opkg works too)"
-    printf '%b\n' "  ${GREEN}search${NC} <text>    Search available packages"
-    printf '%b\n' "  ${GREEN}install${NC} <pkg>    Install packages, plus the webOS setup some need (nano, mlocate, HTTPS)"
-    printf '%b\n' "  ${GREEN}remove${NC} <pkg>     Remove packages"
-    printf '%b\n' "  ${GREEN}info${NC} <pkg>       Show package details"
-    printf '%b\n' "  ${GREEN}files${NC} <pkg>      List the files a package installed"
-    printf '%b\n' "  ${GREEN}owns${NC} <file|cmd>  Show which package a file or command came from"
-    printf '%b\n' "  ${GREEN}du${NC} [count]       Largest installed packages, and free space"
-    printf '%b\n' "  ${GREEN}update${NC}           Refresh the package list"
-    printf '%b\n' "  ${GREEN}upgradable${NC}       Show packages with updates"
-    printf '%b\n' "  ${GREEN}upgrade${NC}          Refresh the list and upgrade everything"
-    printf '%b\n' "  ${GREEN}list${NC}             List installed packages"
-    printf '%b\n' "  ${GREEN}repair${NC}           Reinstall the Entware core"
-    printf '%b\n' "  ${GREEN}doctor${NC}           Check the TV and the install, and say what to fix"
-    printf '%b\n' "  ${GREEN}help${NC}             Show this help"
-    printf '%b\n' "  Anything else is passed straight to opkg, e.g. ent list-installed"
-}
-
-refresh_cache() { $OPKG_BIN list 2>/dev/null | awk '{print $1}' > "$CACHE"; }
-
-# ent search: in a terminal, one block per package (name, version, whether
-# it's installed, then the description wrapped to the screen and cut to two
-# lines), with name matches first. Piped, plain "name - version - description"
-# lines for scripts. ENT_FORMAT=pretty or plain overrides.
-search_pkgs() {
-    if [ -z "$1" ]; then
-        printf '%b\n' "${RED}Name something to search for, e.g. ent search htop${NC}"
-        exit 1
-    fi
-    matches=$($OPKG_BIN list 2>/dev/null | grep -iF -- "$1")
-    fmt=${ENT_FORMAT:-}
-    [ -n "$fmt" ] || { if [ -t 1 ]; then fmt=pretty; else fmt=plain; fi; }
-    if [ "$fmt" = plain ]; then
-        [ -n "$matches" ] && printf '%s\n' "$matches"
-        return 0
-    fi
-    if [ -z "$matches" ]; then
-        echo "No packages match \"$1\".  Try a shorter word, or run: ent update"
-        return 0
-    fi
-    # An exported COLUMNS wins. Otherwise ask the terminal: webOS's busybox
-    # stty can't report the size, but its tput can
-    cols=${COLUMNS:-}
-    case "$cols" in ''|*[!0-9]*) cols=$(tput cols 2>/dev/null) ;; esac
-    case "$cols" in ''|*[!0-9]*) cols=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}') ;; esac
-    case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
-    case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
-    [ "$cols" -lt 40 ] && cols=40
-    [ "$cols" -gt 100 ] && cols=100
-    ENT_INSTALLED=$($OPKG_BIN list-installed 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
-    export ENT_INSTALLED
-    printf '%s\n' "$matches" | awk -v term="$1" -v width="$cols" '
-        function wrap(s, w,    n, words, i, line, cand, out, e) {
-            n = split(s, words, " "); line = ""; out = ""; e = 0
-            for (i = 1; i <= n; i++) {
-                cand = (line == "") ? words[i] : line " " words[i]
-                if (length(cand) > w && line != "") {
-                    if (e == 1) {
-                        if (length(line) + 3 > w) line = substr(line, 1, w - 3)
-                        return out "    " line "...\n"
-                    }
-                    out = out "    " line "\n"; e++; line = words[i]
-                } else line = cand
-            }
-            return (line == "") ? out : out "    " line "\n"
-        }
-        BEGIN {
-            n = split(ENVIRON["ENT_INSTALLED"], tmp, " ")
-            for (i = 1; i <= n; i++) inst[tmp[i]] = 1
-            lt = tolower(term)
-        }
-        {
-            name = $1; rest = $0; sub(/^[^ ]+ - /, "", rest)
-            ver = rest; desc = ""
-            if (index(rest, " - ")) { sub(/ - .*/, "", ver); desc = rest; sub(/^[^ ]+ - /, "", desc) }
-            gsub(/[ \t]+/, " ", desc)
-            e = "\033[1;32m" name "\033[0m  \033[0;90m" ver "\033[0m"
-            if (name in inst) { e = e "  \033[0;36m[installed]\033[0m"; ni++ }
-            e = e "\n" (desc == "" ? "" : wrap(desc, width - 4))
-            if (index(tolower(name), lt)) a[++na] = e; else b[++nb] = e
-        }
-        END {
-            total = na + nb
-            printf "\033[0;36m%d %s \"%s\"\033[0m", total, (total == 1 ? "package matches" : "packages match"), term
-            if (ni) printf "  (%d installed)", ni
-            printf "\n\n"
-            for (i = 1; i <= na; i++) printf "%s\n", a[i]
-            if (na && nb) printf "\033[0;90mAlso mentioned in the description:\033[0m\n\n"
-            for (i = 1; i <= nb; i++) printf "%s\n", b[i]
-            printf "\033[0;90mMore about one: ent info <name>\033[0m\n"
-        }'
-}
-need_pkg() { [ -n "$1" ] || { printf '%b\n' "${RED}Name a package, e.g. ent $2 htop${NC}"; exit 1; }; }
-
-case "$1" in
-  search) shift; search_pkgs "$1" ;;
-  install) shift; need_pkg "$1" install; $OPKG_BIN install "$@" || exit $?
-    # Setup some packages need on webOS: nano's syntax colors, HTTPS
-    # certificates for OpenSSL and Python, and locate (mlocate)
-    [ -f "$MANAGER" ] && sh "$MANAGER" post-install "$@" ;;
-  remove) shift; need_pkg "$1" remove; $OPKG_BIN remove "$@" ;;
-  info) shift; need_pkg "$1" info; $OPKG_BIN info "$@" ;;
-  files) shift; need_pkg "$1" files; $OPKG_BIN files "$@" ;;
-  owns) shift
-    [ -n "$1" ] || { printf '%b\n' "${RED}Name a file or command, e.g. ent owns nano${NC}"; exit 1; }
-    for f in "$@"; do
-        case "$f" in
-            /*) p="$f" ;;
-            */*) p="$(pwd)/$f" ;;
-            *) p=$(command -v -- "$f" 2>/dev/null) || p="" ;;
-        esac
-        if [ -z "$p" ] || { [ ! -e "$p" ] && [ ! -L "$p" ]; }; then
-            echo "$f: not found"
-            continue
-        fi
-        # opkg records /opt paths, not the folder behind the bind mount
-        p=$(printf '%s\n' "$p" | sed -e 's#^/mnt/lg/user/opt/#/opt/#' -e 's#^/mnt/lg/appstore/entware/#/opt/#')
-        r=$(readlink -f "$p" 2>/dev/null | sed -e 's#^/mnt/lg/user/opt/#/opt/#' -e 's#^/mnt/lg/appstore/entware/#/opt/#')
-        out=$({ $OPKG_BIN search "$p"; [ -n "$r" ] && [ "$r" != "$p" ] && $OPKG_BIN search "$r"; } 2>/dev/null | sort -u)
-        if [ -n "$out" ]; then
-            printf '%s: %s\n' "$f" "$(echo "$out" | awk '{print $1}' | tr '\n' ' ')"
-        else
-            case "${r:-$p}" in
-                /opt/*) echo "$f: in Entware's folder but not from a package (${r:-$p})" ;;
-                *) echo "$f: part of webOS, not Entware (${r:-$p})" ;;
-            esac
-        fi
-    done ;;
-  du) n=${2:-15}
-    case "$n" in *[!0-9]*|'') n=15 ;; esac
-    printf '%b\n' "${CYAN}Largest installed packages${NC}"
-    for l in /opt/lib/opkg/info/*.list; do
-        [ -f "$l" ] || continue
-        kb=$(while IFS= read -r f; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done < "$l" |
-            tr '\n' '\0' | xargs -0 -r du -k 2>/dev/null | awk '{s+=$1} END {print s+0}')
-        pkg=${l##*/}
-        echo "$kb ${pkg%.list}"
-    done | sort -rn | head -n "$n" | awk '{printf "  %7.1f MB  %s\n", $1/1024, $2}'
-    echo
-    printf 'Entware in total:  %s\n' "$(du -sh /opt/ 2>/dev/null | awk '{print $1}')"
-    printf 'Free where Entware lives: %s\n' "$(df -h /opt/ 2>/dev/null | awk 'NR==2 {print $(NF-2)}')"
-    printf 'Free on user data (webOS needs some): %s\n' "$(df -h /mnt/lg/user 2>/dev/null | awk 'NR==2 {print $(NF-2)}')" ;;
-  update) $OPKG_BIN update && refresh_cache ;;
-  upgradable) $OPKG_BIN list-upgradable ;;
-  upgrade) $OPKG_BIN update && refresh_cache && $OPKG_BIN upgrade ;;
-  list) $OPKG_BIN list-installed ;;
-  repair) $OPKG_BIN update && refresh_cache && $OPKG_BIN install entware-opt ;;
-  doctor|status) [ -f "$MANAGER" ] || { echo "$MANAGER is missing. Run the installer's doctor instead."; exit 1; }
-    exec sh "$MANAGER" status ;;
-  help|-h|--help|"") print_usage ;;
-  *) exec $OPKG_BIN "$@" ;;
-esac
-ENTWRAP
-
-    chmod +x /opt/bin/entwrap
-    ln -sf /opt/bin/entwrap /opt/bin/ent
+    # ent and entwrap are written with tv (write_tv_cli): one script, two names
 
     # Keep a copy of this script, since /tmp is wiped on reboot
     if [ -f "$SELF" ] && grep -qs "$MARKER" "$SELF"; then
@@ -1164,7 +996,7 @@ _entwrap_complete() {
 _webos_entware_complete() {
     [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "install uninstall status doctor locate upgrade addons add remove info password web move app-update installed search pkg-add pkg-remove logs log --help" -- "${COMP_WORDS[1]}") )
 }
-complete -F _entwrap_complete entwrap ent opkg
+complete -F _entwrap_complete opkg
 complete -F _webos_entware_complete webos-entware
 # App IDs for launch, close and applog, from a list webos-tv apps keeps
 _webos_tv_apps() {
@@ -1195,9 +1027,15 @@ _tv() {
     case "${COMP_WORDS[1]}" in -y|--yes) o=2 ;; esac
     cmd=${COMP_WORDS[o]} sub=${COMP_WORDS[o + 1]} pos=$((COMP_CWORD - o))
     COMPREPLY=()
-    local all="info search show install remove browse list files owns why du cleanup update upgrade upgradable
-        addon svc share apps launch close running app open youtube toast shot volume mute input screen power reboot
-        settings top temp space ports where logs net wake usb report serve qr backup restore autostart keys done help doctor"
+    local all mode=tv
+    case "${COMP_WORDS[0]##*/}" in ent|entwrap) mode=ent ;; esac
+    if [ "$mode" = ent ]; then
+        all="search show install remove browse list files owns why du cleanup update upgrade upgradable repair
+            addon svc share where doctor help"
+    else
+        all="info apps launch close running app open youtube toast shot volume mute input screen power reboot
+            settings top temp space ports logs net wake usb report serve qr backup restore autostart keys done help"
+    fi
     if [ "$pos" -le 0 ]; then
         words=$all
         COMPREPLY=( $(compgen -W "$words" -- "$cur") )
@@ -1205,6 +1043,7 @@ _tv() {
     fi
     case "$cmd" in
         search|install|show) words=$(_ent_available) ;;
+        info) [ "$mode" = ent ] && [ "$pos" -eq 1 ] && words=$(_ent_available) ;;
         remove|uninstall|files|why|upgrade) words=$(_ent_installed) ;;
         owns|where|which) COMPREPLY=( $(compgen -c -- "$cur") ); return 0 ;;
         done) [ "$pos" -eq 1 ] && COMPREPLY=( $(compgen -c -- "$cur") ) || COMPREPLY=( $(compgen -f -- "$cur") ); return 0 ;;
@@ -1237,11 +1076,11 @@ _tv() {
     esac
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
-complete -F _tv tv
+complete -F _tv tv ent entwrap
 COMPLETION
 
     /opt/bin/opkg list 2>/dev/null | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
-    success "Installed the ent helper, tab completion and the webos-entware command."
+    success "Installed tab completion and the webos-entware command."
 }
 
 # === Bash Profile & Environment ===
@@ -1334,11 +1173,11 @@ findf() {
 helpme() {
     RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
     echo -e "${CYAN}== WebOS SSH Quick Commands ==${NC}"
-    echo -e "${CYAN}All in one:${NC}   ${GREEN}tv${NC} (tv help lists everything, and Tab completes)"
+    echo -e "${CYAN}The TV:${NC}       ${GREEN}tv${NC} (tv help lists everything, and Tab completes)"
     echo -e "${CYAN}Navigation:${NC}  ${GREEN}.. ...${NC}"
     echo -e "${CYAN}File Ops:${NC}     ${GREEN}ls ll la lt tr0${NC}"
     echo -e "${CYAN}Sys Info:${NC}     ${GREEN}myip netinfo dfh up${NC}"
-    echo -e "${CYAN}Entware:${NC}      ${GREEN}ent help, ent search, ent install, ent doctor${NC}"
+    echo -e "${CYAN}Entware:${NC}      ${GREEN}ent${NC} (ent help: search, install, addon, svc, doctor...)"
     echo -e "${CYAN}Manager:${NC}      ${GREEN}webos-entware status | install | uninstall | locate${NC}"
     echo -e "${CYAN}TV:${NC}           ${GREEN}toast launch close apps applog tvshot${NC} (webos-tv help)"
     echo -e "${CYAN}Utils:${NC}        ${GREEN}edit findf reboot_safe${NC}"
@@ -1643,22 +1482,24 @@ WEBOSTV
     success "Installed the webOS helpers: $TV_COMMANDS (webos-tv help)."
 }
 
-# tv: one command for packages, add-ons, services, apps, the screen and the
-# system, with tab completion.  It hands off to ent, webos-tv and
-# webos-entware where they already do the job, so those keep working.
+# tv and ent: one script under two names, with tab completion.  As tv it
+# works the TV (apps, the screen, the system, files, automation).  As ent it
+# works Entware (packages, add-ons, services) and passes anything else to
+# opkg, as ent always did.  It hands off to webos-tv and webos-entware where
+# they already do the job, so those keep working.
 write_tv_cli() {
-    if [ -e "$TV_CLI" ] && ! grep -qs "^# tv: Entware and the TV" "$TV_CLI"; then
-        info "Skipped the tv command: $TV_CLI is something else."
-        return 0
-    fi
-    cat > "$TV_CLI" << 'TVCLI'
+    mkdir -p "${CLI%/*}"
+    cat > "$CLI" << 'TVCLI'
 #!/bin/sh
-# tv: Entware and the TV, in one command (webos-entware-installer)
-# tv help lists everything.  ent, webos-entware and webos-tv still work.
+# tv and ent: Entware and the TV (webos-entware-installer)
+# Run as tv, it works the TV.  Run as ent (or entwrap), it works Entware's
+# packages, add-ons and services.  tv help and ent help list everything.
 PATH="/opt/bin:/opt/sbin:$PATH"
 MGR=${TV_MGR:-/opt/bin/webos-entware}
 WTV=${TV_WTV:-/opt/bin/webos-tv}
-ENT=${TV_ENT:-/opt/bin/entwrap}
+OPKG=${TV_OPKG:-/opt/bin/opkg}
+CACHE=/opt/tmp/entpkg-cache.txt
+case "${0##*/}" in ent|entwrap|ent.sh) MODE=ent ;; *) MODE=tv ;; esac
 HBC_BIN=${TV_HBC_BIN:-/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin}
 APP_DIR=${TV_APP_DIR:-/media/developer/apps/usr/palm/applications/org.ohmybahgosh.entware}
 INITD=${TV_INITD:-/opt/etc/init.d}
@@ -1711,40 +1552,13 @@ num_ok() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
 
 # ---------------------------------------------------------------- help
 
-usage() {
+tv_usage() {
     cat << EOF
-${B}tv${N}: Entware and your TV, in one command.  ${D}tv help <command> shows examples.  Tab completes.${N}
+${B}tv${N}: your TV, from the shell.  ${D}tv help <command> shows examples.  Tab completes.${N}
 
 ${C}Overview${N}
-  tv                    How the TV and Entware are doing, and what to fix
+  tv                    How the TV is doing, and what's on screen
   tv info               Model, webOS, network, CPU, memory and storage
-
-${C}Packages${N}
-  tv search <word>      Search Entware's packages
-  tv show <pkg>         All about one package: description, size, what it adds
-  tv install <pkg>...   Install packages, with the webOS setup some need
-  tv remove <pkg>...    Remove packages (not ones Entware needs)
-  tv browse [category]  Packages by category, like the TV app's Browse
-  tv list [text]        What's installed
-  tv files <pkg>        The files a package installed
-  tv owns <file|cmd>    Which package a file or command came from
-  tv why <pkg>          What needs a package
-  tv du [count]         The biggest installed packages
-  tv cleanup            Remove packages nothing needs any more
-  tv update             Refresh the package list
-  tv upgrade [pkg]      Update everything, or one package
-  tv upgradable         What has an update
-
-${C}Add-ons and services${N}
-  tv addon [list]                 The add-ons and their state
-  tv addon add|remove <name>      Add or remove one, with its setup
-  tv addon info <name>            Its address and password
-  tv addon password <name>        A new password (--ask to type your own)
-  tv svc [list]                   Entware's services and whether they run
-  tv svc start|stop|restart <name>
-  tv svc enable|disable <name>    Start it at boot, or not
-  tv svc logs <name>              What it logged
-  tv share                        Every address for File Browser, Samba and the rest
 
 ${C}Apps${N}
   tv apps [-a] [text]   Apps and their IDs (* running)
@@ -1772,7 +1586,6 @@ ${C}System${N}
   tv temp               How hot the chip is
   tv space [clean]      What's using storage, and safe things to clear
   tv ports              What's listening on the network, and who it is
-  tv where <command>    Where a command comes from, and which one runs
   tv logs [boot|tasks|text]   The system log, the boot log or the app's tasks
   tv net [test|speed <host>]  Network details, a connection test, a speed test
   tv wake <mac>         Wake another device on the network
@@ -1794,9 +1607,52 @@ ${C}Automation${N}
   tv keys remove <n>
   tv done <command>     Run a command, then pop up on the TV when it's done
 
-${D}-y answers yes to questions.  ent, webos-entware, webos-tv, toast, launch, close, apps, applog and tvshot still work.${N}
+${D}Packages, add-ons and services are ent: ent help.  -y answers yes to questions.
+webos-tv, toast, launch, close, apps, applog and tvshot still work.${N}
 EOF
 }
+ent_usage() {
+    cat << EOF
+${B}ent${N}: Entware's packages, add-ons and services.  ${D}ent help <command> shows examples.  Tab completes.${N}
+
+${C}Packages${N}
+  ent search <word>     Search Entware's packages
+  ent show <pkg>        All about one package: description, size, what it adds
+  ent install <pkg>...  Install packages, with the webOS setup some need
+  ent remove <pkg>...   Remove packages (not ones Entware needs)
+  ent browse [category] Packages by category, like the TV app's Browse
+  ent list [text]       What's installed
+  ent files <pkg>       The files a package installed
+  ent owns <file|cmd>   Which package a file or command came from
+  ent why <pkg>         What needs a package
+  ent du [count]        The biggest installed packages, and free space
+  ent cleanup           Remove packages nothing needs any more
+  ent update            Refresh the package list
+  ent upgrade [pkg]     Update everything, or one package
+  ent upgradable        What has an update
+  ent repair            Reinstall Entware's core
+
+${C}Add-ons and services${N}
+  ent addon [list]                The add-ons and their state
+  ent addon add|remove <name>     Add or remove one, with its setup
+  ent addon info <name>           Its address and password
+  ent addon password <name>       A new password (--ask to type your own)
+  ent svc [list]                  Entware's services and whether they run
+  ent svc start|stop|restart <name>
+  ent svc enable|disable <name>   Start it at boot, or not
+  ent svc logs <name>             What it logged
+  ent share                       Every address for File Browser, Samba and the rest
+
+${C}Checks${N}
+  ent                   How Entware is doing
+  ent where <command>   Where a command comes from, and which one runs
+  ent doctor            Check Entware and the TV, and say what to fix
+
+${D}Anything else goes straight to opkg, e.g. ent list-installed.  -y answers yes to questions.
+The TV itself is tv: tv help.  webos-entware still works.${N}
+EOF
+}
+usage() { if [ "$MODE" = ent ]; then ent_usage; else tv_usage; fi; }
 
 # Examples for one command
 help_for() {
@@ -1846,26 +1702,28 @@ the same network.  Ctrl+C stops it.  Anyone on your network can read the
 folder while it runs.
 EOF
             ;;
-        *) usage | grep -E "^  tv $1( |\$)" || say "No examples for $1.  tv help lists everything." ;;
+        *) usage | grep -E "^  $MODE $1( |\$)" || say "No examples for $1.  $MODE help lists everything." ;;
     esac
 }
 
 # ---------------------------------------------------------------- overview
 
-dashboard() {
+# Entware's state, from webos-entware status --json
+ent_state() {
     need_mgr
     s=$("$MGR" status --json 2>/dev/null)
-    [ -n "$s" ] || die "Couldn't read the TV's status.  Try: webos-entware doctor"
-    up=$(awk '{ s = int($1); d = int(s / 86400); h = int(s % 86400 / 3600); m = int(s % 3600 / 60)
-        if (d) printf "%dd %dh", d, h; else if (h) printf "%dh %dm", h, m; else printf "%dm", m }' /proc/uptime 2>/dev/null)
-    head1 "$(jval "$s" model)  ·  $(jval "$s" webos) ($(jval "$s" webosRelease))  ·  $(jval "$s" ip)  ·  up $up"
+    [ -n "$s" ] || die "Couldn't read Entware's status.  Try: ent doctor"
+}
+issues_of() { printf '%s' "$1" | sed -n 's/.*"issues":\[\([^]]*\)\].*/\1/p' | sed 's/","/\n/g; s/^"//; s/"$//' | grep -v '^$'; }
+ent_dashboard() {
+    ent_state
     if [ "$(jval "$s" installed)" != true ]; then
         say "Entware isn't installed.  Install it from the TV app, or: webos-entware install"
         return
     fi
     loc=$(jval "$s" location)
     [ "$loc" = appstore ] && loc="app storage" || loc="user data"
-    say "Entware $(jval "$s" version) on $loc  ·  $(jval "$s" packages) packages  ·  $(jval "$s" freeMB) MB free"
+    head1 "Entware $(jval "$s" version) on $loc  ·  $(jval "$s" packages) packages  ·  $(jval "$s" freeMB) MB free"
     svcs=$(svc_names)
     if [ -n "$svcs" ]; then
         line=""
@@ -1875,15 +1733,46 @@ dashboard() {
         say "Services:$line"
     fi
     u=$(jval "$s" updates)
-    if num_ok "$u" && [ "$u" -gt 0 ]; then say "${Y}Updates: $u package(s).  tv upgrade${N}"; fi
-    issues=$(printf '%s' "$s" | sed -n 's/.*"issues":\[\([^]]*\)\].*/\1/p' | sed 's/","/\n/g; s/^"//; s/"$//')
+    if num_ok "$u" && [ "$u" -gt 0 ]; then say "${Y}Updates: $u package(s).  ent upgrade${N}"; fi
+    issues=$(issues_of "$s")
     if [ -n "$issues" ]; then
         say "${R}Problems:${N}"
         printf '%s\n' "$issues" | sed 's/^/  /'
     else
         say "${G}No problems found.${N}"
     fi
-    say "${D}tv help lists everything.${N}"
+    say "${D}ent help lists everything.${N}"
+}
+tv_dashboard() {
+    ent_state
+    up=$(awk '{ s = int($1); d = int(s / 86400); h = int(s % 86400 / 3600); m = int(s % 3600 / 60)
+        if (d) printf "%dd %dh", d, h; else if (h) printf "%dh %dm", h, m; else printf "%dm", m }' /proc/uptime 2>/dev/null)
+    head1 "$(jval "$s" model)  ·  $(jval "$s" webos) ($(jval "$s" webosRelease))  ·  $(jval "$s" ip)  ·  up $up"
+    if have luna-send; then
+        f=$(jval "$(luna "$SAM/getForegroundAppInfo" '{}')" appId)
+        v=$(jval "$(luna luna://com.webos.service.audio/master/getVolume '{}')" volume)
+        line="On screen: ${f:-nothing}"
+        [ -n "$v" ] && line="$line  ·  volume $v"
+        say "$line"
+    fi
+    say "Memory $(awk '/^MemTotal/ { t = $2 } /^MemAvailable/ { a = $2 } END { if (t) printf "%d%% used", (t - a) * 100 / t }' /proc/meminfo 2>/dev/null)  ·  load $(cut -d' ' -f1 /proc/loadavg 2>/dev/null)"
+    if [ "$(jval "$s" installed)" != true ]; then
+        say "Entware isn't installed.  Install it from the TV app, or: webos-entware install"
+    else
+        line="Entware $(jval "$s" version)  ·  $(jval "$s" packages) packages"
+        total=0 up=0
+        for n in $(svc_names); do total=$((total + 1)); svc_running "$n" && up=$((up + 1)); done
+        [ "$total" -gt 0 ] && line="$line  ·  $up of $total services running"
+        n=$(issues_of "$s" | wc -l | tr -d ' ')
+        if [ "$n" -gt 0 ]; then
+            [ "$n" = 1 ] && w=problem || w=problems
+            line="$line  ·  ${R}$n $w: ent doctor${N}"
+        else
+            line="$line  ·  ${G}no problems${N}"
+        fi
+        say "$line"
+    fi
+    say "${D}tv help lists everything.  ent runs Entware.${N}"
 }
 
 info_cmd() {
@@ -1921,43 +1810,55 @@ pick() { # a fuzzy pick from stdin, when fzf is there
 catalog_lines() { "$MGR" catalog --json 2>/dev/null | sed 's/},{/}\n{/g' | sed -n 's/.*"n":"\([^"]*\)".*"d":"\([^"]*\)".*/\1\t\2/p'; }
 
 pkg_install() {
+    case " $* " in *" -"*)
+        "$OPKG" install "$@" || exit $?
+        [ -f "$MGR" ] && exec sh "$MGR" post-install "$@"
+        exit 0 ;;
+    esac
     need_mgr
     if [ $# -eq 0 ]; then
-        p=$(catalog_lines | pick install) || die "Name a package, e.g. tv install htop.  tv search finds them."
+        p=$(catalog_lines | pick install) || die "Name a package, e.g. ent install htop.  ent search finds them."
         [ -n "$p" ] || exit 1
         set -- "$p"
     fi
     rc=0
     for p in "$@"; do
         pkg_ok "$p" || die "That isn't a package name: $p"
-        "$MGR" pkg-add "$p" || rc=1
+        if [ -f "/opt/lib/opkg/info/$p.control" ]; then
+            # Already there: run its webOS setup again, as ent install always did
+            say "$p is already installed."
+            sh "$MGR" post-install "$p" || rc=1
+        else
+            "$MGR" pkg-add "$p" || rc=1
+        fi
     done
     exit "$rc"
 }
 pkg_remove() {
     need_mgr
     if [ $# -eq 0 ]; then
-        p=$("$MGR" installed 2>/dev/null | sed -n 's/^  \([^ ]*\) .*/\1/p' | pick remove) || die "Name a package, e.g. tv remove htop.  tv list shows them."
+        p=$("$MGR" installed 2>/dev/null | sed -n 's/^  \([^ ]*\) .*/\1/p' | pick remove) || die "Name a package, e.g. ent remove htop.  ent list shows them."
         [ -n "$p" ] || exit 1
         set -- "$p"
     fi
     rc=0
     for p in "$@"; do
         pkg_ok "$p" || die "That isn't a package name: $p"
-        confirm "Remove $p?" || { say "Kept $p."; continue; }
+        # Asks in a terminal.  From a script it just removes, as ent always did
+        if [ -t 0 ]; then confirm "Remove $p?" || { say "Kept $p."; continue; }; fi
         "$MGR" pkg-remove "$p" -y || rc=1
     done
     exit "$rc"
 }
 pkg_why() {
-    pkg_ok "$1" || die "Name a package, e.g. tv why libncurses"
+    pkg_ok "$1" || die "Name a package, e.g. ent why libncurses"
     line=$("$MGR" installed --json 2>/dev/null | sed 's/},{/}\n{/g' | grep "\"name\":\"$1\"")
     [ -n "$line" ] || die "$1 isn't installed."
     by=$(jval "$line" neededBy) addon=$(jval "$line" addonTitle)
     if [ "$(jval "$line" base)" = true ]; then say "$1 is part of Entware or its shell setup."; fi
     [ -n "$addon" ] && say "$1 came with the $addon add-on."
     if [ -n "$by" ]; then say "$1 is needed by: $by"
-    elif [ "$(jval "$line" auto)" = true ]; then say "Nothing needs $1 any more.  tv cleanup removes packages like it."
+    elif [ "$(jval "$line" auto)" = true ]; then say "Nothing needs $1 any more.  ent cleanup removes packages like it."
     else say "Nothing else needs $1.  You installed it yourself."; fi
 }
 # Packages that came in as something's dependency and nothing needs now
@@ -1996,10 +1897,10 @@ browse() {
                 list.forEach((p) => (by[catOf(p)] = by[catOf(p)] || []).push(p));
                 if (!want) {
                     C.cats.forEach((c) => { if (by[c.id]) console.log("  " + c.id.padEnd(11) + String(by[c.id].length).padStart(4) + "  " + c.title); });
-                    console.log("tv browse <category> lists one, like: tv browse files"); return;
+                    console.log("ent browse <category> lists one, like: ent browse files"); return;
                 }
                 const c = C.cats.find((x) => x.id === want || x.title.toLowerCase().startsWith(want));
-                if (!c) { console.error("No category called " + want + ". tv browse lists them."); process.exit(1); }
+                if (!c) { console.error("No category called " + want + ". ent browse lists them."); process.exit(1); }
                 const rank = (p) => (C.featured.indexOf(p.n) + 1 || (C.blurbs[p.n] ? 100 : 1000));
                 (by[c.id] || []).sort((a, b) => rank(a) - rank(b) || (a.n < b.n ? -1 : 1)).forEach((p) =>
                     console.log("  " + p.n.padEnd(24) + " " + (C.blurbs[p.n] || p.d).slice(0, 90)));
@@ -2014,6 +1915,119 @@ browse() {
     fi
 }
 
+refresh_cache() { "$OPKG" list 2>/dev/null | awk '{print $1}' > "$CACHE"; }
+
+# ent search: in a terminal, one block per package (name, version, whether
+# it's installed, then the description wrapped to the screen and cut to two
+# lines), with name matches first.  Piped, plain "name - version - description"
+# lines for scripts.  ENT_FORMAT=pretty or plain overrides.
+ent_search() {
+    [ -n "$1" ] || die "Name something to search for, e.g. ent search htop"
+    matches=$("$OPKG" list 2>/dev/null | grep -iF -- "$1")
+    fmt=${ENT_FORMAT:-}
+    [ -n "$fmt" ] || { if [ -t 1 ]; then fmt=pretty; else fmt=plain; fi; }
+    if [ "$fmt" = plain ]; then
+        [ -n "$matches" ] && printf '%s\n' "$matches"
+        return 0
+    fi
+    if [ -z "$matches" ]; then
+        echo "No packages match \"$1\".  Try a shorter word, or run: ent update"
+        return 0
+    fi
+    # An exported COLUMNS wins.  Otherwise ask the terminal: webOS's busybox
+    # stty can't report the size, but its tput can
+    cols=${COLUMNS:-}
+    case "$cols" in ''|*[!0-9]*) cols=$(tput cols 2>/dev/null) ;; esac
+    case "$cols" in ''|*[!0-9]*) cols=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}') ;; esac
+    case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
+    [ "$cols" -lt 40 ] && cols=40
+    [ "$cols" -gt 100 ] && cols=100
+    ENT_INSTALLED=$("$OPKG" list-installed 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+    export ENT_INSTALLED
+    printf '%s\n' "$matches" | awk -v term="$1" -v width="$cols" '
+        function wrap(s, w,    n, words, i, line, cand, out, e) {
+            n = split(s, words, " "); line = ""; out = ""; e = 0
+            for (i = 1; i <= n; i++) {
+                cand = (line == "") ? words[i] : line " " words[i]
+                if (length(cand) > w && line != "") {
+                    if (e == 1) {
+                        if (length(line) + 3 > w) line = substr(line, 1, w - 3)
+                        return out "    " line "...\n"
+                    }
+                    out = out "    " line "\n"; e++; line = words[i]
+                } else line = cand
+            }
+            return (line == "") ? out : out "    " line "\n"
+        }
+        BEGIN {
+            n = split(ENVIRON["ENT_INSTALLED"], tmp, " ")
+            for (i = 1; i <= n; i++) inst[tmp[i]] = 1
+            lt = tolower(term)
+        }
+        {
+            name = $1; rest = $0; sub(/^[^ ]+ - /, "", rest)
+            ver = rest; desc = ""
+            if (index(rest, " - ")) { sub(/ - .*/, "", ver); desc = rest; sub(/^[^ ]+ - /, "", desc) }
+            gsub(/[ \t]+/, " ", desc)
+            e = "\033[1;32m" name "\033[0m  \033[0;90m" ver "\033[0m"
+            if (name in inst) { e = e "  \033[0;36m[installed]\033[0m"; ni++ }
+            e = e "\n" (desc == "" ? "" : wrap(desc, width - 4))
+            if (index(tolower(name), lt)) a[++na] = e; else b[++nb] = e
+        }
+        END {
+            total = na + nb
+            printf "\033[0;36m%d %s \"%s\"\033[0m", total, (total == 1 ? "package matches" : "packages match"), term
+            if (ni) printf "  (%d installed)", ni
+            printf "\n\n"
+            for (i = 1; i <= na; i++) printf "%s\n", a[i]
+            if (na && nb) printf "\033[0;90mAlso mentioned in the description:\033[0m\n\n"
+            for (i = 1; i <= nb; i++) printf "%s\n", b[i]
+            printf "\033[0;90mMore about one: ent show <name>\033[0m\n"
+        }'
+}
+ent_owns() {
+    [ -n "$1" ] || die "Name a file or command, e.g. ent owns nano"
+    for f in "$@"; do
+        case "$f" in
+            /*) p="$f" ;;
+            */*) p="$(pwd)/$f" ;;
+            *) p=$(command -v -- "$f" 2>/dev/null) || p="" ;;
+        esac
+        if [ -z "$p" ] || { [ ! -e "$p" ] && [ ! -L "$p" ]; }; then
+            echo "$f: not found"
+            continue
+        fi
+        # opkg records /opt paths, not the folder behind the bind mount
+        p=$(printf '%s\n' "$p" | sed -e 's#^/mnt/lg/user/opt/#/opt/#' -e 's#^/mnt/lg/appstore/entware/#/opt/#')
+        r=$(readlink -f "$p" 2>/dev/null | sed -e 's#^/mnt/lg/user/opt/#/opt/#' -e 's#^/mnt/lg/appstore/entware/#/opt/#')
+        out=$({ "$OPKG" search "$p"; [ -n "$r" ] && [ "$r" != "$p" ] && "$OPKG" search "$r"; } 2>/dev/null | sort -u)
+        if [ -n "$out" ]; then
+            printf '%s: %s\n' "$f" "$(echo "$out" | awk '{print $1}' | tr '\n' ' ')"
+        else
+            case "${r:-$p}" in
+                /opt/*) echo "$f: in Entware's folder but not from a package (${r:-$p})" ;;
+                *) echo "$f: part of webOS, not Entware (${r:-$p})" ;;
+            esac
+        fi
+    done
+}
+ent_du() {
+    n=${1:-15}
+    case "$n" in *[!0-9]*|'') n=15 ;; esac
+    say "${C}Largest installed packages${N}"
+    for l in /opt/lib/opkg/info/*.list; do
+        [ -f "$l" ] || continue
+        k=$(while IFS= read -r f; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done < "$l" |
+            tr '\n' '\0' | xargs -0 -r du -k 2>/dev/null | awk '{s+=$1} END {print s+0}')
+        p=${l##*/}
+        echo "$k ${p%.list}"
+    done | sort -rn | head -n "$n" | awk '{printf "  %7.1f MB  %s\n", $1/1024, $2}'
+    echo
+    printf 'Entware in total:  %s\n' "$(du -sh /opt/ 2>/dev/null | awk '{print $1}')"
+    printf 'Free where Entware lives: %s\n' "$(df -h /opt/ 2>/dev/null | awk 'NR==2 {print $(NF-2)}')"
+    printf 'Free on user data (webOS needs some): %s\n' "$(df -h /mnt/lg/user 2>/dev/null | awk 'NR==2 {print $(NF-2)}')"
+}
+
 # ---------------------------------------------------------------- services
 
 # Entware's services: the init scripts, by name without their S00 prefix
@@ -2026,7 +2040,7 @@ svc_cmd() {
     sub=$1 n=$2
     if [ -z "$sub" ] || [ "$sub" = list ]; then
         names=$(svc_names)
-        [ -n "$names" ] || { say "No Entware services are installed.  tv addon lists ones with their setup."; return 0; }
+        [ -n "$names" ] || { say "No Entware services are installed.  ent addon lists ones with their setup."; return 0; }
         printf '%s\n' "$names" | while read -r s; do
             if svc_running "$s"; then st="${G}running${N}"; else st="${D}stopped${N}"; fi
             if svc_enabled "$s"; then bt="starts at boot"; else bt="${D}off at boot${N}"; fi
@@ -2034,21 +2048,21 @@ svc_cmd() {
         done
         return 0
     fi
-    [ -n "$n" ] || die "Name a service, e.g. tv svc $sub smb.  tv svc lists them."
-    f=$(svc_file "$n") || die "There's no service called $n.  tv svc lists them."
+    [ -n "$n" ] || die "Name a service, e.g. ent svc $sub smb.  ent svc lists them."
+    f=$(svc_file "$n") || die "There's no service called $n.  ent svc lists them."
     case "$sub" in
         status) if svc_running "$n"; then say "$n is running."; else say "$n is stopped."; fi
             if svc_enabled "$n"; then say "It starts at boot."; else say "It doesn't start at boot."; fi ;;
         start|stop|restart)
-            [ "$sub" = stop ] || svc_enabled "$n" || die "$n is off at boot, so its script won't start it.  Turn it on first: tv svc enable $n"
+            [ "$sub" = stop ] || svc_enabled "$n" || die "$n is off at boot, so its script won't start it.  Turn it on first: ent svc enable $n"
             [ "$sub" = start ] || sh "$f" stop < /dev/null > /dev/null 2>&1
             if [ "$sub" != stop ]; then
                 if have setsid; then setsid "$f" start < /dev/null > /dev/null 2>&1; else "$f" start < /dev/null > /dev/null 2>&1; fi
             fi
             sleep 1
             if svc_running "$n"; then say "$n is running."; else say "$n is stopped."; fi ;;
-        enable) sed -i 's/^ENABLED=no/ENABLED=yes/' "$f"; chmod 755 "$f"; say "$n starts at boot.  tv svc start $n starts it now." ;;
-        disable) sed -i 's/^ENABLED=yes/ENABLED=no/' "$f"; chmod 644 "$f"; say "$n won't start at boot.  tv svc stop $n stops it now." ;;
+        enable) sed -i 's/^ENABLED=no/ENABLED=yes/' "$f"; chmod 755 "$f"; say "$n starts at boot.  ent svc start $n starts it now." ;;
+        disable) sed -i 's/^ENABLED=yes/ENABLED=no/' "$f"; chmod 644 "$f"; say "$n won't start at boot.  ent svc stop $n stops it now." ;;
         logs)
             found=0
             for l in /opt/var/log/"$n"*.log /opt/var/log/"$(svc_proc "$n")"*.log; do
@@ -2059,7 +2073,7 @@ svc_cmd() {
                 [ -n "$m" ] && { head1 "/var/log/messages"; printf '%s\n' "$m"; found=1; }
             fi
             [ "$found" = 1 ] || say "$n hasn't logged anything." ;;
-        *) die "tv svc $sub isn't a thing.  Try: start, stop, restart, status, enable, disable or logs" ;;
+        *) die "ent svc $sub isn't a thing.  Try: start, stop, restart, status, enable, disable or logs" ;;
     esac
 }
 share() {
@@ -2073,8 +2087,8 @@ share() {
         printf '%s\n' "$out" | grep -v -i 'password\|^\[' | grep -E 'http|smb:|\\\\|address|Open|tailnet' | sed 's/^ */  /'
         said=1
     done
-    if [ "$said" = 0 ]; then say "No sharing add-ons yet.  Try: tv addon add filebrowser (or samba, minidlna, syncthing)"; fi
-    say "Files live in $FILES.  ${D}Passwords: tv addon info <name>${N}"
+    if [ "$said" = 0 ]; then say "No sharing add-ons yet.  Try: ent addon add filebrowser (or samba, minidlna, syncthing)"; fi
+    say "Files live in $FILES.  ${D}Passwords: ent addon info <name>${N}"
     [ -n "$ip" ] && say "${D}The TV is at $ip.${N}"
 }
 
@@ -2296,7 +2310,7 @@ space() {
     done | awk '!seen[$0]++'
     head1 "Biggest in /opt"
     du -sk /opt/* 2>/dev/null | sort -rn | head -n 8 | while read -r s p; do printf '  %-9s %s\n' "$(kb "$s")" "$p"; done
-    say "${D}tv du lists the biggest packages.  tv space clean clears caches and old logs.${N}"
+    say "${D}ent du lists the biggest packages.  tv space clean clears caches and old logs.${N}"
 }
 ports() {
     # Socket inode -> program, from each process's open files
@@ -2325,8 +2339,8 @@ ports() {
     done
 }
 where() {
-    [ -n "$1" ] || die "Name a command, e.g. tv where rsync"
-    case "$1" in */*|*[!A-Za-z0-9._+-]*) die "Name a command, e.g. tv where rsync" ;; esac
+    [ -n "$1" ] || die "Name a command, e.g. ent where rsync"
+    case "$1" in */*|*[!A-Za-z0-9._+-]*) die "Name a command, e.g. ent where rsync" ;; esac
     first=$(command -v "$1" 2>/dev/null)
     found=0
     for d in /opt/bin /opt/sbin /opt/usr/bin "$HBC_BIN" /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do
@@ -2334,13 +2348,13 @@ where() {
         [ -x "$f" ] || continue
         found=1
         case "$d" in
-            /opt/*) o=$("$ENT" owns "$f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | head -n 1)
+            /opt/*) o=$(ent_owns "$f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | head -n 1)
                 case "$o" in *"not from a package"*|*"not found"*|'') from="Entware's folder (no package)" ;; *) from="Entware, package $(printf '%s' "${o#*: }" | cut -d' ' -f1)" ;; esac ;;
             "$HBC_BIN") from="the Homebrew Channel" ;;
             *) from="webOS"; [ "$(readlink "$f" 2>/dev/null)" = /bin/busybox ] || [ "$(readlink -f "$f" 2>/dev/null)" = /bin/busybox ] && from="webOS (busybox)" ;;
         esac
         [ "$f" = "$first" ] && mark="${G}runs${N}  " || mark="      "
-        printf '  %s%-40s %s\n' "$mark" "$f" "$from"
+        printf '  %s%-40s  %s\n' "$mark" "$f" "$from"
     done
     [ "$found" = 1 ] || { say "There's no $1 on the TV."; [ -x "$MGR" ] && "$MGR" search "$1" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -v '^[[:space:]]' | awk 'NF { print "  Entware has " $1; if (++n == 3) exit }'; return 1; }
     case "$first" in /*) ;; *) [ -n "$first" ] && say "  (in your shell, $1 is an $first)" ;; esac
@@ -2367,7 +2381,7 @@ net() {
             [ "$bad" = 0 ] && say "Everything answers." ;;
         speed)
             [ -n "$2" ] || die "Name a computer running iperf3 -s, e.g. tv net speed 192.168.1.20"
-            have iperf3 || die "This needs iperf3: tv addon add nettools (or tv install iperf3)"
+            have iperf3 || die "This needs iperf3: ent addon add nettools (or ent install iperf3)"
             say "From the TV:"; iperf3 -c "$2" -t 5 | tail -n 4
             say "To the TV:"; iperf3 -c "$2" -t 5 -R | tail -n 4 ;;
         *)
@@ -2385,7 +2399,7 @@ wake() {
     printf '%s' "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || die "Name a MAC address, e.g. tv wake 00:11:22:33:44:55"
     if have ether-wake; then ether-wake -b "$mac" && { say "Sent a wake-up to $mac."; return; }; fi
     if have etherwake; then etherwake -b "$mac" && { say "Sent a wake-up to $mac."; return; }; fi
-    have node || die "This needs node (webOS has it) or etherwake: tv install etherwake"
+    have node || die "This needs node (webOS has it) or etherwake: ent install etherwake"
     MAC=$mac node -e '
         const m = Buffer.from(process.env.MAC.split(":").map((h) => parseInt(h, 16)));
         const p = Buffer.concat([Buffer.alloc(6, 0xff)].concat(Array(16).fill(m)));
@@ -2457,7 +2471,7 @@ qr() {
         return
     fi
     say "$1"
-    say "${D}(For a QR code here: tv install qrencode)${N}"
+    say "${D}(For a QR code here: ent install qrencode)${N}"
 }
 serve() {
     dir=${1:-.} port=${2:-8000}
@@ -2671,37 +2685,54 @@ if [ "$strip" = 1 ]; then
     shift "$n"
 fi
 
+if [ "$MODE" = ent ]; then
+    case "$cmd" in
+        '') ent_dashboard ;;
+        help|-h|--help) if [ -n "$1" ]; then help_for "$1"; else usage; fi ;;
+        search) ent_search "$1" ;;
+        show|info) need_mgr; pkg_ok "$1" || die "Name a package, e.g. ent show htop"; exec "$MGR" pkginfo "$1" ;;
+        install) pkg_install "$@" ;;
+        remove|uninstall) case " $* " in *" -"*) exec "$OPKG" remove "$@" ;; esac; pkg_remove "$@" ;;
+        browse) browse "$1" ;;
+        list) if [ -n "$1" ]; then "$OPKG" list-installed | grep -i -F -- "$1" || say "Nothing installed matches $1.  ent search $1 looks in Entware."; else exec "$OPKG" list-installed; fi ;;
+        files) [ -n "$1" ] || die "Name a package, e.g. ent files htop"; exec "$OPKG" files "$@" ;;
+        owns) ent_owns "$@" ;;
+        why) pkg_why "$1" ;;
+        du) ent_du "$1" ;;
+        cleanup) cleanup ;;
+        update) "$OPKG" update && refresh_cache ;;
+        upgradable) u=$("$OPKG" list-upgradable 2>/dev/null); if [ -n "$u" ]; then printf '%s\n' "$u"; else say "Everything is up to date.  (ent update refreshes the list first.)"; fi ;;
+        upgrade) need_mgr; [ "$YES" = 1 ] && y=-y || y=""; if [ -n "$1" ]; then exec "$MGR" upgrade "$1" $y; else exec "$MGR" upgrade $y; fi ;;
+        repair) "$OPKG" update && refresh_cache && exec "$OPKG" install entware-opt ;;
+        addon|addons)
+            need_mgr
+            sub=${1:-list}; [ $# -gt 0 ] && shift
+            case "$sub" in
+                list) exec "$MGR" addons ;;
+                add|remove|info|password)
+                    [ -n "$1" ] || die "Name an add-on, e.g. ent addon $sub filebrowser.  ent addon lists them."
+                    n=$1; shift
+                    [ "$YES" = 1 ] && set -- "$@" -y
+                    exec "$MGR" "$sub" "$n" "$@" ;;
+                *) die "Try: ent addon list, add, remove, info or password" ;;
+            esac ;;
+        svc|service|services) svc_cmd "$@" ;;
+        share) share ;;
+        where|which) where "$1" ;;
+        doctor|status) need_mgr; exec "$MGR" status ;;
+        # Anything else is opkg's, as ent always did
+        *) exec "$OPKG" "$cmd" "$@" ;;
+    esac
+    exit
+fi
+
 case "$cmd" in
-    '') dashboard ;;
+    '') tv_dashboard ;;
     help|-h|--help) if [ -n "$1" ]; then help_for "$1"; else usage; fi ;;
     info) info_cmd ;;
-    # Packages
-    list) if [ -n "$1" ]; then "$ENT" list | grep -i -F -- "$1" || say "Nothing installed matches $1.  tv search $1 looks in Entware."; else exec "$ENT" list; fi ;;
-    upgradable) u=$("$ENT" upgradable "$@"); if [ -n "$u" ]; then printf '%s\n' "$u"; else say "Everything is up to date.  (tv update refreshes the list first.)"; fi ;;
-    search|files|owns|du) exec "$ENT" "$cmd" "$@" ;;
-    update) exec "$ENT" update ;;
-    show) need_mgr; pkg_ok "$1" || die "Name a package, e.g. tv show htop"; exec "$MGR" pkginfo "$1" ;;
-    install) pkg_install "$@" ;;
-    remove|uninstall) pkg_remove "$@" ;;
-    browse) browse "$1" ;;
-    why) pkg_why "$1" ;;
-    cleanup) cleanup ;;
-    upgrade) need_mgr; [ "$YES" = 1 ] && y=-y || y=""; if [ -n "$1" ]; then exec "$MGR" upgrade "$1" $y; else exec "$MGR" upgrade $y; fi ;;
-    # Add-ons and services
-    addon|addons)
-        need_mgr
-        sub=${1:-list}; [ $# -gt 0 ] && shift
-        case "$sub" in
-            list) exec "$MGR" addons ;;
-            add|remove|info|password)
-                [ -n "$1" ] || die "Name an add-on, e.g. tv addon $sub filebrowser.  tv addon lists them."
-                n=$1; shift
-                [ "$YES" = 1 ] && set -- "$@" -y
-                exec "$MGR" "$sub" "$n" "$@" ;;
-            *) die "Try: tv addon list, add, remove, info or password" ;;
-        esac ;;
-    svc|service|services) svc_cmd "$@" ;;
-    share) share ;;
+    # Packages, add-ons and services moved to ent
+    search|show|install|remove|uninstall|browse|list|files|owns|why|du|cleanup|update|upgrade|upgradable|repair|addon|addons|svc|service|services|share|where|which|doctor|status)
+        printf '%s\n' "That's ent now: ent $cmd${1:+ $*}" >&2; exit 1 ;;
     # Apps
     apps|launch|close|applog) exec "$WTV" "$cmd" "$@" ;;
     running) running ;;
@@ -2724,7 +2755,6 @@ case "$cmd" in
     temp|temperature) t=$(temp_c); [ -n "$t" ] && say "The chip is at $t °C." || die "The TV doesn't report a temperature here." ;;
     space|disk|df) space "$1" ;;
     ports) ports ;;
-    where|which) where "$1" ;;
     logs|log) logs "$@" ;;
     net|network) net "$@" ;;
     wake|wol) wake "$1" ;;
@@ -2739,13 +2769,20 @@ case "$cmd" in
     autostart|boot) [ "$1" = add ] && case "$2" in -y|--yes) YES=1; n=$3; shift 3; set -- add "$n" "$@" ;; esac; autostart "$@" ;;
     keys|key) keys "$@" ;;
     done) done_cmd "$@" ;;
-    # webos-entware's own commands, for anyone who knows them
-    doctor|status) need_mgr; exec "$MGR" status ;;
     *) printf '%s\n' "tv $cmd isn't a command.  tv help lists them." >&2; exit 1 ;;
 esac
 TVCLI
-    chmod 755 "$TV_CLI"
-    success "Installed the tv command: tv help lists everything, and Tab completes."
+    chmod 755 "$CLI"
+    ln -sf "$CLI" /opt/bin/entwrap
+    ln -sf entwrap /opt/bin/ent
+    if [ -e "$TV_CLI" ] || [ -L "$TV_CLI" ]; then
+        if [ "$(readlink "$TV_CLI")" != "$CLI" ] && ! grep -qs "^# tv\( and ent\)\{0,1\}: Entware and the TV" "$TV_CLI"; then
+            info "Skipped the tv command: $TV_CLI is something else.  (ent still works.)"
+            return 0
+        fi
+    fi
+    ln -sf "$CLI" "$TV_CLI"
+    success "Installed tv and ent: tv help and ent help list everything, and Tab completes."
 }
 
 # The helpers, written again: ent, webos-tv, tv and their tab completion
@@ -4340,10 +4377,10 @@ pkg_info_json() {
             y = val("system"); c = y; sub(/.*\//, "", c)
             if (y ~ /webosbrew/) printf "  %-11s the Homebrew Channel already has %s\n", "Note", c
             else if (y != "") printf "  %-11s webOS already has %s (%s)\n", "Note", c, y
-            if (val("addon") != "") printf "  %-11s %s, %s.%s\n", "Add-on", val("addonTitle"), state(val("addonState")), (val("addonState") == "installed" ? "" : "  tv addon add " val("addon") " sets it up")
+            if (val("addon") != "") printf "  %-11s %s, %s.%s\n", "Add-on", val("addonTitle"), state(val("addonState")), (val("addonState") == "installed" ? "" : "  ent addon add " val("addon") " sets it up")
             if (val("neededBy") != "") printf "  %-11s %s\n", "Needed by", val("neededBy")
             d = val("description"); if (d != "") { print ""; print d }
-            print ""; print (inst ? "tv remove " n " removes it." : "tv install " n " installs it.")
+            print ""; print (inst ? "ent remove " n " removes it." : "ent install " n " installs it.")
         }'
 }
 
@@ -4655,7 +4692,7 @@ install_entware() {
     echo
     show_status
     echo
-    [ "$SETUP_SHELL" = 1 ] && info "Disconnect and SSH in again to get the bash shell. Type 'tv' to see how things are, or 'tv help' for everything."
+    [ "$SETUP_SHELL" = 1 ] && info "Disconnect and SSH in again to get the bash shell. Type 'tv' for the TV and 'ent' for Entware's packages, add-ons and services ('tv help' and 'ent help' list everything)."
     return 0
 }
 
