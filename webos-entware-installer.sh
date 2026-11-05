@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.14.1"
+VERSION="2.15.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -39,6 +39,7 @@ LOCATE_CRON="/opt/etc/cron.hourly/updatedb"
 NANORC="/opt/etc/nanorc"
 TV_HELPER="/opt/bin/webos-tv"
 TV_COMMANDS="toast launch close apps applog tvshot"
+TV_CLI="/opt/bin/tv"
 CA_FILE="/opt/etc/ssl/certs/ca-certificates.crt"
 BANNER_DIR="/opt/etc/webos-entware/banner"
 NEOFETCH_BIN="/opt/bin/neofetch"
@@ -138,6 +139,7 @@ usage() {
     echo "  search <word>  Search Entware's packages (name matches first)"
     echo "  pkginfo <name> All about one package: description, sizes, what else it installs"
     echo "  catalog        Every package a person would pick (--all for libraries too), as JSON"
+    echo "  helpers        Write ent, tv, the webOS helpers and tab completion again"
     echo "  pkg-add <name> Install one Entware package, with its webOS setup"
     echo "  pkg-remove <name>  Uninstall one package (not ones Entware needs)"
     echo "  logs           The boot log and the TV app's recent tasks; log <name> shows one"
@@ -1171,6 +1173,74 @@ _webos_tv_apps() {
     [ "$COMP_CWORD" -eq 1 ] && COMPREPLY=( $(compgen -W "$(cat "$cache" 2>/dev/null)" -- "${COMP_WORDS[1]}") )
 }
 complete -F _webos_tv_apps launch close applog
+# tv: commands, then what each one takes
+_tv_list_addons() {
+    local c=/tmp/.tv-addons
+    [ -s "$c" ] || /opt/bin/webos-entware addons --json 2>/dev/null | sed 's/},{/}\n{/g' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' > "$c"
+    cat "$c" 2>/dev/null
+}
+_tv_list_svcs() { local f; for f in /opt/etc/init.d/S*; do [ -f "$f" ] && f=${f##*/} && echo "${f#S[0-9][0-9]}"; done; }
+_tv_list_apps() { local c=/tmp/.webos-tv-apps; [ -s "$c" ] || webos-tv apps --ids > "$c" 2>/dev/null; cat "$c" 2>/dev/null; }
+_tv_count() { local n=${1:-0} i; for ((i = 1; i <= n; i++)); do echo "$i"; done; }
+_tv_cron_jobs() { crontab -l 2>/dev/null | awk '/^#off# / { n++; next } /^#/ || /^ *$/ || /^[A-Za-z_][A-Za-z0-9_]*=/ { next } { n++ } END { print n + 0 }'; }
+_tv_settings_keys() {
+    case "$1" in
+        picture) echo "backlight brightness contrast color sharpness tint pictureMode energySaving eyeComfortMode dynamicContrast peakBrightness gamma colorGamut truMotionMode noiseReduction superResolution" ;;
+        sound) echo "soundMode soundOutput" ;;
+        option) echo "country audioGuidance" ;;
+        caption) echo "captionEnable" ;;
+    esac
+}
+_tv() {
+    local cur=${COMP_WORDS[COMP_CWORD]} o=1 cmd sub pos words=""
+    case "${COMP_WORDS[1]}" in -y|--yes) o=2 ;; esac
+    cmd=${COMP_WORDS[o]} sub=${COMP_WORDS[o + 1]} pos=$((COMP_CWORD - o))
+    COMPREPLY=()
+    local all="info search show install remove browse list files owns why du cleanup update upgrade upgradable
+        addon svc share apps launch close running app open youtube toast shot volume mute input screen power reboot
+        settings top temp space ports where logs net wake usb report serve qr backup restore cron autostart keys done help doctor"
+    if [ "$pos" -le 0 ]; then
+        words=$all
+        COMPREPLY=( $(compgen -W "$words" -- "$cur") )
+        return 0
+    fi
+    case "$cmd" in
+        search|install|show) words=$(_ent_available) ;;
+        remove|uninstall|files|why|upgrade) words=$(_ent_installed) ;;
+        owns|where|which) COMPREPLY=( $(compgen -c -- "$cur") ); return 0 ;;
+        done) [ "$pos" -eq 1 ] && COMPREPLY=( $(compgen -c -- "$cur") ) || COMPREPLY=( $(compgen -f -- "$cur") ); return 0 ;;
+        browse) [ "$pos" -eq 1 ] && words="shell editors files downloads media network vpn servers dev system games other" ;;
+        addon|addons) if [ "$pos" -eq 1 ]; then words="list add remove info password"; elif [ "$pos" -eq 2 ]; then words=$(_tv_list_addons); fi ;;
+        svc|service|services) if [ "$pos" -eq 1 ]; then words="list status start stop restart enable disable logs"; elif [ "$pos" -eq 2 ]; then words=$(_tv_list_svcs); fi ;;
+        launch|close|applog) [ "$pos" -eq 1 ] && words=$(_tv_list_apps) ;;
+        app) if [ "$pos" -eq 1 ]; then words="install uninstall"
+             elif [ "$sub" = install ]; then compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -f -- "$cur") ); return 0
+             else words=$(_tv_list_apps); fi ;;
+        volume|vol) [ "$pos" -eq 1 ] && words="up down" ;;
+        mute) [ "$pos" -eq 1 ] && words="on off" ;;
+        input|inputs) [ "$pos" -eq 1 ] && words="list hdmi1 hdmi2 hdmi3 hdmi4" ;;
+        screen) [ "$pos" -eq 1 ] && words="off on" ;;
+        power) [ "$pos" -eq 1 ] && words="off" ;;
+        settings) if [ "$pos" -eq 1 ]; then words="get set"; elif [ "$pos" -eq 2 ]; then words="picture sound option caption"
+                  else words=$(_tv_settings_keys "${COMP_WORDS[o + 2]}"); [ "$sub" = set ] && { compopt -o nospace 2>/dev/null; words=$(printf '%s= ' $words); }; fi ;;
+        space|disk) [ "$pos" -eq 1 ] && words="clean" ;;
+        logs|log) [ "$pos" -eq 1 ] && words="boot tasks" ;;
+        net|network) [ "$pos" -eq 1 ] && words="test speed" ;;
+        usb) if [ "$pos" -eq 1 ]; then words="eject"; else words=$(ls -d /tmp/usb/*/* 2>/dev/null | sed 's#.*/##'); fi ;;
+        serve|backup) compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -d -- "$cur") ); return 0 ;;
+        restore|shot) compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -f -- "$cur") ); return 0 ;;
+        cron) if [ "$pos" -eq 1 ]; then words="list add run on off remove log when"
+              elif [ "$pos" -eq 2 ]; then case "$sub" in run|on|off|remove|log) words=$(_tv_count "$(_tv_cron_jobs)") ;; add) words="--toast" ;; esac; fi ;;
+        autostart|boot) if [ "$pos" -eq 1 ]; then words="list add on off remove show"
+                        elif [ "$pos" -eq 2 ] && [ "$sub" != add ]; then words=$(ls /var/lib/webosbrew/init.d 2>/dev/null); fi ;;
+        keys|key) if [ "$pos" -eq 1 ]; then words="list add remove"
+                  elif [ "$pos" -eq 2 ] && [ "$sub" = remove ]; then words=$(_tv_count "$(grep -vc '^ *#\|^ *$' /home/root/.ssh/authorized_keys 2>/dev/null)"); fi ;;
+        help) [ "$pos" -eq 1 ] && words=$all ;;
+        *) return 0 ;;
+    esac
+    COMPREPLY=( $(compgen -W "$words" -- "$cur") )
+}
+complete -F _tv tv
 COMPLETION
 
     /opt/bin/opkg list 2>/dev/null | awk '{print $1}' > /opt/tmp/entpkg-cache.txt
@@ -1267,6 +1337,7 @@ findf() {
 helpme() {
     RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
     echo -e "${CYAN}== WebOS SSH Quick Commands ==${NC}"
+    echo -e "${CYAN}All in one:${NC}   ${GREEN}tv${NC} (tv help lists everything, and Tab completes)"
     echo -e "${CYAN}Navigation:${NC}  ${GREEN}.. ...${NC}"
     echo -e "${CYAN}File Ops:${NC}     ${GREEN}ls ll la lt tr0${NC}"
     echo -e "${CYAN}Sys Info:${NC}     ${GREEN}myip netinfo dfh up${NC}"
@@ -1575,7 +1646,1377 @@ WEBOSTV
     success "Installed the webOS helpers: $TV_COMMANDS (webos-tv help)."
 }
 
-tv_helpers_ok() { [ -x "$TV_HELPER" ]; }
+# tv: one command for packages, add-ons, services, apps, the screen and the
+# system, with tab completion.  It hands off to ent, webos-tv and
+# webos-entware where they already do the job, so those keep working.
+write_tv_cli() {
+    if [ -e "$TV_CLI" ] && ! grep -qs "^# tv: Entware and the TV" "$TV_CLI"; then
+        info "Skipped the tv command: $TV_CLI is something else."
+        return 0
+    fi
+    cat > "$TV_CLI" << 'TVCLI'
+#!/bin/sh
+# tv: Entware and the TV, in one command (webos-entware-installer)
+# tv help lists everything.  ent, webos-entware and webos-tv still work.
+PATH="/opt/bin:/opt/sbin:$PATH"
+MGR=${TV_MGR:-/opt/bin/webos-entware}
+WTV=${TV_WTV:-/opt/bin/webos-tv}
+ENT=${TV_ENT:-/opt/bin/entwrap}
+HBC_BIN=${TV_HBC_BIN:-/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin}
+APP_DIR=${TV_APP_DIR:-/media/developer/apps/usr/palm/applications/org.ohmybahgosh.entware}
+INITD=${TV_INITD:-/opt/etc/init.d}
+BOOTD=${TV_BOOTD:-/var/lib/webosbrew/init.d}
+KEYS=${TV_KEYS:-/home/root/.ssh/authorized_keys}
+USB=${TV_USB:-/tmp/usb}
+THERMAL=${TV_THERMAL:-/sys/class/thermal}
+APPS_ROOT=${TV_APPS_ROOT:-/media/developer/apps/usr/palm/applications}
+TVDIR=/opt/etc/tv
+CRONDIR=$TVDIR/cron
+CRONLOG=/opt/var/log/tv-cron
+FILES=/opt/files
+SAM=luna://com.webos.applicationManager
+YES=0
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    B=$(printf '\033[1m') D=$(printf '\033[2m') G=$(printf '\033[0;32m') Y=$(printf '\033[0;33m')
+    R=$(printf '\033[0;31m') C=$(printf '\033[0;36m') N=$(printf '\033[0m')
+else
+    B='' D='' G='' Y='' R='' C='' N=''
+fi
+
+die() { printf '%s\n' "${R}$*${N}" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
+head1() { printf '%s\n' "${B}$*${N}"; }
+# Asks first, unless -y was given.  With no terminal to ask on, it doesn't go ahead.
+confirm() {
+    [ "$YES" = 1 ] && return 0
+    if [ ! -t 0 ]; then printf '%s\n' "$1  (Add -y to go ahead without being asked.)" >&2; return 1; fi
+    printf '%s [y/N] ' "$1"
+    read -r ans || return 1
+    case "$ans" in y|Y|yes|Yes|YES) return 0 ;; esac
+    return 1
+}
+# luna-send gives up when stdin is a closed pipe, so it always gets /dev/null
+luna() { luna-send -n 1 "$@" < /dev/null 2>&1; }
+ok() { printf '%s' "$1" | grep -q '"returnValue": *true'; }
+err() { printf '%s' "$1" | sed -n 's/.*"errorText": *"\([^"]*\)".*/\1/p' | head -n 1; }
+need_luna() { command -v luna-send > /dev/null 2>&1 || die "luna-send wasn't found.  This only works on a webOS TV."; }
+# One value from a JSON reply: a string, a number or true/false
+jval() {
+    printf '%s' "$1" | tr '\n' ' ' | sed -n "s/.*\"$2\": *\"\\([^\"]*\\)\".*/\\1/p; t; s/.*\"$2\": *\\([-0-9.a-z]*\\).*/\\1/p" | head -n 1
+}
+json_text() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\t' '  '; }
+kb() { awk -v k="$1" 'BEGIN { if (k >= 1048576) printf "%.1f GB", k / 1048576; else if (k >= 1024) printf "%.1f MB", k / 1024; else printf "%d KB", k }'; }
+# The TV's clock, like "Tue 9:41 PM"
+now_str() { date '+%H %M %a' | awk '{ h = $1 + 0; ap = h < 12 ? "AM" : "PM"; h12 = h % 12; if (!h12) h12 = 12; printf "%s %d:%s %s", $3, h12, $2, ap }'; }
+tv_ip() { ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p'; }
+have() { command -v "$1" > /dev/null 2>&1; }
+need_mgr() { [ -x "$MGR" ] || die "webos-entware is missing.  Repair Entware from the TV app, or run the installer again."; }
+pkg_ok() { case "$1" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._+-]*) return 1 ;; esac; return 0; }
+num_ok() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
+
+# ---------------------------------------------------------------- help
+
+usage() {
+    cat << EOF
+${B}tv${N}: Entware and your TV, in one command.  ${D}tv help <command> shows examples.  Tab completes.${N}
+
+${C}Overview${N}
+  tv                    How the TV and Entware are doing, and what to fix
+  tv info               Model, webOS, network, CPU, memory and storage
+
+${C}Packages${N}
+  tv search <word>      Search Entware's packages
+  tv show <pkg>         All about one package: description, size, what it adds
+  tv install <pkg>...   Install packages, with the webOS setup some need
+  tv remove <pkg>...    Remove packages (not ones Entware needs)
+  tv browse [category]  Packages by category, like the TV app's Browse
+  tv list [text]        What's installed
+  tv files <pkg>        The files a package installed
+  tv owns <file|cmd>    Which package a file or command came from
+  tv why <pkg>          What needs a package
+  tv du [count]         The biggest installed packages
+  tv cleanup            Remove packages nothing needs any more
+  tv update             Refresh the package list
+  tv upgrade [pkg]      Update everything, or one package
+  tv upgradable         What has an update
+
+${C}Add-ons and services${N}
+  tv addon [list]                 The add-ons and their state
+  tv addon add|remove <name>      Add or remove one, with its setup
+  tv addon info <name>            Its address and password
+  tv addon password <name>        A new password (--ask to type your own)
+  tv svc [list]                   Entware's services and whether they run
+  tv svc start|stop|restart <name>
+  tv svc enable|disable <name>    Start it at boot, or not
+  tv svc logs <name>              What it logged
+  tv share                        Every address for File Browser, Samba and the rest
+
+${C}Apps${N}
+  tv apps [-a] [text]   Apps and their IDs (* running)
+  tv launch <id> [json] Start an app
+  tv close <id>         Close an app
+  tv running            What's running, and what's on screen
+  tv app install <ipk|url>   Install an app package
+  tv app uninstall <id>      Remove an app you installed
+  tv open <url>         Open a page in the TV's browser
+  tv youtube <link|id>  Play a video in the YouTube app
+
+${C}The screen${N}
+  tv toast <message>    Show a notification on the TV
+  tv shot [file]        Screenshot what's on screen
+  tv volume [up|down|0-100]
+  tv mute [on|off]
+  tv input [list|hdmi1-4]
+  tv screen off|on      Turn the picture off or on, with the TV still running
+  tv power off          Turn the TV off
+  tv reboot             Restart the TV
+  tv settings get|set <category> [key[=value]...]
+
+${C}System${N}
+  tv top                CPU, memory and the busiest processes
+  tv temp               How hot the chip is
+  tv space [clean]      What's using storage, and safe things to clear
+  tv ports              What's listening on the network, and who it is
+  tv where <command>    Where a command comes from, and which one runs
+  tv logs [boot|tasks|text]   The system log, the boot log or the app's tasks
+  tv net [test|speed <host>]  Network details, a connection test, a speed test
+  tv wake <mac>         Wake another device on the network
+  tv usb [eject <drive>]      USB drives, and unplugging one safely
+  tv report             What to put in a GitHub issue
+
+${C}Files${N}
+  tv serve [folder] [port]    Share a folder over HTTP, with a QR code
+  tv qr <text>          Show text or a link as a QR code
+  tv backup [where]     Save your settings, add-ons, packages and keys
+  tv restore <file>     Put a backup back
+
+${C}Automation${N}
+  tv cron [list]        Scheduled jobs, in plain English
+  tv cron add "<when>" <command>   e.g. tv cron add "daily 3am" rclone sync ...
+  tv cron run|on|off|remove|log <n>
+  tv cron when "<when>"  What a time means, without saving anything
+  tv autostart [list]   Scripts that run when the TV starts
+  tv autostart add <name> <command>
+  tv autostart on|off|remove|show <name>
+  tv keys [list]        Who can log in over SSH
+  tv keys add <github-user|key|file>
+  tv keys remove <n>
+  tv done <command>     Run a command, then pop up on the TV when it's done
+
+${D}-y answers yes to questions.  ent, webos-entware, webos-tv, toast, launch, close, apps, applog and tvshot still work.${N}
+EOF
+}
+
+# Examples for one command
+help_for() {
+    case "$1" in
+        cron) cat << 'EOF'
+tv cron add "<when>" <command>
+  when, in plain words:
+    every 15 minutes, every 2 hours, hourly
+    daily, daily 3am, every day at 6:30pm
+    weekdays 7am, weekends 9:30am, mon,wed,fri 18:00, sunday 4am
+    weekly, monthly, monthly 15th 2am
+    at boot
+    or a cron line, like "*/10 * * * *"
+  --toast pops up on the TV when the job finishes.
+Examples:
+  tv cron add "daily 3am" rclone copy gdrive:Photos /opt/files/Media/Photos
+  tv cron add --toast "sunday 4am" tv cleanup -y
+  tv cron when "weekdays 7:30am"   check what a time means first
+  tv cron                 list them, with when each runs next
+  tv cron run 1           run job 1 now
+  tv cron off 1           pause it (tv cron on 1 to resume)
+  tv cron log 1           what it printed
+  tv cron remove 1
+EOF
+            ;;
+        autostart) cat << 'EOF'
+Scripts in /var/lib/webosbrew/init.d run when the TV starts (the Homebrew Channel runs them).
+  tv autostart                       list them
+  tv autostart add hello toast "TV is up"
+  tv autostart off hello             keep it, but don't run it
+  tv autostart show hello
+  tv autostart remove hello
+S99entware is Entware's own, so tv leaves it alone.
+EOF
+            ;;
+        keys) cat << 'EOF'
+  tv keys                          who can log in (from /home/root/.ssh/authorized_keys)
+  tv keys add octocat              add the keys on github.com/octocat.keys
+  tv keys add "ssh-ed25519 AAAA... me@laptop"
+  tv keys add ~/id_ed25519.pub
+  tv keys remove 2
+EOF
+            ;;
+        backup|restore) cat << 'EOF'
+  tv backup                 to the first USB drive, or /opt/files/Backups
+  tv backup /tmp/usb/sda/sda1
+  tv restore /tmp/usb/sda/sda1/tv-backup-20261104-2100.tar.gz
+A backup has Entware's settings (/opt/etc, with your add-ons' passwords),
+your cron jobs, autostart scripts, SSH keys and shell files, and the lists of
+packages and add-ons you installed.  restore reinstalls those, then puts the
+settings back.  Keep backups somewhere private: they hold passwords.
+EOF
+            ;;
+        settings) cat << 'EOF'
+  tv settings get picture                   every picture setting
+  tv settings get picture backlight contrast
+  tv settings set picture backlight=40
+  tv settings set picture energySaving=off
+Categories include picture, sound, option and caption.  Values are what
+webOS uses (mostly words and numbers as text).
+EOF
+            ;;
+        serve) cat << 'EOF'
+  tv serve                  share the folder you're in, on port 8000
+  tv serve /opt/files 8080
+Open the address it prints (or scan the QR code) on a phone or computer on
+the same network.  Ctrl+C stops it.  Anyone on your network can read the
+folder while it runs.
+EOF
+            ;;
+        *) usage | grep -E "^  tv $1( |\$)" || say "No examples for $1.  tv help lists everything." ;;
+    esac
+}
+
+# ---------------------------------------------------------------- overview
+
+dashboard() {
+    need_mgr
+    s=$("$MGR" status --json 2>/dev/null)
+    [ -n "$s" ] || die "Couldn't read the TV's status.  Try: webos-entware doctor"
+    up=$(awk '{ s = int($1); d = int(s / 86400); h = int(s % 86400 / 3600); m = int(s % 3600 / 60)
+        if (d) printf "%dd %dh", d, h; else if (h) printf "%dh %dm", h, m; else printf "%dm", m }' /proc/uptime 2>/dev/null)
+    head1 "$(jval "$s" model)  ·  $(jval "$s" webos) ($(jval "$s" webosRelease))  ·  $(jval "$s" ip)  ·  up $up"
+    if [ "$(jval "$s" installed)" != true ]; then
+        say "Entware isn't installed.  Install it from the TV app, or: webos-entware install"
+        return
+    fi
+    loc=$(jval "$s" location)
+    [ "$loc" = appstore ] && loc="app storage" || loc="user data"
+    say "Entware $(jval "$s" version) on $loc  ·  $(jval "$s" packages) packages  ·  $(jval "$s" freeMB) MB free"
+    svcs=$(svc_names)
+    if [ -n "$svcs" ]; then
+        line=""
+        for n in $svcs; do
+            if svc_running "$n"; then line="$line ${G}$n${N}"; elif svc_enabled "$n"; then line="$line ${R}$n (stopped)${N}"; else line="$line ${D}$n (off)${N}"; fi
+        done
+        say "Services:$line"
+    fi
+    u=$(jval "$s" updates)
+    if num_ok "$u" && [ "$u" -gt 0 ]; then say "${Y}Updates: $u package(s).  tv upgrade${N}"; fi
+    issues=$(printf '%s' "$s" | sed -n 's/.*"issues":\[\([^]]*\)\].*/\1/p' | sed 's/","/\n/g; s/^"//; s/"$//')
+    if [ -n "$issues" ]; then
+        say "${R}Problems:${N}"
+        printf '%s\n' "$issues" | sed 's/^/  /'
+    else
+        say "${G}No problems found.${N}"
+    fi
+    say "${D}tv help lists everything.${N}"
+}
+
+info_cmd() {
+    need_mgr
+    s=$("$MGR" status --json 2>/dev/null)
+    row() { printf '  %-14s %s\n' "$1" "$2"; }
+    head1 "The TV"
+    row Model "$(jval "$s" model)"
+    row webOS "$(jval "$s" webos) ($(jval "$s" webosRelease)), firmware $(jval "$s" firmware)"
+    row Kernel "$(uname -r 2>/dev/null) ($(jval "$s" kernel), $(jval "$s" kernelBits)-bit)"
+    cpu=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null)
+    row CPU "${cpu:-?} cores, load $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)"
+    row Memory "$(awk '/^MemTotal/ { t = $2 } /^MemAvailable/ { a = $2 } END { printf "%d MB free of %d MB", a / 1024, t / 1024 }' /proc/meminfo 2>/dev/null)"
+    t=$(temp_c)
+    [ -n "$t" ] && row Temperature "$t °C"
+    head1 "Network"
+    row Address "$(tv_ip)"
+    for i in eth0 wlan0; do
+        [ -r "/sys/class/net/$i/address" ] && row "$i" "$(cat "/sys/class/net/$i/address")  $(cat "/sys/class/net/$i/operstate" 2>/dev/null)"
+    done
+    head1 "Entware"
+    row Version "$(jval "$s" version), $(jval "$s" buildLabel)"
+    row Location "$(jval "$s" location), $(jval "$s" diskUsed) used, $(jval "$s" freeMB) MB free"
+    row Packages "$(jval "$s" packages)"
+    row Root "$(jval "$s" root)   Homebrew Channel: $(jval "$s" homebrewChannel)   telnet: $(jval "$s" telnet)"
+}
+
+# ---------------------------------------------------------------- packages
+
+pick() { # a fuzzy pick from stdin, when fzf is there
+    have fzf || return 1
+    [ -t 0 ] || [ -t 2 ] || return 1
+    fzf --height 40% --reverse --prompt "$1> " | cut -f1 | awk '{print $1}'
+}
+catalog_lines() { "$MGR" catalog --json 2>/dev/null | sed 's/},{/}\n{/g' | sed -n 's/.*"n":"\([^"]*\)".*"d":"\([^"]*\)".*/\1\t\2/p'; }
+
+pkg_install() {
+    need_mgr
+    if [ $# -eq 0 ]; then
+        p=$(catalog_lines | pick install) || die "Name a package, e.g. tv install htop.  tv search finds them."
+        [ -n "$p" ] || exit 1
+        set -- "$p"
+    fi
+    rc=0
+    for p in "$@"; do
+        pkg_ok "$p" || die "That isn't a package name: $p"
+        "$MGR" pkg-add "$p" || rc=1
+    done
+    exit "$rc"
+}
+pkg_remove() {
+    need_mgr
+    if [ $# -eq 0 ]; then
+        p=$("$MGR" installed 2>/dev/null | sed -n 's/^  \([^ ]*\) .*/\1/p' | pick remove) || die "Name a package, e.g. tv remove htop.  tv list shows them."
+        [ -n "$p" ] || exit 1
+        set -- "$p"
+    fi
+    rc=0
+    for p in "$@"; do
+        pkg_ok "$p" || die "That isn't a package name: $p"
+        confirm "Remove $p?" || { say "Kept $p."; continue; }
+        "$MGR" pkg-remove "$p" -y || rc=1
+    done
+    exit "$rc"
+}
+pkg_why() {
+    pkg_ok "$1" || die "Name a package, e.g. tv why libncurses"
+    line=$("$MGR" installed --json 2>/dev/null | sed 's/},{/}\n{/g' | grep "\"name\":\"$1\"")
+    [ -n "$line" ] || die "$1 isn't installed."
+    by=$(jval "$line" neededBy) addon=$(jval "$line" addonTitle)
+    if [ "$(jval "$line" base)" = true ]; then say "$1 is part of Entware or its shell setup."; fi
+    [ -n "$addon" ] && say "$1 came with the $addon add-on."
+    if [ -n "$by" ]; then say "$1 is needed by: $by"
+    elif [ "$(jval "$line" auto)" = true ]; then say "Nothing needs $1 any more.  tv cleanup removes packages like it."
+    else say "Nothing else needs $1.  You installed it yourself."; fi
+}
+# Packages that came in as something's dependency and nothing needs now
+orphans() {
+    "$MGR" installed --json 2>/dev/null | sed 's/},{/}\n{/g' |
+        grep '"auto":true' | grep '"neededBy":""' | grep '"base":false' | grep '"addon":""' |
+        sed -n 's/.*"name":"\([^"]*\)".*"sizeKB":\([0-9]*\).*/\1 \2/p'
+}
+cleanup() {
+    need_mgr
+    list=$(orphans)
+    [ -n "$list" ] || { say "Nothing to clean up: every package is still needed."; return 0; }
+    total=$(printf '%s\n' "$list" | awk '{ s += $2 } END { print s }')
+    say "No longer needed:"
+    printf '%s\n' "$list" | while read -r n k; do printf '  %-28s %s\n' "$n" "$(kb "$k")"; done
+    confirm "Remove these $(printf '%s\n' "$list" | wc -l | tr -d ' ') packages ($(kb "$total"))?" || { say "Kept them."; return 0; }
+    # Removing one can leave another unneeded, so go round until none are left
+    n=0
+    while [ -n "$list" ] && [ $n -lt 5 ]; do
+        for p in $(printf '%s\n' "$list" | cut -d' ' -f1); do "$MGR" pkg-remove "$p" -y > /dev/null 2>&1 && say "Removed $p"; done
+        list=$(orphans); n=$((n + 1))
+    done
+}
+browse() {
+    need_mgr
+    cat_js="$APP_DIR/catalog.js"
+    if [ -f "$cat_js" ] && have node; then
+        "$MGR" catalog --json 2>/dev/null | CAT="$cat_js" WANT="$1" node -e '
+            global.window = {}; require(process.env.CAT); const C = window.ENTWARE_CATALOG;
+            const names = {}, rules = [];
+            C.cats.forEach((c) => { (c.names || "").split(" ").forEach((n) => { if (n && !names[n]) names[n] = c.id; }); if (c.match) rules.push([new RegExp(c.match), c.id]); });
+            const catOf = (p) => names[p.n] || (rules.find((r) => r[0].test(p.n)) || [])[1] ||
+                (C.cats.find((c) => c.sections && (" " + c.sections + " ").includes(" " + p.s + " ")) || {}).id || "other";
+            let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+                const list = JSON.parse(s.slice(s.indexOf("["))), want = (process.env.WANT || "").toLowerCase(), by = {};
+                list.forEach((p) => (by[catOf(p)] = by[catOf(p)] || []).push(p));
+                if (!want) {
+                    C.cats.forEach((c) => { if (by[c.id]) console.log("  " + c.id.padEnd(11) + String(by[c.id].length).padStart(4) + "  " + c.title); });
+                    console.log("tv browse <category> lists one, like: tv browse files"); return;
+                }
+                const c = C.cats.find((x) => x.id === want || x.title.toLowerCase().startsWith(want));
+                if (!c) { console.error("No category called " + want + ". tv browse lists them."); process.exit(1); }
+                const rank = (p) => (C.featured.indexOf(p.n) + 1 || (C.blurbs[p.n] ? 100 : 1000));
+                (by[c.id] || []).sort((a, b) => rank(a) - rank(b) || (a.n < b.n ? -1 : 1)).forEach((p) =>
+                    console.log("  " + p.n.padEnd(24) + " " + (C.blurbs[p.n] || p.d).slice(0, 90)));
+            });'
+    else
+        # No app or node: Entware's own sections
+        if [ -z "$1" ]; then
+            "$MGR" catalog --json 2>/dev/null | sed 's/},{/}\n{/g' | sed -n 's/.*"s":"\([^"]*\)".*/\1/p' | sort | uniq -c | sort -rn
+        else
+            "$MGR" catalog --json 2>/dev/null | sed 's/},{/}\n{/g' | grep "\"s\":\"$1\"" | sed -n 's/.*"n":"\([^"]*\)".*"d":"\([^"]*\)".*/  \1\t\2/p'
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------- services
+
+# Entware's services: the init scripts, by name without their S00 prefix
+svc_names() { for f in "$INITD"/S*; do [ -f "$f" ] && b=${f##*/} && b=${b#S[0-9][0-9]} && printf '%s\n' "$b"; done | grep -v '^$' ; }
+svc_file() { for f in "$INITD"/S[0-9][0-9]"$1"; do [ -f "$f" ] && { echo "$f"; return 0; }; done; return 1; }
+svc_proc() { p=$(sed -n 's/^PROCS=\([^ ]*\).*/\1/p' "$(svc_file "$1")" 2>/dev/null | tr -d '"'); [ -n "$p" ] && echo "$p" || echo "$1"; }
+svc_running() { pidof "$(svc_proc "$1")" > /dev/null 2>&1; }
+svc_enabled() { f=$(svc_file "$1") && [ -x "$f" ] && ! grep -q '^ENABLED=no' "$f"; }
+svc_cmd() {
+    sub=$1 n=$2
+    if [ -z "$sub" ] || [ "$sub" = list ]; then
+        names=$(svc_names)
+        [ -n "$names" ] || { say "No Entware services are installed.  tv addon lists ones with their setup."; return 0; }
+        printf '%s\n' "$names" | while read -r s; do
+            if svc_running "$s"; then st="${G}running${N}"; else st="${D}stopped${N}"; fi
+            if svc_enabled "$s"; then bt="starts at boot"; else bt="${D}off at boot${N}"; fi
+            printf '  %-22s %s, %s\n' "$s" "$st" "$bt"
+        done
+        return 0
+    fi
+    [ -n "$n" ] || die "Name a service, e.g. tv svc $sub smb.  tv svc lists them."
+    f=$(svc_file "$n") || die "There's no service called $n.  tv svc lists them."
+    case "$sub" in
+        status) if svc_running "$n"; then say "$n is running."; else say "$n is stopped."; fi
+            if svc_enabled "$n"; then say "It starts at boot."; else say "It doesn't start at boot."; fi ;;
+        start|stop|restart)
+            [ "$sub" = stop ] || svc_enabled "$n" || die "$n is off at boot, so its script won't start it.  Turn it on first: tv svc enable $n"
+            [ "$sub" = start ] || sh "$f" stop < /dev/null > /dev/null 2>&1
+            if [ "$sub" != stop ]; then
+                if have setsid; then setsid "$f" start < /dev/null > /dev/null 2>&1; else "$f" start < /dev/null > /dev/null 2>&1; fi
+            fi
+            sleep 1
+            if svc_running "$n"; then say "$n is running."; else say "$n is stopped."; fi ;;
+        enable) sed -i 's/^ENABLED=no/ENABLED=yes/' "$f"; chmod 755 "$f"; say "$n starts at boot.  tv svc start $n starts it now." ;;
+        disable) sed -i 's/^ENABLED=yes/ENABLED=no/' "$f"; chmod 644 "$f"; say "$n won't start at boot.  tv svc stop $n stops it now." ;;
+        logs)
+            found=0
+            for l in /opt/var/log/"$n"*.log /opt/var/log/"$(svc_proc "$n")"*.log; do
+                [ -f "$l" ] && { head1 "$l"; tail -n 30 "$l"; found=1; }
+            done
+            if [ -r /var/log/messages ]; then
+                m=$(grep -i -F -- "$(svc_proc "$n")" /var/log/messages | tail -n 30)
+                [ -n "$m" ] && { head1 "/var/log/messages"; printf '%s\n' "$m"; found=1; }
+            fi
+            [ "$found" = 1 ] || say "$n hasn't logged anything." ;;
+        *) die "tv svc $sub isn't a thing.  Try: start, stop, restart, status, enable, disable or logs" ;;
+    esac
+}
+share() {
+    need_mgr
+    ip=$(tv_ip)
+    said=0
+    for a in filebrowser samba minidlna transmission syncthing tailscale; do
+        out=$("$MGR" info "$a" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+        case "$out" in *"isn't installed"*|*"not installed"*|'') continue ;; esac
+        head1 "$a"
+        printf '%s\n' "$out" | grep -v -i 'password\|^\[' | grep -E 'http|smb:|\\\\|address|Open|tailnet' | sed 's/^ */  /'
+        said=1
+    done
+    if [ "$said" = 0 ]; then say "No sharing add-ons yet.  Try: tv addon add filebrowser (or samba, minidlna, syncthing)"; fi
+    say "Files live in $FILES.  ${D}Passwords: tv addon info <name>${N}"
+    [ -n "$ip" ] && say "${D}The TV is at $ip.${N}"
+}
+
+# ---------------------------------------------------------------- apps and the screen
+
+running() {
+    need_luna
+    f=$(luna "$SAM/getForegroundAppInfo" '{}')
+    say "On screen: $(jval "$f" appId)"
+    say "Running:"
+    luna "$SAM/running" '{}' | sed -n 's/.*"id": *"\([^"]*\)".*/  \1/p'
+}
+app_cmd() {
+    need_luna
+    sub=$1; shift
+    case "$sub" in
+        install)
+            src=$1
+            [ -n "$src" ] || die "Name an .ipk file or its link, e.g. tv app install https://example.com/app.ipk"
+            case "$src" in
+                http://*|https://*)
+                    tmp=/tmp/tv-app-$$.ipk
+                    say "Downloading $src"
+                    curl -fsSL -o "$tmp" "$src" || { rm -f "$tmp"; die "The download failed."; }
+                    src=$tmp ;;
+                *) [ -f "$src" ] || die "There's no file $src."
+                   case "$src" in /*) ;; *) src="$(pwd)/$src" ;; esac ;;
+            esac
+            x=/tmp/tv-app-x$$; rm -rf "$x"; mkdir -p "$x"
+            id=$(cd "$x" && ar x "$src" control.tar.gz 2>/dev/null && tar xzf control.tar.gz 2>/dev/null && sed -n 's/^Package: //p' ./control 2>/dev/null)
+            rm -rf "$x"
+            case "$id" in ''|*[!A-Za-z0-9._-]*) rm -f "/tmp/tv-app-$$.ipk"; die "That isn't a webOS app package (.ipk)." ;; esac
+            confirm "Install ${id:-this app} from $1?" || { rm -f "/tmp/tv-app-$$.ipk"; say "Not installed."; exit 1; }
+            r=$(luna luna://com.webos.appInstallService/dev/install "{\"id\":\"$id\",\"ipkUrl\":\"$(json_text "$src")\",\"subscribe\":false}")
+            rm -f "/tmp/tv-app-$$.ipk"
+            ok "$r" || die "webOS didn't install it: $(err "$r")"
+            rm -f /tmp/.webos-tv-apps
+            say "Installing ${id:-it}.  It shows up in a few seconds: tv apps ${id:-}" ;;
+        uninstall|remove)
+            id=$1
+            case "$id" in ''|*[!A-Za-z0-9._-]*) die "Name an app, e.g. tv app uninstall com.example.app.  tv apps lists them." ;; esac
+            [ -d "$APPS_ROOT/$id" ] ||
+                die "$id isn't an app you installed (only those can be removed here)."
+            confirm "Uninstall $id?" || { say "Kept $id."; exit 1; }
+            r=$(luna luna://com.webos.appInstallService/dev/remove "{\"id\":\"$id\",\"subscribe\":false}")
+            ok "$r" || die "webOS didn't remove it: $(err "$r")"
+            rm -f /tmp/.webos-tv-apps
+            say "Removed $id." ;;
+        *) die "Try: tv app install <ipk|url> or tv app uninstall <id>" ;;
+    esac
+}
+launch_with() { # app id, params JSON, what to say
+    r=$(luna "$SAM/launch" "{\"id\":\"$1\",\"params\":$2}")
+    ok "$r" || die "It didn't open: $(err "$r")"
+    say "$3"
+}
+open_url() {
+    need_luna
+    case "$1" in http://*|https://*) u=$1 ;; '') die "Name a page, e.g. tv open https://example.com" ;; *) u="https://$1" ;; esac
+    launch_with com.webos.app.browser "{\"target\":\"$(json_text "$u")\"}" "Opened $u in the TV's browser."
+}
+youtube() {
+    need_luna
+    v=$(printf '%s' "$1" | sed -n 's/.*[?&]v=\([A-Za-z0-9_-]\{11\}\).*/\1/p')
+    [ -n "$v" ] || v=$(printf '%s' "$1" | sed -n 's|.*youtu\.be/\([A-Za-z0-9_-]\{11\}\).*|\1|p; s|.*/shorts/\([A-Za-z0-9_-]\{11\}\).*|\1|p' | head -n 1)
+    [ -n "$v" ] || { printf '%s' "$1" | grep -qE '^[A-Za-z0-9_-]{11}$' && v=$1; }
+    [ -n "$v" ] || die "That isn't a YouTube link or video ID.  e.g. tv youtube https://youtu.be/dQw4w9WgXcQ"
+    launch_with youtube.leanback.v4 "{\"contentTarget\":\"https://www.youtube.com/tv?v=$v\"}" "Playing $v in YouTube."
+}
+volume() {
+    need_luna
+    A=luna://com.webos.audio
+    case "$1" in
+        '') r=$(luna "$A/getVolume" '{}'); v=$(jval "$r" volume); [ -n "$v" ] || die "Couldn't read the volume: $(err "$r")"
+            m=$(jval "$r" muted); [ "$m" = true ] && say "Volume $v (muted)" || say "Volume $v" ;;
+        up|down) r=$(luna "$A/volume$( [ "$1" = up ] && echo Up || echo Down)" '{}'); ok "$r" || die "It didn't change: $(err "$r")"; volume ;;
+        *) num_ok "$1" && [ "$1" -le 100 ] || die "Volume is 0 to 100, or up or down."
+            r=$(luna "$A/setVolume" "{\"volume\":$1}"); ok "$r" || die "It didn't change: $(err "$r")"; say "Volume $1" ;;
+    esac
+}
+mute() {
+    need_luna
+    case "${1:-on}" in on) m=true ;; off) m=false ;; *) die "tv mute on or tv mute off" ;; esac
+    r=$(luna luna://com.webos.audio/setMuted "{\"muted\":$m}")
+    ok "$r" || die "It didn't change: $(err "$r")"
+    [ "$m" = true ] && say "Muted." || say "Sound on."
+}
+input() {
+    need_luna
+    case "$1" in
+        ''|list)
+            r=$(luna luna://com.webos.service.eim/getAllInputStatus '{}')
+            ok "$r" || die "Couldn't read the inputs: $(err "$r")"
+            f=$(jval "$(luna "$SAM/getForegroundAppInfo" '{}')" appId)
+            printf '%s\n' "$r" | tr '\n' ' ' | sed 's/}, *{/}\n{/g' | while IFS= read -r i || [ -n "$i" ]; do
+                id=$(jval "$i" id); [ -n "$id" ] || continue
+                label=$(jval "$i" label) app=$(jval "$i" appId) c=$(jval "$i" connected)
+                [ "$app" = "$f" ] && mark='*' || mark=' '
+                printf '%s %-10s %-20s %s\n' "$mark" "$id" "${label:-$id}" "$( [ "$c" = true ] && echo connected || echo '')"
+            done
+            say "(* on screen)  tv input hdmi2 switches." ;;
+        *)
+            n=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^0-9]//g')
+            num_ok "$n" && [ "$n" -ge 1 ] && [ "$n" -le 4 ] || die "Name an input: hdmi1 to hdmi4, or tv input list"
+            launch_with "com.webos.app.hdmi$n" '{}' "Switched to HDMI $n." ;;
+    esac
+}
+screen() {
+    need_luna
+    P=luna://com.webos.service.tvpower/power
+    case "$1" in
+        off) r=$(luna "$P/turnOffScreen" '{"standbyMode":"active"}'); ok "$r" || die "It didn't turn off: $(err "$r")"; say "The picture is off.  Any remote button, or tv screen on, brings it back." ;;
+        on) r=$(luna "$P/turnOnScreen" '{"standbyMode":"active"}'); ok "$r" || die "It didn't turn on: $(err "$r")"; say "The picture is on." ;;
+        *) die "tv screen off or tv screen on" ;;
+    esac
+}
+power() {
+    need_luna
+    [ "$1" = off ] || die "tv power off turns the TV off.  (Turn it on with the remote, or Wake-on-LAN.)"
+    confirm "Turn the TV off?  Your SSH session ends." || { say "Left it on."; exit 1; }
+    r=$(luna luna://com.webos.service.tvpower/power/powerOff '{"reason":"remoteKey"}')
+    ok "$r" || die "It didn't turn off: $(err "$r")"
+    say "Turning off."
+}
+reboot_tv() {
+    need_luna
+    confirm "Restart the TV?  Your SSH session ends, and Entware's services start again with the TV." || { say "Not restarting."; exit 1; }
+    r=$(luna luna://com.webos.service.tvpower/power/reboot '{"reason":"cpuCommand"}')
+    if ! ok "$r"; then say "webOS didn't take the request ($(err "$r")), so restarting directly."; /sbin/reboot; fi
+    say "Restarting."
+}
+settings() {
+    need_luna
+    S=luna://com.webos.settingsservice
+    sub=$1 cat=$2
+    [ -n "$sub" ] && [ -n "$cat" ] || { help_for settings; exit 1; }
+    case "$cat" in *[!A-Za-z0-9._]*) die "That isn't a settings category: $cat" ;; esac
+    shift 2
+    case "$sub" in
+        get)
+            keys=""
+            for k in "$@"; do case "$k" in *[!A-Za-z0-9_]*) die "That isn't a setting name: $k" ;; esac; keys="$keys${keys:+,}\"$k\""; done
+            r=$(luna "$S/getSystemSettings" "{\"category\":\"$cat\"$( [ -n "$keys" ] && echo ",\"keys\":[$keys]")}")
+            ok "$r" || die "Couldn't read $cat: $(err "$r")"
+            printf '%s' "$r" | tr '\n' ' ' | sed -n 's/.*"settings": *{\([^}]*\)}.*/\1/p' | sed 's/, *"/\n"/g' |
+                sed 's/^ *"\([^"]*\)": *"\{0,1\}\([^"]*\)"\{0,1\} *$/  \1 = \2/' ;;
+        set)
+            [ $# -gt 0 ] || die "Say what to set, e.g. tv settings set picture backlight=40"
+            body=""
+            for kv in "$@"; do
+                k=${kv%%=*} v=${kv#*=}
+                [ "$k" != "$kv" ] || die "Use key=value, e.g. backlight=40"
+                case "$k" in ''|*[!A-Za-z0-9_]*) die "That isn't a setting name: $k" ;; esac
+                body="$body${body:+,}\"$k\":\"$(json_text "$v")\""
+            done
+            r=$(luna "$S/setSystemSettings" "{\"category\":\"$cat\",\"settings\":{$body}}")
+            ok "$r" || die "webOS didn't take it: $(err "$r")"
+            say "Set: $*" ;;
+        *) help_for settings; exit 1 ;;
+    esac
+}
+
+# ---------------------------------------------------------------- system
+
+temp_c() {
+    for z in "$THERMAL"/thermal_zone*/temp; do
+        [ -r "$z" ] || continue
+        t=$(cat "$z" 2>/dev/null)
+        num_ok "$t" || continue
+        [ "$t" -gt 1000 ] && t=$((t / 1000))
+        [ "$t" -gt "${max:-0}" ] && max=$t
+    done
+    [ -n "${max:-}" ] && echo "$max"
+}
+top_cmd() {
+    head1 "Load $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)  ·  $(awk '/^MemTotal/ { t = $2 } /^MemAvailable/ { a = $2 } END { printf "memory %d%% used (%d MB free)", (t - a) * 100 / t, a / 1024 }' /proc/meminfo)"
+    t=$(temp_c); [ -n "$t" ] && say "Chip at $t °C"
+    say "Busiest processes:"
+    # ps with %CPU where it can; busybox ps doesn't, so then by memory
+    if ps -eo pid,pcpu,rss,comm --sort=-pcpu > /dev/null 2>&1; then
+        ps -eo pid,pcpu,rss,comm --sort=-pcpu | head -n 11 | awk 'NR == 1 { printf "  %6s %5s %8s  %s\n", "PID", "CPU%", "MEMORY", "COMMAND"; next } { printf "  %6s %5s %6d MB  %s\n", $1, $2, $3 / 1024, $4 }'
+    else
+        for p in /proc/[0-9]*; do
+            r=$(sed -n 's/^VmRSS: *\([0-9]*\).*/\1/p' "$p/status" 2>/dev/null)
+            [ -n "$r" ] && printf '%s %s %s\n' "$r" "${p#/proc/}" "$(cat "$p/comm" 2>/dev/null)"
+        done | sort -rn | head -n 10 | awk 'BEGIN { printf "  %6s %8s  %s\n", "PID", "MEMORY", "COMMAND" } { printf "  %6s %6d MB  %s\n", $2, $1 / 1024, $3 }'
+    fi
+    have htop && say "${D}For a live view: htop${N}"
+}
+space() {
+    if [ "$1" = clean ]; then
+        found=""
+        add() { [ -e "$1" ] || return 0; s=$(du -sk "$1" 2>/dev/null | cut -f1); [ "${s:-0}" -gt 0 ] && found="$found$s $1 $2
+"; }
+        add /opt/var/opkg-cache "downloaded package files"
+        for f in /opt/tmp/*; do add "$f" "a temporary file"; done
+        for f in /opt/var/log/*.gz /opt/var/log/*.[0-9] /opt/var/log/*.old; do add "$f" "an old log"; done
+        for f in /tmp/tvshot-*; do add "$f" "a screenshot"; done
+        found=$(printf '%s' "$found" | grep -v '^$' | grep -v 'entpkg-cache')
+        [ -n "$found" ] || { say "Nothing to clean: no caches, old logs or screenshots."; return 0; }
+        printf '%s\n' "$found" | while read -r s p why; do printf '  %-9s %s  (%s)\n' "$(kb "$s")" "$p" "$why"; done
+        confirm "Delete these?" || { say "Kept them."; return 0; }
+        printf '%s\n' "$found" | while read -r _s p _why; do rm -rf "$p"; done
+        say "Done."
+        return 0
+    fi
+    head1 "Storage"
+    for m in / /mnt/lg/user /mnt/lg/appstore /opt /tmp "$USB"/*/*; do
+        [ -d "$m" ] || continue
+        df -kP "$m" 2>/dev/null | tail -n 1 | awk -v m="$m" '{ printf "  %-28s %6.1f GB free of %6.1f GB  (%s used)\n", m, $(NF-2) / 1048576, $(NF-4) / 1048576, $(NF-1) }'
+    done | awk '!seen[$0]++'
+    head1 "Biggest in /opt"
+    du -sk /opt/* 2>/dev/null | sort -rn | head -n 8 | while read -r s p; do printf '  %-9s %s\n' "$(kb "$s")" "$p"; done
+    say "${D}tv du lists the biggest packages.  tv space clean clears caches and old logs.${N}"
+}
+ports() {
+    # Socket inode -> program, from each process's open files
+    map=$(for p in /proc/[0-9]*; do
+        c=$(cat "$p/comm" 2>/dev/null) || continue
+        for fd in "$p"/fd/*; do
+            l=$(readlink "$fd" 2>/dev/null) || continue
+            case "$l" in socket:*) i=${l#socket:[}; printf '%s %s\n' "${i%]}" "$c" ;; esac
+        done
+    done 2>/dev/null)
+    known() {
+        case "$1" in 22) echo "SSH (Homebrew Channel)" ;; 23) echo "telnet (Homebrew Channel)" ;; 445|139) echo "Samba file sharing" ;;
+            8090) echo "File Browser" ;; 8200) echo "media server (DLNA)" ;; 9091) echo "Transmission" ;; 8384) echo "Syncthing" ;;
+            8095) echo "phone dashboard" ;; 3000|3001) echo "webOS (second screen)" ;; 8080|9080|8443) echo "webOS" ;; esac
+    }
+    printf '  %-6s %-5s %-22s %s\n' PORT TYPE PROGRAM WHAT
+    for t in tcp tcp6 udp udp6; do
+        [ -r "/proc/net/$t" ] || continue
+        awk -v t="$t" 'NR > 1 && ((t ~ /tcp/ && $4 == "0A") || (t ~ /udp/ && $4 == "07")) { n = split($2, a, ":"); print t, a[n], $10 }' "/proc/net/$t"
+    done | while read -r t hex inode; do
+        port=$(printf '%d' "0x$hex")
+        prog=$(printf '%s\n' "$map" | awk -v i="$inode" '$1 == i { print $2; exit }')
+        printf '%s %s %s\n' "$port" "${t%6}" "${prog:--}"
+    done | sort -n -u | while read -r port t prog; do
+        printf '  %-6s %-5s %-22s %s\n' "$port" "$t" "$prog" "$(known "$port")"
+    done
+}
+where() {
+    [ -n "$1" ] || die "Name a command, e.g. tv where rsync"
+    case "$1" in */*|*[!A-Za-z0-9._+-]*) die "Name a command, e.g. tv where rsync" ;; esac
+    first=$(command -v "$1" 2>/dev/null)
+    found=0
+    for d in /opt/bin /opt/sbin /opt/usr/bin "$HBC_BIN" /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do
+        f="$d/$1"
+        [ -x "$f" ] || continue
+        found=1
+        case "$d" in
+            /opt/*) o=$("$ENT" owns "$f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | head -n 1)
+                case "$o" in *"not from a package"*|*"not found"*|'') from="Entware's folder (no package)" ;; *) from="Entware, package $(printf '%s' "${o#*: }" | cut -d' ' -f1)" ;; esac ;;
+            "$HBC_BIN") from="the Homebrew Channel" ;;
+            *) from="webOS"; [ "$(readlink "$f" 2>/dev/null)" = /bin/busybox ] || [ "$(readlink -f "$f" 2>/dev/null)" = /bin/busybox ] && from="webOS (busybox)" ;;
+        esac
+        [ "$f" = "$first" ] && mark="${G}runs${N}  " || mark="      "
+        printf '  %s%-40s %s\n' "$mark" "$f" "$from"
+    done
+    [ "$found" = 1 ] || { say "There's no $1 on the TV."; [ -x "$MGR" ] && "$MGR" search "$1" 2>/dev/null | head -n 3 | sed 's/^/  Entware has: /'; return 1; }
+    case "$first" in /*) ;; *) [ -n "$first" ] && say "  (in your shell, $1 is an $first)" ;; esac
+    return 0
+}
+logs() {
+    case "$1" in
+        boot) cat /tmp/webos-entware-boot.log 2>/dev/null || say "Nothing logged this boot yet." ;;
+        tasks) need_mgr; "$MGR" logs ;;
+        *) exec "$WTV" applog "$@" ;;
+    esac
+}
+net() {
+    case "$1" in
+        test)
+            gw=$(ip route 2>/dev/null | sed -n 's/^default via \([0-9.]*\).*/\1/p' | head -n 1)
+            check() { if eval "$2" > /dev/null 2>&1; then say "  ${G}ok${N}    $1"; else say "  ${R}fails${N} $1"; bad=1; fi; }
+            bad=0
+            check "the router ($gw) answers" "[ -n '$gw' ] && ping -c 1 -W 2 $gw"
+            check "names look up (DNS)" "nslookup bin.entware.net"
+            check "the internet answers" "ping -c 1 -W 3 1.1.1.1"
+            check "Entware's server (HTTPS)" "curl -fsS -m 8 -o /dev/null https://bin.entware.net/"
+            check "GitHub (HTTPS)" "curl -fsS -m 8 -o /dev/null https://github.com/"
+            [ "$bad" = 0 ] && say "Everything answers." ;;
+        speed)
+            [ -n "$2" ] || die "Name a computer running iperf3 -s, e.g. tv net speed 192.168.1.20"
+            have iperf3 || die "This needs iperf3: tv addon add nettools (or tv install iperf3)"
+            say "From the TV:"; iperf3 -c "$2" -t 5 | tail -n 4
+            say "To the TV:"; iperf3 -c "$2" -t 5 -R | tail -n 4 ;;
+        *)
+            head1 "Network"
+            printf '  %-10s %s\n' Address "$(tv_ip)"
+            ip -4 -o addr 2>/dev/null | awk '$2 != "lo" { printf "  %-10s %s\n", $2, $4 }'
+            printf '  %-10s %s\n' Router "$(ip route 2>/dev/null | sed -n 's/^default via \([0-9.]*\) dev \([^ ]*\).*/\1 (\2)/p' | head -n 1)"
+            printf '  %-10s %s\n' DNS "$(sed -n 's/^nameserver //p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
+            for i in eth0 wlan0; do [ -r "/sys/class/net/$i/address" ] && printf '  %-10s %s\n' "$i" "$(cat "/sys/class/net/$i/address") $(cat "/sys/class/net/$i/operstate" 2>/dev/null)"; done
+            say "${D}tv net test checks the connection.  tv net speed <host> tests speed with iperf3.${N}" ;;
+    esac
+}
+wake() {
+    mac=$(printf '%s' "$1" | tr 'A-F-' 'a-f:')
+    printf '%s' "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || die "Name a MAC address, e.g. tv wake 00:11:22:33:44:55"
+    if have ether-wake; then ether-wake -b "$mac" && { say "Sent a wake-up to $mac."; return; }; fi
+    if have etherwake; then etherwake -b "$mac" && { say "Sent a wake-up to $mac."; return; }; fi
+    have node || die "This needs node (webOS has it) or etherwake: tv install etherwake"
+    MAC=$mac node -e '
+        const m = Buffer.from(process.env.MAC.split(":").map((h) => parseInt(h, 16)));
+        const p = Buffer.concat([Buffer.alloc(6, 0xff)].concat(Array(16).fill(m)));
+        const s = require("dgram").createSocket("udp4");
+        s.bind(() => { s.setBroadcast(true); s.send(p, 9, "255.255.255.255", (e) => { s.close(); process.exit(e ? 1 : 0); }); });' &&
+        say "Sent a wake-up to $mac."
+}
+usb() {
+    if [ "$1" = eject ]; then
+        d=$2
+        [ -n "$d" ] || die "Name a drive, e.g. tv usb eject sda1.  tv usb lists them."
+        case "$d" in */*|*[!A-Za-z0-9_-]*) die "Name a drive, e.g. sda1" ;; esac
+        m=$(ls -d "$USB"/*/"$d" 2>/dev/null | head -n 1)
+        [ -n "$m" ] || die "There's no drive $d.  tv usb lists them."
+        sync
+        if umount "$m" 2>/dev/null; then say "$d is safe to unplug."; else
+            say "$d is in use.  These are using it:"
+            for p in /proc/[0-9]*; do
+                for l in "$p/cwd" "$p"/fd/*; do
+                    case "$(readlink "$l" 2>/dev/null)" in "$m"|"$m"/*) printf '  %s %s\n' "${p#/proc/}" "$(cat "$p/comm" 2>/dev/null)"; break ;; esac
+                done
+            done
+            exit 1
+        fi
+        return
+    fi
+    found=0
+    for m in "$USB"/*/*; do
+        [ -d "$m" ] || continue
+        grep -qs " $m " /proc/mounts || continue
+        found=1
+        df -kP "$m" | tail -n 1 | awk -v m="$m" -v n="${m##*/}" '{ printf "  %-8s %-30s %6.1f GB free of %6.1f GB\n", n, m, $(NF-2) / 1048576, $(NF-4) / 1048576 }'
+    done
+    [ "$found" = 1 ] || say "No USB drives are plugged in."
+}
+report() {
+    need_mgr
+    s=$("$MGR" status --json 2>/dev/null)
+    say "Open an issue: https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new/choose"
+    say "and paste this:"
+    say ""
+    say "- TV: $(jval "$s" model), $(jval "$s" webos) ($(jval "$s" webosRelease)), firmware $(jval "$s" firmware)"
+    say "- Entware: $(jval "$s" version), $(jval "$s" buildLabel), on $(jval "$s" location)"
+    say "- Packages: $(jval "$s" packages)"
+    say ""
+    say "Full check:"
+    "$MGR" status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'
+    say ""
+    say "${D}The TV app's Report for GitHub does this with a QR code for your phone.${N}"
+}
+
+# ---------------------------------------------------------------- files
+
+qr() {
+    [ -n "$1" ] || die "Say what to show, e.g. tv qr https://example.com"
+    if have qrencode; then qrencode -t ansiutf8 -m 2 -- "$1"; return; fi
+    lib="$APP_DIR/vendor/qrcode.js"
+    if have node && [ -f "$lib" ]; then
+        TEXT=$1 LIB=$lib node -e '
+            const qrcode = require(process.env.LIB); const q = qrcode(0, "M"); q.addData(process.env.TEXT); q.make();
+            const n = q.getModuleCount(), dark = (r, c) => r >= 0 && c >= 0 && r < n && c < n && q.isDark(r, c);
+            let out = "";
+            for (let r = -2; r < n + 2; r += 2) {
+                let line = "";
+                for (let c = -2; c < n + 2; c++) { const t = dark(r, c), b = dark(r + 1, c); line += t && b ? " " : t ? "▄" : b ? "▀" : "█"; }
+                out += line + "\n";
+            }
+            process.stdout.write(out);'
+        return
+    fi
+    say "$1"
+    say "${D}(For a QR code here: tv install qrencode)${N}"
+}
+serve() {
+    dir=${1:-.} port=${2:-8000}
+    [ -d "$dir" ] || die "There's no folder $dir."
+    num_ok "$port" && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || die "Use a port from 1024 to 65535."
+    dir=$(cd "$dir" && pwd)
+    url="http://$(tv_ip):$port/"
+    say "Sharing $dir at $url  (Ctrl+C stops it)"
+    qr "$url"
+    say "${D}Anyone on your network can read this folder while it runs.${N}"
+    if have node; then
+        DIR=$dir PORT=$port exec node -e '
+            const http = require("http"), fs = require("fs"), path = require("path"), root = process.env.DIR;
+            const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[c]);
+            http.createServer((req, res) => {
+                let rel; try { rel = decodeURIComponent(req.url.split("?")[0]); } catch (e) { res.writeHead(400); return res.end(); }
+                const p = path.join(root, path.normalize(rel));
+                if (p !== root && !p.startsWith(root + path.sep)) { res.writeHead(403); return res.end(); }
+                fs.stat(p, (e, st) => {
+                    if (e) { res.writeHead(404); return res.end("Not found"); }
+                    if (st.isDirectory()) {
+                        fs.readdir(p, { withFileTypes: true }, (e2, list) => {
+                            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                            const base = rel.endsWith("/") ? rel : rel + "/";
+                            res.end("<meta name=viewport content=\"width=device-width\"><h2>" + esc(rel) + "</h2><ul>" + (list || []).map((d) =>
+                                "<li><a href=\"" + esc(encodeURI(base + d.name)) + (d.isDirectory() ? "/" : "") + "\">" + esc(d.name) + (d.isDirectory() ? "/" : "") + "</a>").join("") + "</ul>");
+                        });
+                    } else {
+                        res.writeHead(200, { "Content-Length": st.size, "Content-Type": "application/octet-stream" });
+                        fs.createReadStream(p).pipe(res);
+                    }
+                });
+            }).listen(+process.env.PORT);'
+    fi
+    if have python3; then cd "$dir" && exec python3 -m http.server "$port"; fi
+    die "This needs node or python3."
+}
+backup() {
+    dest=$1
+    if [ -z "$dest" ]; then
+        dest=$(for m in "$USB"/*/*; do grep -qs " $m " /proc/mounts && echo "$m" && break; done)
+        [ -n "$dest" ] || dest=$FILES/Backups
+    fi
+    case "$dest" in *.tar.gz) file=$dest; mkdir -p "$(dirname "$file")" ;; *) mkdir -p "$dest" || die "Couldn't use $dest."; file="$dest/tv-backup-$(date +%Y%m%d-%H%M).tar.gz" ;; esac
+    work=/tmp/tv-backup-$$
+    rm -rf "$work"; mkdir -p "$work/meta" "$work/root"
+    trap 'rm -rf "$work"' EXIT
+    if [ -x "$MGR" ]; then
+        "$MGR" installed --json 2>/dev/null | sed 's/},{/}\n{/g' | grep '"auto":false' | grep '"base":false' | grep '"addon":""' |
+            sed -n 's/.*"name":"\([^"]*\)".*/\1/p' > "$work/meta/packages"
+        "$MGR" addons --json 2>/dev/null | sed 's/},{/}\n{/g' | grep '"state":"installed"\|"state":"needsSetup"' |
+            sed -n 's/.*"id":"\([^"]*\)".*/\1/p' > "$work/meta/addons"
+    fi
+    touch "$work/meta/packages" "$work/meta/addons"
+    have crontab && crontab -l > "$work/meta/crontab" 2>/dev/null
+    date > "$work/meta/when"
+    for p in /opt/etc "$KEYS" "$BOOTD" /home/root/.bashrc /home/root/.profile /home/root/.bash_profile /home/root/.nanorc /home/root/.tmux.conf /home/root/.config/rclone; do
+        [ -e "$p" ] || continue
+        mkdir -p "$work/root$(dirname "$p")"
+        cp -a "$p" "$work/root$p" 2>/dev/null
+    done
+    tar -czf "$file" -C "$work" meta root 2>/dev/null || { rm -f "$file"; die "The backup failed.  Is there room on $(dirname "$file")?"; }
+    chmod 600 "$file"
+    say "Saved $file ($(kb "$(du -k "$file" | cut -f1)"))"
+    say "It has $(grep -c . "$work/meta/packages") packages you installed, $(grep -c . "$work/meta/addons") add-ons, Entware's settings, cron jobs, SSH keys and boot scripts."
+    say "${Y}It holds your add-ons' passwords, so keep it private.${N}  Put it back with: tv restore $file"
+}
+restore() {
+    f=$1
+    [ -f "$f" ] || die "Name a backup, e.g. tv restore /opt/files/Backups/tv-backup-20261104-2100.tar.gz"
+    work=/tmp/tv-restore-$$
+    rm -rf "$work"; mkdir -p "$work"
+    trap 'rm -rf "$work"' EXIT
+    tar -xzf "$f" -C "$work" 2>/dev/null && [ -d "$work/meta" ] || die "That isn't a tv backup."
+    say "Backup from $(cat "$work/meta/when" 2>/dev/null):"
+    say "  packages: $(tr '\n' ' ' < "$work/meta/packages")"
+    say "  add-ons:  $(tr '\n' ' ' < "$work/meta/addons")"
+    say "  and Entware's settings, cron jobs, SSH keys and boot scripts"
+    confirm "Put it all back?  Settings in the backup replace the ones here." || { say "Nothing changed."; exit 1; }
+    need_mgr
+    while read -r a; do [ -n "$a" ] || continue; if "$MGR" add "$a" -y > /dev/null 2>&1; then say "Added the $a add-on"; else say "${Y}Couldn't add $a${N}"; fi; done < "$work/meta/addons"
+    while read -r p; do pkg_ok "$p" || continue; if "$MGR" pkg-add "$p" > /dev/null 2>&1; then say "Installed $p"; else say "${Y}Couldn't install $p${N}"; fi; done < "$work/meta/packages"
+    [ -d "$work/root" ] && cp -a "$work/root/." / && say "Put back Entware's settings, SSH keys and boot scripts."
+    if [ -s "$work/meta/crontab" ] && have crontab; then crontab "$work/meta/crontab" && say "Put back the cron jobs."; fi
+    [ -f "$KEYS" ] && chmod 600 "$KEYS"
+    for s in $(svc_names); do svc_enabled "$s" && svc_cmd restart "$s" > /dev/null 2>&1; done
+    say "${G}Restored.${N}  Services restarted with their settings."
+}
+
+# ---------------------------------------------------------------- automation: cron
+
+# "3am", "3:30pm", "15:30", "noon", "midnight" -> "M H"
+parse_time() {
+    t=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/^ *at //; s/ //g')
+    case "$t" in
+        ''|midnight) echo "0 0"; return ;;
+        noon) echo "0 12"; return ;;
+    esac
+    case "$t" in *am) ap=am; t=${t%am} ;; *pm) ap=pm; t=${t%pm} ;; *) ap="" ;; esac
+    case "$t" in *:*) h=${t%%:*} m=${t#*:}; [ ${#m} -eq 2 ] || return 1 ;; *) h=$t m=0 ;; esac
+    num_ok "$h" && num_ok "$m" && [ ${#h} -le 2 ] || return 1
+    h=$(echo "$h" | sed 's/^0\([0-9]\)/\1/') m=$(echo "$m" | sed 's/^0\([0-9]\)/\1/')
+    case "$ap" in
+        am) [ "$h" -ge 1 ] && [ "$h" -le 12 ] || return 1; [ "$h" = 12 ] && h=0 ;;
+        pm) [ "$h" -ge 1 ] && [ "$h" -le 12 ] || return 1; [ "$h" != 12 ] && h=$((h + 12)) ;;
+        *) [ "$h" -le 23 ] || return 1 ;;
+    esac
+    [ "$m" -le 59 ] || return 1
+    echo "$m $h"
+}
+day_num() {
+    case "$1" in sun|sunday|sundays) echo 0 ;; mon|monday|mondays) echo 1 ;; tue|tues|tuesday|tuesdays) echo 2 ;;
+        wed|wednesday|wednesdays) echo 3 ;; thu|thur|thurs|thursday|thursdays) echo 4 ;; fri|friday|fridays) echo 5 ;;
+        sat|saturday|saturdays) echo 6 ;; *) return 1 ;; esac
+}
+# Plain words -> a cron schedule (5 fields, or @reboot)
+cron_when() {
+    w=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/^ *//; s/ *$//; s/  */ /g; s/, */,/g; s/ at / /; s/^every day/daily/; s/^each day/daily/; s/^on //')
+    case "$w" in
+        "at boot"|boot|reboot|"at startup"|startup|@reboot) echo "@reboot"; return ;;
+        "every minute") echo "* * * * *"; return ;;
+        hourly|"every hour") echo "0 * * * *"; return ;;
+        weekly) echo "0 0 * * 0"; return ;;
+    esac
+    # A cron line already
+    if printf '%s' "$w" | grep -qE '^[0-9*/,-]+( [0-9*/,a-z-]+){4}$'; then echo "$w"; return; fi
+    case "$w" in
+        "every "*" minute"|"every "*" minutes"|"every "*" min"|"every "*" mins")
+            n=$(echo "$w" | cut -d' ' -f2); num_ok "$n" && [ "$n" -ge 1 ] && [ "$n" -le 59 ] || return 1
+            echo "*/$n * * * *"; return ;;
+        "every "*" hour"|"every "*" hours")
+            n=$(echo "$w" | cut -d' ' -f2); num_ok "$n" && [ "$n" -ge 1 ] && [ "$n" -le 23 ] || return 1
+            echo "0 */$n * * *"; return ;;
+        daily|"daily "*)
+            mh=$(parse_time "${w#daily}") || return 1; echo "$mh * * *"; return ;;
+        weekdays*|"every weekday"*)
+            mh=$(parse_time "$(echo "$w" | sed 's/^every weekday//; s/^weekdays//')") || return 1; echo "$mh * * 1-5"; return ;;
+        weekends*|"every weekend"*)
+            mh=$(parse_time "$(echo "$w" | sed 's/^every weekend//; s/^weekends//')") || return 1; echo "$mh * * 0,6"; return ;;
+        monthly|"monthly "*)
+            r=${w#monthly}; r=$(echo "$r" | sed 's/^ *on the //; s/^ *on //; s/^ *//')
+            d=$(echo "$r" | sed -E -n 's/^([0-9]{1,2})(st|nd|rd|th)?( .*)?$/\1/p')
+            if [ -n "$d" ]; then r=$(echo "$r" | sed -E 's/^[0-9]+(st|nd|rd|th)? *//'); else d=1; fi
+            [ "$d" -ge 1 ] && [ "$d" -le 28 ] || return 1
+            mh=$(parse_time "$r") || return 1; echo "$mh $d * *"; return ;;
+    esac
+    # Days of the week: "sunday 4am", "every mon,wed,fri 18:00", "mon-fri 7am"
+    w=${w#every }
+    days=${w%% *} rest=""
+    [ "$days" = "$w" ] || rest=${w#* }
+    out=""
+    for part in $(echo "$days" | tr ',' ' '); do
+        case "$part" in
+            *-*) a=$(day_num "${part%-*}") && b=$(day_num "${part#*-}") || return 1; out="$out${out:+,}$a-$b" ;;
+            *) a=$(day_num "$part") || return 1; out="$out${out:+,}$a" ;;
+        esac
+    done
+    [ -n "$out" ] || return 1
+    mh=$(parse_time "$rest") || return 1
+    echo "$mh * * $out"
+}
+# A cron schedule -> plain words
+cron_say() {
+    [ "$1" = "@reboot" ] && { echo "when the TV starts"; return; }
+    set -f
+    # shellcheck disable=SC2086
+    set -- $1
+    set +f
+    mi=$1 hr=$2 dom=$3 mon=$4 dow=$5
+    at() { awk -v h="$1" -v m="$2" 'BEGIN { ap = h < 12 ? "AM" : "PM"; h12 = h % 12; if (h12 == 0) h12 = 12; printf "%d:%02d %s", h12, m, ap }'; }
+    dayname() { echo "$1" | sed 's/0/Sunday/; s/1/Monday/; s/2/Tuesday/; s/3/Wednesday/; s/4/Thursday/; s/5/Friday/; s/6/Saturday/; s/7/Sunday/'; }
+    if [ "$mi $hr $dom $mon $dow" = "* * * * *" ]; then echo "every minute"; return; fi
+    case "$mi" in \*/*) [ "$hr $dom $mon $dow" = "* * * *" ] && { echo "every ${mi#*/} minutes"; return; } ;; esac
+    if num_ok "$mi" && [ "$hr $dom $mon $dow" = "* * * *" ]; then [ "$mi" = 0 ] && echo "every hour" || echo "every hour at $mi minutes past"; return; fi
+    case "$hr" in \*/*) num_ok "$mi" && [ "$dom $mon $dow" = "* * *" ] && { echo "every ${hr#*/} hours"; return; } ;; esac
+    if num_ok "$mi" && num_ok "$hr" && [ "$mon" = "*" ]; then
+        t=$(at "$hr" "$mi")
+        if [ "$dom $dow" = "* *" ]; then echo "every day at $t"; return; fi
+        if [ "$dom" = "*" ]; then
+            case "$dow" in
+                1-5) echo "weekdays at $t" ;; 0,6|6,0) echo "weekends at $t" ;;
+                *[!0-9,-]*) echo "cron: $mi $hr $dom $mon $dow" ;;
+                *) echo "$(dayname "$dow" | sed 's/,/, /g; s/-/ to /g') at $t" ;;
+            esac
+            return
+        fi
+        if num_ok "$dom" && [ "$dow" = "*" ]; then
+            sfx=th; case "$dom" in 1|21|31) sfx=st ;; 2|22) sfx=nd ;; 3|23) sfx=rd ;; esac
+            echo "monthly on the $dom$sfx at $t"; return
+        fi
+    fi
+    echo "cron: $mi $hr $dom $mon $dow"
+}
+cron_need() {
+    have crontab && return 0
+    say "Scheduled jobs need Entware's cron."
+    confirm "Install it now?" || exit 1
+    need_mgr
+    "$MGR" pkg-add cron || die "cron didn't install."
+    [ -x "$INITD/S10cron" ] && { if have setsid; then setsid "$INITD/S10cron" start; else "$INITD/S10cron" start; fi; } < /dev/null > /dev/null 2>&1
+}
+cron_lines() { crontab -l 2>/dev/null | grep -v '^# DO NOT EDIT\|^# (' ; }
+# Numbered jobs: ours (tagged), and your own lines
+cron_jobs() { cron_lines | awk '/^#off# / { print; next } /^#/ || /^ *$/ || /^[A-Za-z_][A-Za-z0-9_]*=/ { next } { print }'; }
+cron_job() { cron_jobs | sed -n "${1}p"; }
+cron_id_of() { printf '%s' "$1" | sed -n 's|.* /opt/bin/tv cron exec \([0-9a-z]*\).*|\1|p'; }
+cron_desc() { printf '%s' "$1" | sed -n 's/.*# tv: //p'; }
+next_run() { # schedule -> "Tue 3:00 AM", with node
+    [ "$1" = "@reboot" ] && { echo "at the next start"; return; }
+    have node || return 0
+    CRON="$1" node -e '
+        const f = process.env.CRON.split(" "), lim = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
+        const set = (s, i) => { const [lo, hi] = lim[i], out = new Set();
+            for (const part of s.split(",")) { let [r, step] = part.split("/"); step = +step || 1;
+                let [a, b] = r === "*" ? [lo, hi] : r.split("-").map(Number); if (b === undefined) b = step > 1 ? hi : a;
+                for (let x = a; x <= b; x += step) out.add(i === 4 && x === 7 ? 0 : x); }
+            return out; };
+        const S = f.map(set), d = new Date(); d.setSeconds(0, 0);
+        for (let i = 0; i < 366 * 24 * 60; i++) { d.setMinutes(d.getMinutes() + 1);
+            if (S[0].has(d.getMinutes()) && S[1].has(d.getHours()) && S[3].has(d.getMonth() + 1) &&
+                (f[2] === "*" || f[4] === "*" ? S[2].has(d.getDate()) && S[4].has(d.getDay()) : S[2].has(d.getDate()) || S[4].has(d.getDay()))) {
+                const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], h = d.getHours();
+                const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                console.log(days[d.getDay()] + " " + mon[d.getMonth()] + " " + d.getDate() + ", " + ((h % 12) || 12) + ":" + String(d.getMinutes()).padStart(2, "0") + (h < 12 ? " AM" : " PM")); break; } }' 2>/dev/null
+}
+cron_cmd() {
+    sub=${1:-list}; [ $# -gt 0 ] && shift
+    case "$sub" in
+        list)
+            have crontab || { say "No scheduled jobs (Entware's cron isn't installed).  tv help cron shows how to add one."; return 0; }
+            jobs=$(cron_jobs)
+            [ -n "$jobs" ] || { say "No scheduled jobs.  Add one: tv cron add \"daily 3am\" <command>   (tv help cron)"; return 0; }
+            say "TV time is now $(now_str)."
+            i=0
+            printf '%s\n' "$jobs" | while IFS= read -r line; do
+                i=$((i + 1))
+                off=0
+                case "$line" in "#off# "*) off=1; line=${line#\#off\# } ;; esac
+                case "$line" in @*) sched=${line%% *} ;; *) sched=$(printf '%s' "$line" | cut -d' ' -f1-5) ;; esac
+                id=$(cron_id_of "$line")
+                if [ -n "$id" ]; then what=$(cron_desc "$line"); else what=$(printf '%s' "$line" | cut -d' ' -f"$( [ "${sched#@}" != "$sched" ] && echo 2 || echo 6)"-); fi
+                printf '%s\n' "${B}$i.${N} $(cron_say "$sched")$( [ "$off" = 1 ] && echo "  ${Y}(paused)${N}")"
+                printf '   %s\n' "$what"
+                [ -z "$id" ] && printf '   %s\n' "${D}(your own line, not added by tv)${N}"
+                if [ "$off" = 0 ]; then nr=$(next_run "$sched"); [ -n "$nr" ] && printf '   %s\n' "${D}next: $nr${N}"; fi
+                if [ -n "$id" ] && [ -f "$CRONLOG/$id.last" ]; then
+                    read -r day clock code < "$CRONLOG/$id.last"
+                    [ "$code" = 0 ] && st="${G}worked${N}" || st="${R}failed (exit $code)${N}"
+                    printf '   %s\n' "${D}last ran $day $clock:${N} $st"
+                fi
+            done ;;
+        add)
+            toast=0
+            while :; do case "$1" in --toast) toast=1; shift ;; -y|--yes) YES=1; shift ;; *) break ;; esac; done
+            [ $# -ge 2 ] || { help_for cron; exit 1; }
+            sched=$(cron_when "$1") || die "\"$1\" isn't a time tv understands.  Try: daily 3am, every 15 minutes, weekdays 7:30am, sunday 4am, monthly 1st 2am, at boot"
+            shift
+            cmd=$*
+            cron_need
+            id=$(date +%s | tail -c 7)$$
+            mkdir -p "$CRONDIR" "$CRONLOG"
+            desc=$(printf '%s' "$cmd" | tr '\n' ' ' | cut -c1-120)
+            say "Runs $(cron_say "$sched") (TV time is now $(now_str)):"
+            say "  $cmd"
+            confirm "Save it?" || { say "Not saved."; exit 1; }
+            printf '#!/bin/sh\n# %s\n%s\n' "$(cron_say "$sched")" "$cmd" > "$CRONDIR/$id.sh"
+            [ "$toast" = 1 ] && touch "$CRONDIR/$id.toast"
+            # Read it all first: writing while it's being read could empty it
+            cur=$(cron_lines)
+            { [ -n "$cur" ] && printf '%s\n' "$cur"; printf '%s /opt/bin/tv cron exec %s # tv: %s\n' "$sched" "$id" "$(printf '%s' "$desc" | tr '%' ' ')"; } | crontab - ||
+                die "Couldn't save it to cron."
+            say "${G}Saved.${N}  tv cron lists your jobs; tv cron run $(cron_jobs | wc -l | tr -d ' ') tries it now." ;;
+        when)
+            [ -n "$1" ] || die "Try a time, e.g. tv cron when \"weekdays 7am\""
+            sched=$(cron_when "$*") || die "\"$*\" isn't a time tv understands.  tv help cron lists what works."
+            say "\"$*\" means: $(cron_say "$sched")  ${D}(cron: $sched)${N}"
+            nr=$(next_run "$sched"); [ -n "$nr" ] && say "Next: $nr" ;;
+        exec)
+            # Run by cron: the job, its log, and how it went
+            id=$1
+            case "$id" in ''|*[!0-9a-z]*) exit 1 ;; esac
+            [ -f "$CRONDIR/$id.sh" ] || exit 1
+            mkdir -p "$CRONLOG"
+            start=$(date +%s)
+            { echo "== $(date '+%Y-%m-%d %H:%M:%S')"; PATH="/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin" HOME=/home/root sh "$CRONDIR/$id.sh" 2>&1; echo "$?" > "$CRONLOG/$id.code"; } >> "$CRONLOG/$id.log"
+            code=$(cat "$CRONLOG/$id.code" 2>/dev/null); rm -f "$CRONLOG/$id.code"
+            echo "$(date '+%Y-%m-%d %H:%M') ${code:-1}" > "$CRONLOG/$id.last"
+            tail -n 300 "$CRONLOG/$id.log" > "$CRONLOG/$id.log.new" && mv "$CRONLOG/$id.log.new" "$CRONLOG/$id.log"
+            if [ -f "$CRONDIR/$id.toast" ] && have luna-send; then
+                [ "${code:-1}" = 0 ] && msg="Done: $(sed -n 3p "$CRONDIR/$id.sh" | cut -c1-60)" || msg="Failed: $(sed -n 3p "$CRONDIR/$id.sh" | cut -c1-60)"
+                luna -a webosbrew luna://com.webos.notification/createToast "{\"sourceId\":\"webosbrew\",\"message\":\"$(json_text "$msg ($(($(date +%s) - start))s)")\"}" > /dev/null
+            fi
+            exit "${code:-1}" ;;
+        run|on|off|remove|log)
+            n=$1
+            num_ok "$n" || die "Name a job by its number: tv cron lists them."
+            line=$(cron_job "$n")
+            [ -n "$line" ] || die "There's no job $n.  tv cron lists them."
+            id=$(cron_id_of "$line")
+            case "$sub" in
+                run)
+                    [ -n "$id" ] || { cmd=$(printf '%s' "${line#\#off\# }" | cut -d' ' -f6-); say "Running: $cmd"; sh -c "$cmd"; exit $?; }
+                    say "Running job $n: $(cron_desc "$line")"
+                    before=$(cat "$CRONLOG/$id.log" 2>/dev/null | wc -l)
+                    "$0" cron exec "$id"; code=$?
+                    tail -n +"$((before + 2))" "$CRONLOG/$id.log"
+                    [ "$code" = 0 ] && say "${G}It worked.${N}" || say "${R}It failed (exit $code).${N}"
+                    exit "$code" ;;
+                log)
+                    [ -n "$id" ] || die "Job $n is your own line, so tv doesn't keep its output."
+                    [ -s "$CRONLOG/$id.log" ] && tail -n 60 "$CRONLOG/$id.log" || say "Job $n hasn't run yet." ;;
+                on|off|remove)
+                    lnum=$(cron_lines | grep -n -F -x -- "$line" | head -n 1 | cut -d: -f1)
+                    case "$sub" in
+                        off) case "$line" in "#off# "*) say "Job $n is already paused."; exit 0 ;; esac; new="#off# $line" ;;
+                        on) new=${line#\#off\# } ;;
+                        remove) confirm "Remove job $n ($(cron_desc "$line"))?" || { say "Kept it."; exit 1; }; new="" ;;
+                    esac
+                    cur=$(cron_lines)
+                    printf '%s\n' "$cur" | awk -v n="$lnum" -v new="$new" 'NR == n { if (new != "") print new; next } { print }' | crontab - || die "Couldn't change cron."
+                    if [ "$sub" = remove ] && [ -n "$id" ]; then rm -f "$CRONDIR/$id.sh" "$CRONDIR/$id.toast" "$CRONLOG/$id.log" "$CRONLOG/$id.last"; fi
+                    case "$sub" in off) say "Paused job $n.  tv cron on $n resumes it." ;; on) say "Job $n runs again." ;; remove) say "Removed job $n." ;; esac ;;
+            esac ;;
+        *) help_for cron; exit 1 ;;
+    esac
+}
+
+# ---------------------------------------------------------------- automation: autostart and keys
+
+auto_name_ok() { case "$1" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac; return 0; }
+autostart() {
+    sub=${1:-list}; [ $# -gt 0 ] && shift
+    case "$sub" in
+        list)
+            [ -d "$BOOTD" ] || { say "The Homebrew Channel's boot folder ($BOOTD) isn't there."; return 1; }
+            say "Run at startup by the Homebrew Channel, in this order:"
+            for f in "$BOOTD"/*; do
+                [ -f "$f" ] || continue
+                n=${f##*/}
+                if [ -x "$f" ]; then st="${G}on${N}"; else st="${D}off${N}"; fi
+                what=$(grep -v '^#\|^ *$\|^PATH=\|^export\|^exec >' "$f" | head -n 1 | cut -c1-70)
+                [ "$n" = S99entware ] && what="Entware's own: mounts /opt and starts its services"
+                printf '  %-20s %-4s %s\n' "$n" "$st" "$what"
+            done ;;
+        add)
+            n=$1; shift
+            auto_name_ok "$n" || die "Name it with letters, numbers, - or _, e.g. tv autostart add hello toast \"TV is up\""
+            [ $# -gt 0 ] || die "Say what to run, e.g. tv autostart add $n toast \"TV is up\""
+            [ -e "$BOOTD/$n" ] && die "$BOOTD/$n already exists.  tv autostart show $n"
+            say "At startup, run:  $*"
+            confirm "Add it as $n?" || { say "Not added."; exit 1; }
+            mkdir -p "$BOOTD"
+            { echo "#!/bin/sh"; echo "# $n: added by tv autostart"; echo "# Its output goes to /tmp/autostart-$n.log"
+              echo "PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/root; export PATH HOME"
+              echo "exec > /tmp/autostart-$n.log 2>&1"; echo "$*"; } > "$BOOTD/$n"
+            chmod 755 "$BOOTD/$n"
+            say "${G}Added.${N}  It runs from the next start.  Try it now: sh $BOOTD/$n" ;;
+        on|off|remove|show)
+            n=$1
+            auto_name_ok "$n" || die "Name a script: tv autostart lists them."
+            f="$BOOTD/$n"
+            [ -f "$f" ] || die "There's no $n.  tv autostart lists them."
+            [ "$n" = S99entware ] && [ "$sub" != show ] && die "S99entware is Entware's own, so tv leaves it alone.  (webos-entware repairs it.)"
+            case "$sub" in
+                show) cat "$f" ;;
+                on) chmod 755 "$f"; say "$n runs at startup." ;;
+                off) chmod 644 "$f"; say "$n won't run at startup (kept, so tv autostart on $n brings it back)." ;;
+                remove) confirm "Delete $n?" || { say "Kept it."; exit 1; }; rm -f "$f"; say "Removed $n." ;;
+            esac ;;
+        *) help_for autostart; exit 1 ;;
+    esac
+}
+keys() {
+    sub=${1:-list}; [ $# -gt 0 ] && shift
+    case "$sub" in
+        list)
+            [ -s "$KEYS" ] || { say "No SSH keys yet ($KEYS).  Add yours: tv keys add <github-user>"; return 0; }
+            i=0
+            grep -v '^ *#\|^ *$' "$KEYS" | while read -r a b c; do
+                i=$((i + 1))
+                case "$a" in ssh-*|ecdsa-*|sk-*) t=$a k=$b cm=$c ;; *) t=$b k=$c cm="(with options)" ;; esac
+                printf '  %s. %-20s ...%s  %s\n' "$i" "$t" "$(printf '%s' "$k" | tail -c 13)" "$cm"
+            done ;;
+        add)
+            src=$*
+            [ -n "$src" ] || die "Say whose: tv keys add <github-user>, a key, or a .pub file"
+            case "$src" in
+                ssh-*|ecdsa-*|sk-*) new=$src ;;
+                *)
+                    if [ -f "$src" ]; then new=$(cat "$src")
+                    else
+                        printf '%s' "$src" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$' || die "That isn't a key, a file or a GitHub user name."
+                        tmp=/tmp/tv-keys-$$
+                        curl -fsSL -m 15 -o "$tmp" "https://github.com/$src.keys" || { rm -f "$tmp"; die "Couldn't get github.com/$src.keys"; }
+                        new=$(cat "$tmp"); rm -f "$tmp"
+                        [ -n "$new" ] || die "$src has no SSH keys on GitHub."
+                        new=$(printf '%s\n' "$new" | sed "s/\$/ github:$src/")
+                    fi ;;
+            esac
+            printf '%s\n' "$new" | grep -qE '^(ssh-|ecdsa-|sk-)' || die "That doesn't look like an SSH public key."
+            mkdir -p "$(dirname "$KEYS")"; chmod 700 "$(dirname "$KEYS")"
+            touch "$KEYS"; chmod 600 "$KEYS"
+            printf '%s\n' "$new" | grep -E '^(ssh-|ecdsa-|sk-)' | while IFS= read -r k; do
+                body=$(printf '%s' "$k" | cut -d' ' -f2)
+                if grep -qF -- "$body" "$KEYS"; then say "Already there: $(printf '%s' "$k" | cut -d' ' -f1,3-)"; continue; fi
+                printf '%s\n' "$k" >> "$KEYS"
+                say "${G}Added${N} $(printf '%s' "$k" | cut -d' ' -f1,3-)"
+            done ;;
+        remove)
+            n=$1
+            num_ok "$n" || die "Name a key by its number: tv keys lists them."
+            line=$(grep -v '^ *#\|^ *$' "$KEYS" 2>/dev/null | sed -n "${n}p")
+            [ -n "$line" ] || die "There's no key $n."
+            total=$(grep -vc '^ *#\|^ *$' "$KEYS")
+            [ "$total" -gt 1 ] || say "${Y}That's your only key: after removing it, logging in needs a password or telnet.${N}"
+            confirm "Remove key $n ($(printf '%s' "$line" | awk '{ print $1, $NF }'))?" || { say "Kept it."; exit 1; }
+            grep -vF -x -- "$line" "$KEYS" > "$KEYS.new" && mv "$KEYS.new" "$KEYS" && chmod 600 "$KEYS"
+            say "Removed key $n." ;;
+        *) help_for keys; exit 1 ;;
+    esac
+}
+done_cmd() {
+    [ $# -gt 0 ] || die "Say what to run, e.g. tv done ent upgrade"
+    start=$(date +%s)
+    "$@"; code=$?
+    secs=$(($(date +%s) - start))
+    if [ "$code" = 0 ]; then msg="Done: $* (${secs}s)"; else msg="Failed: $* (exit $code, ${secs}s)"; fi
+    if have luna-send; then
+        luna -a webosbrew luna://com.webos.notification/createToast "{\"sourceId\":\"webosbrew\",\"message\":\"$(json_text "$(printf '%s' "$msg" | cut -c1-80)")\"}" > /dev/null
+    fi
+    say "$msg"
+    exit "$code"
+}
+
+# ---------------------------------------------------------------- dispatch
+
+case "$1" in -y|--yes) YES=1; shift ;; esac
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+# -y anywhere answers yes, except where the words are someone's own text
+strip=1
+case "$cmd" in
+    done|toast|launch|serve|qr|settings|setting) strip=0 ;;
+    cron|autostart|boot) [ "${1:-}" = add ] && strip=0 ;;
+esac
+if [ "$strip" = 1 ]; then
+    n=$#
+    for a do case "$a" in -y|--yes) YES=1 ;; *) set -- "$@" "$a" ;; esac; done
+    shift "$n"
+fi
+
+case "$cmd" in
+    '') dashboard ;;
+    help|-h|--help) if [ -n "$1" ]; then help_for "$1"; else usage; fi ;;
+    info) info_cmd ;;
+    # Packages
+    search|files|owns|du|upgradable|list) [ "$cmd" = list ] && [ -n "$1" ] && { "$ENT" list | grep -i -F -- "$1"; exit; }; exec "$ENT" "$cmd" "$@" ;;
+    update) exec "$ENT" update ;;
+    show) need_mgr; pkg_ok "$1" || die "Name a package, e.g. tv show htop"; exec "$MGR" pkginfo "$1" ;;
+    install) pkg_install "$@" ;;
+    remove|uninstall) pkg_remove "$@" ;;
+    browse) browse "$1" ;;
+    why) pkg_why "$1" ;;
+    cleanup) cleanup ;;
+    upgrade) need_mgr; [ "$YES" = 1 ] && y=-y || y=""; if [ -n "$1" ]; then exec "$MGR" upgrade "$1" $y; else exec "$MGR" upgrade $y; fi ;;
+    # Add-ons and services
+    addon|addons)
+        need_mgr
+        sub=${1:-list}; [ $# -gt 0 ] && shift
+        case "$sub" in
+            list) exec "$MGR" addons ;;
+            add|remove|info|password)
+                [ -n "$1" ] || die "Name an add-on, e.g. tv addon $sub filebrowser.  tv addon lists them."
+                n=$1; shift
+                [ "$YES" = 1 ] && set -- "$@" -y
+                exec "$MGR" "$sub" "$n" "$@" ;;
+            *) die "Try: tv addon list, add, remove, info or password" ;;
+        esac ;;
+    svc|service|services) svc_cmd "$@" ;;
+    share) share ;;
+    # Apps
+    apps|launch|close|applog) exec "$WTV" "$cmd" "$@" ;;
+    running) running ;;
+    app) app_cmd "$@" ;;
+    open) open_url "$1" ;;
+    youtube|yt) youtube "$1" ;;
+    # The screen
+    toast) exec "$WTV" toast "$@" ;;
+    shot|screenshot|tvshot) exec "$WTV" tvshot "$@" ;;
+    volume|vol) volume "$1" ;;
+    mute) mute "$1" ;;
+    unmute) mute off ;;
+    input|inputs) input "$1" ;;
+    screen) screen "$1" ;;
+    power) power "$1" ;;
+    reboot|restart) reboot_tv ;;
+    settings|setting) settings "$@" ;;
+    # System
+    top) top_cmd ;;
+    temp|temperature) t=$(temp_c); [ -n "$t" ] && say "The chip is at $t °C." || die "The TV doesn't report a temperature here." ;;
+    space|disk|df) space "$1" ;;
+    ports) ports ;;
+    where|which) where "$1" ;;
+    logs|log) logs "$@" ;;
+    net|network) net "$@" ;;
+    wake|wol) wake "$1" ;;
+    usb) usb "$@" ;;
+    report) report ;;
+    # Files
+    serve) serve "$@" ;;
+    qr) qr "$*" ;;
+    backup) backup "$1" ;;
+    restore) restore "$1" ;;
+    # Automation
+    cron) cron_cmd "$@" ;;
+    autostart|boot) [ "$1" = add ] && case "$2" in -y|--yes) YES=1; n=$3; shift 3; set -- add "$n" "$@" ;; esac; autostart "$@" ;;
+    keys|key) keys "$@" ;;
+    done) done_cmd "$@" ;;
+    # webos-entware's own commands, for anyone who knows them
+    doctor|status) need_mgr; exec "$MGR" status ;;
+    *) printf '%s\n' "tv $cmd isn't a command.  tv help lists them." >&2; exit 1 ;;
+esac
+TVCLI
+    chmod 755 "$TV_CLI"
+    success "Installed the tv command: tv help lists everything, and Tab completes."
+}
+
+# The helpers, written again: ent, webos-tv, tv and their tab completion
+refresh_helpers() {
+    opt_ours || error_exit "Entware isn't mounted on /opt. Run '$(fix_cmd)' first."
+    install_entwrap
+    write_tv_helpers
+    write_tv_cli
+}
+
+tv_helpers_ok() { [ -x "$TV_HELPER" ] && [ -e "$TV_CLI" ]; }
 
 # Free space on the data partition, in KB (webOS shares it)
 data_free_kb() {
@@ -3414,6 +4855,7 @@ install_entware() {
     setup_identity_files
     install_entwrap
     write_tv_helpers
+    write_tv_cli
     if [ "$SETUP_SHELL" = 1 ]; then
         setup_shell_environment
     else
@@ -3436,7 +4878,7 @@ install_entware() {
     echo
     show_status
     echo
-    [ "$SETUP_SHELL" = 1 ] && info "Disconnect and SSH in again to get the bash shell. Type 'helpme' for shortcuts."
+    [ "$SETUP_SHELL" = 1 ] && info "Disconnect and SSH in again to get the bash shell. Type 'tv' to see how things are, or 'tv help' for everything."
     return 0
 }
 
@@ -3809,6 +5251,8 @@ update_command() {
         [ "$(sha256sum "$UW/installer.sh" | awk '{print $1}')" = "${sline%% *}" ] && grep -qs "$MARKER" "$UW/installer.sh"; then
         cp "$UW/installer.sh" "$MANAGER.new" && chmod 755 "$MANAGER.new" && mv -f "$MANAGER.new" "$MANAGER" &&
             success "Updated the webos-entware command to v$1."
+        # The new version's helpers (tv, ent, tab completion) come with it
+        "$MANAGER" helpers > /dev/null 2>&1 && success "Updated the tv, ent and webOS helpers."
     fi
     return 0
 }
@@ -3935,7 +5379,7 @@ show_status() {
             note "The 32-bit build works here, but the 64-bit build is faster. To switch: uninstall, then install with --arch=aarch64-k3.10."
         fi
     fi
-    tv_helpers_ok || issue "The webOS helpers (toast, launch, apps...) are missing. Fix: $(fix_cmd)"
+    tv_helpers_ok || issue "The webOS helpers (tv, toast, launch, apps...) are missing. Fix: webos-entware helpers"
     if ! entware_safe; then
         bad=""
         for k in $OPT_KEY; do { [ -e "$k" ] || [ -L "$k" ]; } && ! entry_safe "$k" && { bad=$k; break; }; done
@@ -4095,7 +5539,7 @@ if [ "$1" = web ]; then
 fi
 for arg in "$@"; do
     case "$arg" in
-        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates|installed|logs|catalog)
+        install|uninstall|status|locate|upgrade|addons|doctor|clean|app-update|updates|installed|logs|catalog|helpers)
             # add and remove take only options after the name
             [ -z "$ADDON" ] && [ -z "$MOVE_TO" ] || { usage; exit 1; }
             case "$arg" in doctor) ACTION="status" ;; clean) ACTION="uninstall" ;; *) ACTION="$arg" ;; esac ;;
@@ -4192,6 +5636,7 @@ case "$ACTION" in
     installed) installed_list ;;
     search) search_list ;;
     catalog) catalog_json ;;
+    helpers) refresh_helpers ;;
     pkginfo) pkg_info_json ;;
     pkg-add) pkg_add ;;
     pkg-remove) pkg_remove ;;

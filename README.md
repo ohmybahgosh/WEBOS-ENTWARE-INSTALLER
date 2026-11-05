@@ -62,6 +62,7 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 - [Options](#options)
 - [After installing](#after-installing)
 - [Managing the install](#managing-the-install)
+- [The tv command](#the-tv-command)
 - [The ent helper](#the-ent-helper)
 - [Shell setup and shortcuts](#shell-setup-and-shortcuts)
 - [webOS helpers](#webos-helpers)
@@ -146,6 +147,7 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 - ✅ **Checks the result** when it finishes and prints a summary.
 - ✅ **Survives reboots** with a Homebrew Channel boot script that remounts `/opt` and starts Entware services, plus a backup remount at SSH login if the boot script didn't run.
 - ✅ **`doctor` check** that shows what's installed and says exactly what to fix.
+- ✅ **One `tv` command** for everything over SSH: packages, add-ons, services, apps, volume and inputs, cron jobs in plain English, backups, SSH keys and more, with Tab completion throughout.
 - ✅ **`ent` helper** for searching, installing and checking packages, with Tab completion for `ent`, `opkg` and package names. `opkg` itself is never replaced.
 - ✅ **Saves itself as `webos-entware`**, so status, repair and uninstall work any time, even after a reboot wipes `/tmp`.
 - ✅ **Optional bash shell** with nano, colors, a neon prompt and handy aliases, plus a safe fallback to the stock shell if bash is ever missing or broken.
@@ -288,8 +290,8 @@ On a TV with a 32-bit kernel it recommends the 32-bit build, explains that this 
 
 ## After installing
 
-- SSH in again to get bash. Type `helpme` for the shortcuts.
-- Try `ent search htop`, then `ent install htop`.
+- SSH in again to get bash. Type `tv` to see how the TV is doing, and `tv help` for everything it can do.
+- Try `tv search htop`, then `tv install htop`.
 - Run `webos-entware doctor` any time to check everything.
 
 ---
@@ -314,6 +316,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware web start` | The [phone dashboard](#manage-from-your-phone): prints its address and sign-in code.  `web stop` stops it |
 | `webos-entware installed` | List installed packages with their version, size and what needs them (`--json` for scripts) |
 | `webos-entware search <word>` | Search Entware's packages, names first, marking what's installed |
+| `webos-entware helpers` | Write `tv`, `ent`, the webOS helpers and Tab completion again (app updates do this too) |
 | `webos-entware pkginfo <name>` | All about one package: its whole description, sizes, and what else it would install (`--json` for scripts) |
 | `webos-entware catalog --json` | The packages the app's Browse tab lists, with their category data; `--all` for libraries and modules too |
 | `webos-entware pkg-add <name>` | Install one package with its webOS setup, like `ent install` |
@@ -335,6 +338,66 @@ The installer also writes `/opt/etc/webos-entware/install.info` with the install
 Install, repair, uninstall, locate, upgrade and installing or removing a package take a lock, so two of them can never run at once, from SSH or the TV app.  If one is running, the other says so and stops.  A lock left by a task that was stopped is cleared on its own.
 
 If you piped the installer into sh, there's no file to copy, so it saves the published version from GitHub instead. If that download fails, it tells you, and you can download it to `/opt/bin/webos-entware` yourself.
+
+---
+
+## The tv command
+
+`tv` puts everything in one place, with Tab completion for its commands and what each one takes: package names, add-ons, services, app IDs, inputs, settings, cron jobs and more.  `tv` on its own shows how the TV and Entware are doing, and `tv help <command>` gives examples.
+
+The older commands all keep working: `ent`, `entwrap`, `webos-entware`, `webos-tv`, `toast`, `launch`, `close`, `apps`, `applog`, `tvshot` and the `entup`, `entlist` and `entfix` shortcuts.  `tv` hands off to them where they already do the job.
+
+| Packages | |
+|:--|:--|
+| `tv search <word>`, `tv show <pkg>` | Search, and everything about one package: its description, size and what else it installs |
+| `tv install <pkg>`, `tv remove <pkg>` | Install or remove, with the webOS setup some need.  With `fzf` installed, leave the name out to pick from a list |
+| `tv browse [category]` | Packages by category, like the TV app's Browse |
+| `tv list`, `tv files`, `tv owns`, `tv du` | What's installed, a package's files, where a file came from, the biggest packages |
+| `tv why <pkg>` | What needs a package |
+| `tv cleanup` | Remove packages nothing needs any more |
+| `tv update`, `tv upgrade [pkg]`, `tv upgradable` | The package list and updates |
+
+| Add-ons, services and apps | |
+|:--|:--|
+| `tv addon [list\|add\|remove\|info\|password] <name>` | The [add-ons](#add-ons) |
+| `tv svc [list\|start\|stop\|restart\|enable\|disable\|logs] <name>` | Every Entware service, whether it came from an add-on or not |
+| `tv share` | The addresses for File Browser, Samba, the media server and the rest |
+| `tv apps`, `tv launch`, `tv close`, `tv running` | Apps, and what's on screen |
+| `tv app install <ipk or link>`, `tv app uninstall <id>` | Your own app packages |
+| `tv open <url>`, `tv youtube <link>` | Open a page in the TV's browser, or play a video in YouTube |
+
+| The screen | |
+|:--|:--|
+| `tv toast <message>`, `tv shot [file]` | A notification on the TV, or a screenshot |
+| `tv volume [up\|down\|0-100]`, `tv mute [on\|off]` | The volume |
+| `tv input [list\|hdmi1-4]` | Switch inputs |
+| `tv screen off\|on` | Turn the picture off or on, with the TV still running |
+| `tv power off`, `tv reboot` | Turn the TV off, or restart it (both ask first) |
+| `tv settings get\|set <category> [key=value]` | Picture, sound and other settings, like `tv settings set picture backlight=40` |
+
+| System and files | |
+|:--|:--|
+| `tv info`, `tv top`, `tv temp` | The TV's details, what's busy, and how hot the chip is |
+| `tv space [clean]` | What's using storage, and clearing caches, old logs and screenshots |
+| `tv ports` | What's listening on the network, and which program it is |
+| `tv where <command>` | Where a command comes from (Entware, webOS or the Homebrew Channel) and which one runs |
+| `tv net [test\|speed <host>]`, `tv wake <mac>` | Network details, a connection test, a speed test with iperf3, and Wake-on-LAN |
+| `tv usb [eject <drive>]` | USB drives, and unmounting one safely |
+| `tv logs [boot\|tasks\|text]`, `tv report` | The logs, and what to put in a GitHub issue |
+| `tv serve [folder] [port]`, `tv qr <text>` | Share a folder over HTTP with a QR code for your phone, or show any text as a QR code |
+| `tv backup [where]`, `tv restore <file>` | Your settings, add-ons, packages, cron jobs, SSH keys and boot scripts, in one file.  It goes to a USB drive if one's plugged in.  It holds your add-ons' passwords, so keep it private |
+
+| Automation | |
+|:--|:--|
+| `tv cron add "<when>" <command>` | A scheduled job, with the time in plain words (below) |
+| `tv cron [list\|run\|on\|off\|remove\|log] <n>` | Your jobs in plain English, with when each runs next and how it last went |
+| `tv autostart [list\|add\|on\|off\|remove\|show]` | Scripts the Homebrew Channel runs when the TV starts |
+| `tv keys [list\|add\|remove]` | Who can log in over SSH.  `tv keys add <github-user>` adds their keys from GitHub |
+| `tv done <command>` | Run something long, then pop up on the TV when it's done |
+
+**Cron in plain words.**  `tv cron add "daily 3am" rclone copy gdrive:Photos /opt/files/Media/Photos` reads the time back in plain English and asks before saving.  It understands `every 15 minutes`, `every 2 hours`, `hourly`, `daily 3am`, `every day at 6:30pm`, `weekdays 7am`, `weekends 9:30am`, `mon,wed,fri 18:00`, `sunday 4am`, `weekly`, `monthly`, `monthly 15th 2am`, `at boot`, or a cron line like `"*/10 * * * *"`.  `tv cron when "<time>"` checks one without saving anything, and `--toast` pops up on the TV when the job finishes.  Jobs go in root's crontab, tagged with their description, so `crontab -e` still works.  It needs Entware's `cron` package, and offers to install it.
+
+Anything that changes or removes something asks first.  `-y` answers yes, and without a terminal to ask on, `tv` doesn't go ahead.
 
 ---
 
