@@ -187,7 +187,7 @@ case "$*" in
     *createToast*) echo '{"returnValue": true}' ;;
     *audio/getVolume*) echo '{"returnValue": true, "volume": 12, "muted": false}' ;;
     *audio/setVolume*|*audio/volumeUp*|*audio/volumeDown*|*audio/setMuted*) echo '{"returnValue": true}' ;;
-    *eim/getAllInputStatus*) echo '{"returnValue": true, "devices": [{"id": "HDMI_1", "label": "HDMI 1", "appId": "com.webos.app.hdmi1", "connected": true}, {"id": "HDMI_2", "label": "Xbox", "appId": "com.webos.app.hdmi2", "connected": false}]}' ;;
+    *eim/getAllInputStatus*) echo '{"returnValue": true, "devices": [{"hdmiPlugIn": true, "connected": true, "label": "HDMI 1", "id": "HDMI_1", "subList": [{"id": "SIMPLINK", "portId": 1}, {"id": "URCU", "connectedInput": "HDMI_1"}], "appId": "com.webos.app.hdmi1"}, {"hdmiPlugIn": false, "connected": true, "id": "HDMI_2", "label": "Xbox", "subList": [], "appId": "com.webos.app.hdmi2"}]}' ;;
     *getForegroundAppInfo*) echo '{"returnValue": true, "appId": "com.webos.app.hdmi1"}' ;;
     *tvpower/power/*) echo '{"returnValue": true}' ;;
     *settingsservice/getSystemSettings*) echo '{"returnValue": true, "category": "picture", "settings": {"backlight": "40", "contrast": "85"}}' ;;
@@ -1194,8 +1194,16 @@ ok "an installed package says so, with its version and that Entware needs it" 'p
 import json,sys; d=json.load(open(sys.argv[1]))
 assert d[\"installed\"] is True and d[\"installedVersion\"] == \"1.0-1\" and d[\"base\"] is True and d[\"commands\"] == [\"bash\"], d
 " "$W/out"'
+run pkginfo htop
+ok "pkginfo without --json reads well: size, what it adds, the add-on and how to install" 'grep -q "^htop  3.4.1-1  (not installed)" "$W/out" && grep -q "Size .*130 KB to download, 290 KB installed" "$W/out" && grep -q "Also adds .*2 more (libncurses, terminfo), 313 KB" "$W/out" && grep -q "Add-on .*htop, not added yet.  tv addon add htop sets it up" "$W/out" && grep -q "^it allows to scroll the list.$" "$W/out" && grep -q "^tv install htop installs it.$" "$W/out"'
+run pkginfo myapp
+ok "pkginfo text keeps quotes and backslashes" 'grep -q "An app that \"quotes\" \\\\ things" "$W/out"'
+run pkginfo bash
+ok "pkginfo text for an installed package" 'grep -q "^bash  .*(installed" "$W/out" && grep -q "Commands .*bash" "$W/out" && grep -q "^tv remove bash removes it.$" "$W/out"'
 run pkginfo dropbear --json
 ok "pkginfo names the Homebrew Channel's copy" 'grep -q "\"system\":\"/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear\"" "$W/out"'
+run pkginfo dropbear
+ok "and says so in plain words" 'grep -q "Note .*the Homebrew Channel already has dropbear$" "$W/out"'
 run pkg-add htop -y
 run pkginfo htop --json
 ok "after installing it, pkginfo says it's installed and adds nothing" 'python3 -c "
@@ -1474,7 +1482,7 @@ ok "and sets it, turns it up and mutes" 'grep -q "audio/setVolume {\"volume\":30
 ! tvr volume 300
 ok "a volume over 100 is refused" 'grep -q "0 to 100" "$W/out"'
 tvr input
-ok "tv input lists the inputs, marking the one on screen" 'grep -q "^\* HDMI_1" "$W/out" && grep -q "HDMI_2 .*Xbox" "$W/out"'
+ok "tv input lists the inputs, marking the one on screen" 'grep -q "^\* hdmi1 .*plugged in" "$W/out" && grep -q "^  hdmi2 .*Xbox *$" "$W/out" && ! grep -q "SIMPLINK\|URCU" "$W/out"'
 tvr input hdmi2
 ok "tv input hdmi2 switches to it" 'grep -q "applicationManager/launch {\"id\":\"com.webos.app.hdmi2\"" /tmp/luna.log'
 tvr screen off
@@ -1509,6 +1517,11 @@ tvr where sh
 ok "tv where says where a command comes from" 'grep -q "/bin/sh .*webOS" "$W/out"'
 ! tvr where nosuchcommand
 ok "and when there isn't one" 'grep -q "no nosuchcommand on the TV" "$W/out"'
+printf '#!/bin/sh\nprintf "sshfs  3.7.2-4\\n    Mount remote system over sftp.\\nsshguard  2.5.1-1 [installed]\\n    Protects hosts.\\n"\n' > "$W/fakemgr"; chmod +x "$W/fakemgr"
+! (cd /tmp && TV_MGR="$W/fakemgr" $SH /opt/bin/tv where ssh) > "$W/out" 2>&1
+ok "and names what Entware has, one line each" 'grep -q "^  Entware has sshfs$" "$W/out" && grep -q "^  Entware has sshguard$" "$W/out" && ! grep -q "Mount" "$W/out"'
+tvr list nosuchpkg
+ok "tv list with no match says so" 'grep -q "Nothing installed matches nosuchpkg" "$W/out"'
 tvr ports
 ok "tv ports lists what's listening" 'grep -q "^  PORT *TYPE *PROGRAM" "$W/out"'
 tvr top

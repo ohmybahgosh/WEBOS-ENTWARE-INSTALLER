@@ -2169,11 +2169,12 @@ input() {
             r=$(luna luna://com.webos.service.eim/getAllInputStatus '{}')
             ok "$r" || die "Couldn't read the inputs: $(err "$r")"
             f=$(jval "$(luna "$SAM/getForegroundAppInfo" '{}')" appId)
-            printf '%s\n' "$r" | tr '\n' ' ' | sed 's/}, *{/}\n{/g' | while IFS= read -r i || [ -n "$i" ]; do
-                id=$(jval "$i" id); [ -n "$id" ] || continue
-                label=$(jval "$i" label) app=$(jval "$i" appId) c=$(jval "$i" connected)
+            printf '%s\n' "$r" | tr '\n' ' ' | sed 's/"subList": *\[[^]]*\]//g; s/}, *{/}\n{/g' | while IFS= read -r i || [ -n "$i" ]; do
+                app=$(jval "$i" appId); case "$app" in com.webos.app.*) ;; *) continue ;; esac
+                id=$(jval "$i" id) label=$(jval "$i" label) c=$(jval "$i" hdmiPlugIn)
+                [ -n "$c" ] || c=$(jval "$i" connected)
                 [ "$app" = "$f" ] && mark='*' || mark=' '
-                printf '%s %-10s %-20s %s\n' "$mark" "$id" "${label:-$id}" "$( [ "$c" = true ] && echo connected || echo '')"
+                printf '%s %-7s %-22s %s\n' "$mark" "${app#com.webos.app.}" "${label:-$id}" "$( [ "$c" = true ] && echo 'plugged in' || echo '')"
             done
             say "(* on screen)  tv input hdmi2 switches." ;;
         *)
@@ -2219,8 +2220,15 @@ settings() {
             for k in "$@"; do case "$k" in *[!A-Za-z0-9_]*) die "That isn't a setting name: $k" ;; esac; keys="$keys${keys:+,}\"$k\""; done
             r=$(luna "$S/getSystemSettings" "{\"category\":\"$cat\"$( [ -n "$keys" ] && echo ",\"keys\":[$keys]")}")
             ok "$r" || die "Couldn't read $cat: $(err "$r")"
-            printf '%s' "$r" | tr '\n' ' ' | sed -n 's/.*"settings": *{\([^}]*\)}.*/\1/p' | sed 's/, *"/\n"/g' |
-                sed 's/^ *"\([^"]*\)": *"\{0,1\}\([^"]*\)"\{0,1\} *$/  \1 = \2/' ;;
+            if command -v node >/dev/null 2>&1; then
+                printf '%s' "$r" | node -e 'let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+                    const o = JSON.parse(s).settings || {};
+                    for (const k of Object.keys(o).sort()) { const v = o[k]; console.log("  " + k + " = " + (typeof v === "string" ? v : JSON.stringify(v))); }
+                })'
+            else
+                printf '%s' "$r" | tr '\n' ' ' | sed -n 's/.*"settings": *{\([^}]*\)}.*/\1/p' | sed 's/, *"/\n"/g' |
+                    sed 's/^ *"\([^"]*\)": *"\{0,1\}\([^"]*\)"\{0,1\} *$/  \1 = \2/' | awk 1
+            fi ;;
         set)
             [ $# -gt 0 ] || die "Say what to set, e.g. tv settings set picture backlight=40"
             body=""
@@ -2334,7 +2342,7 @@ where() {
         [ "$f" = "$first" ] && mark="${G}runs${N}  " || mark="      "
         printf '  %s%-40s %s\n' "$mark" "$f" "$from"
     done
-    [ "$found" = 1 ] || { say "There's no $1 on the TV."; [ -x "$MGR" ] && "$MGR" search "$1" 2>/dev/null | head -n 3 | sed 's/^/  Entware has: /'; return 1; }
+    [ "$found" = 1 ] || { say "There's no $1 on the TV."; [ -x "$MGR" ] && "$MGR" search "$1" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -v '^[[:space:]]' | awk 'NF { print "  Entware has " $1; if (++n == 3) exit }'; return 1; }
     case "$first" in /*) ;; *) [ -n "$first" ] && say "  (in your shell, $1 is an $first)" ;; esac
     return 0
 }
@@ -2668,7 +2676,9 @@ case "$cmd" in
     help|-h|--help) if [ -n "$1" ]; then help_for "$1"; else usage; fi ;;
     info) info_cmd ;;
     # Packages
-    search|files|owns|du|upgradable|list) [ "$cmd" = list ] && [ -n "$1" ] && { "$ENT" list | grep -i -F -- "$1"; exit; }; exec "$ENT" "$cmd" "$@" ;;
+    list) if [ -n "$1" ]; then "$ENT" list | grep -i -F -- "$1" || say "Nothing installed matches $1.  tv search $1 looks in Entware."; else exec "$ENT" list; fi ;;
+    upgradable) u=$("$ENT" upgradable "$@"); if [ -n "$u" ]; then printf '%s\n' "$u"; else say "Everything is up to date.  (tv update refreshes the list first.)"; fi ;;
+    search|files|owns|du) exec "$ENT" "$cmd" "$@" ;;
     update) exec "$ENT" update ;;
     show) need_mgr; pkg_ok "$1" || die "Name a package, e.g. tv show htop"; exec "$MGR" pkginfo "$1" ;;
     install) pkg_install "$@" ;;
@@ -4296,8 +4306,45 @@ pkg_info_json() {
     [ "$r" = 0 ] || error_exit "There's no package called $PKG in Entware's list."
     if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; return 0; fi
     printf '%s\n' "$out" | awk '
-        function val(k,   r) { r = $0; if (!match(r, "\"" k "\":\"[^\"]*\"")) return ""; r = substr(r, RSTART + length(k) + 4, RLENGTH - length(k) - 5); return r }
-        { printf "%s  %s\n%s\n", val("name"), val("version"), val("section"); d = val("description"); gsub(/\\n/, "\n", d); print d }'
+        function val(k,   r) {
+            r = $0; if (!match(r, "\"" k "\":\"([^\"\\\\]|\\\\.)*\"")) return ""
+            r = substr(r, RSTART + length(k) + 4, RLENGTH - length(k) - 5)
+            gsub(/\\n/, "\n", r); gsub(/\\"/, "\"", r); gsub(/\\\\/, "\\", r); return r
+        }
+        function num(k,   r) { r = $0; if (!match(r, "\"" k "\":[0-9]+")) return 0; return substr(r, RSTART + length(k) + 3, RLENGTH - length(k) - 3) + 0 }
+        function flag(k) { return index($0, "\"" k "\":true") > 0 }
+        function size(k) { return k < 1024 ? k " KB" : (k < 1048576 ? sprintf("%.1f MB", k / 1024) : sprintf("%.1f GB", k / 1048576)) }
+        function state(x) { return x == "notInstalled" ? "not added yet" : (x == "needsSetup" ? "needs setup" : (x == "installed" ? "added" : x)) }
+        function list(k,   r, out, x) {
+            r = $0; if (!match(r, "\"" k "\":\\[[^]]*\\]")) return ""
+            r = substr(r, RSTART, RLENGTH); out = ""
+            while (match(r, (k == "needs" ? "\"name\":" : "") "\"[^\"]*\"")) {
+                x = substr(r, RSTART, RLENGTH); sub(/^"name":/, "", x); gsub(/"/, "", x)
+                if (x != k) out = out (out == "" ? "" : ", ") x
+                r = substr(r, RSTART + RLENGTH)
+            }
+            return out
+        }
+        {
+            n = val("name"); inst = flag("installed")
+            printf "%s  %s  %s\n", n, val("version"), (inst ? "(installed" (val("installedVersion") != val("version") ? ", " val("installedVersion") " now" : "") ")" : "(not installed)")
+            if (val("section") != "") printf "  %-11s %s\n", "Category", val("section")
+            printf "  %-11s %s to download, %s installed\n", "Size", size(num("sizeKB")), size(num("isizeKB"))
+            c = list("commands"); if (c != "") printf "  %-11s %s\n", "Commands", c
+            if (!inst) {
+                m = list("needs"); k = split(m, q, ", ")
+                if (m == "") printf "  %-11s nothing else\n", "Also adds"
+                else printf "  %-11s %d more (%s), %s\n", "Also adds", k, (length(m) > 60 ? substr(m, 1, 57) "..." : m), size(num("needsIKB"))
+                printf "  %-11s %s free where Entware lives\n", "Space", size(num("freeKB"))
+            }
+            y = val("system"); c = y; sub(/.*\//, "", c)
+            if (y ~ /webosbrew/) printf "  %-11s the Homebrew Channel already has %s\n", "Note", c
+            else if (y != "") printf "  %-11s webOS already has %s (%s)\n", "Note", c, y
+            if (val("addon") != "") printf "  %-11s %s, %s.%s\n", "Add-on", val("addonTitle"), state(val("addonState")), (val("addonState") == "installed" ? "" : "  tv addon add " val("addon") " sets it up")
+            if (val("neededBy") != "") printf "  %-11s %s\n", "Needed by", val("neededBy")
+            d = val("description"); if (d != "") { print ""; print d }
+            print ""; print (inst ? "tv remove " n " removes it." : "tv install " n " installs it.")
+        }'
 }
 
 pkg_add() {
