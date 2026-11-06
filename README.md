@@ -13,6 +13,7 @@
 [![Shell](https://img.shields.io/badge/POSIX-sh-89e051)](webos-entware-installer.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![ohmybahgosh.dev](https://img.shields.io/badge/ohmybahgosh.dev-project%20page-33e1ff)](https://ohmybahgosh.dev/webos-entware-installer/)
+[![Listed in awesome-webos](https://img.shields.io/badge/listed%20in-awesome--webos-fc60a8)](https://github.com/tolgakurtuluss/awesome-webos)
 
 </div>
 
