@@ -109,10 +109,10 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
-<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote: opening Add-ons, showing the Manage from your phone QR code and sign-in code, adding the Login banner and watching it install, then opening Package updates"></p>
+<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote, on an LG C2: Packages opens on Start here, rclone's page with tips for using it on a TV, the Files and backup category, then SSH commands switching from tv to ent, and Add-ons with Samba, File Browser and the media server running"></p>
 
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 36 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, SSH commands, Full check and logs, Report for GitHub and Uninstall Entware">
+  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 121 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, SSH commands, Full check and logs, Report for GitHub and Uninstall Entware">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen at the network services: Tailscale asking you to sign in, and Samba, File Browser, the DLNA media server, Transmission and Syncthing running">
 </p>
 <p align="center">
@@ -203,7 +203,7 @@ No SSH needed.  Everything happens on the TV with the remote.
 
 **4.  Open it and choose Install Entware.**  Choose **Launch**.  The app checks your TV, picks the right build and installs Entware in about two minutes, with the progress on screen.  When it's done it says **Entware is ready**.
 
-<p align="center"><img src="images/app-status.png" width="760" alt="The Entware app on an LG C2 after installing: Entware is ready, 36 packages on app storage, no problems found"></p>
+<p align="center"><img src="images/app-status.png" width="760" alt="The Entware app on an LG C2: Entware is ready, 121 packages on app storage, no problems found"></p>
 
 From there, [add-ons](#add-ons) are one press away.  For the bash shell and `ent`, SSH in to the TV (turn on SSH in the Homebrew Channel's settings first).
 
@@ -377,9 +377,11 @@ The older commands all keep working: `entwrap` (the same as `ent`), `webos-entwa
 | `ent where <command>` | Where a command comes from (Entware, webOS or the Homebrew Channel) and which one runs |
 | `ent doctor` | Check Entware and the TV, and say what to fix (the same as `webos-entware doctor`) |
 
-<p align="center"><img src="images/term-ent.gif" width="760" alt="ent search top, animated: htop marked installed and btop, then ent owns htop"></p>
+<p align="center"><img src="images/term-ent.gif" width="760" alt="Animated, over SSH on an LG C2: ent shows Entware 2.15.2 with no problems, ent sv and Tab completes ent svc, which lists every service running, then ent show rsync gives its size, what it adds, that the Homebrew Channel already has it, and its description"></p>
 
 ### tv: the TV
+
+<p align="center"><img src="images/term-tv.gif" width="760" alt="Animated, over SSH on an LG C2: tv shows the model, webOS, address, what's on screen, the volume and a line about Entware, then tv inp and Tab completes tv input, a second Tab lists hdmi1 to hdmi4 and list, tv input list shows the SHIELD and the sound bar plugged in, and tv volume reads 9"></p>
 
 | Apps | |
 |:--|:--|
