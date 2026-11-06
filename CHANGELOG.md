@@ -2,6 +2,17 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.15.2] - 2026-11-05
+
+### Fixed
+
+- **Services that didn't start after the TV restarted:** some services, like MiniDLNA, keep a PID file on Entware's storage, which survives a restart.  When the old PID belonged to something else by the next boot, MiniDLNA said it was already running and quit, so the media server was off until you started it.  The boot script now clears PID files left from before the restart, before it starts Entware's services.  Existing boot scripts are brought up to date when the app updates.
+- **Samba's log no longer repeats** "dos charset 'CP850' unavailable" at every start.  New Samba setups say ASCII outright.
+
+### Changed
+
+- **`ent svc` leaves out Syncthing's own script** when the Syncthing add-on runs it, so Syncthing is listed once, as webos-syncthing.  `ent svc status syncthing` and the rest still work by name.
+
 ## [2.15.1] - 2026-11-05
 
 ### Fixed

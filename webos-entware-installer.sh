@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.15.1"
+VERSION="2.15.2"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -2031,7 +2031,20 @@ ent_du() {
 # ---------------------------------------------------------------- services
 
 # Entware's services: the init scripts, by name without their S00 prefix
-svc_names() { for f in "$INITD"/S*; do [ -f "$f" ] && b=${f##*/} && b=${b#S[0-9][0-9]} && printf '%s\n' "$b"; done | grep -v '^$' ; }
+svc_all() { for f in "$INITD"/S*; do [ -f "$f" ] && b=${f##*/} && b=${b#S[0-9][0-9]} && printf '%s\n' "$b"; done | grep -v '^$' ; }
+# Every service, less a package's own script that's off at boot when another
+# one runs the same program (Syncthing's, next to the add-on's webos-syncthing)
+svc_names() {
+    all=$(svc_all)
+    for n in $all; do
+        if ! svc_enabled "$n"; then
+            p=$(svc_proc "$n") dup=0
+            for o in $all; do [ "$o" != "$n" ] && svc_enabled "$o" && [ "$(svc_proc "$o")" = "$p" ] && dup=1; done
+            [ "$dup" = 1 ] && continue
+        fi
+        printf '%s\n' "$n"
+    done
+}
 svc_file() { for f in "$INITD"/S[0-9][0-9]"$1"; do [ -f "$f" ] && { echo "$f"; return 0; }; done; return 1; }
 # The program a service runs: its script's PROCS= line, or else the first
 # program it starts as a daemon (Samba's script has no PROCS and runs smbd -D)
@@ -2805,6 +2818,7 @@ refresh_helpers() {
     install_entwrap
     write_tv_helpers
     write_tv_cli
+    boot_script_pids
 }
 
 tv_helpers_ok() { [ -x "$TV_HELPER" ] && [ -e "$TV_CLI" ]; }
@@ -3451,6 +3465,26 @@ svc() {
     (unset LD_PRELOAD LD_LIBRARY_PATH; PATH="/opt/sbin:/opt/bin:$PATH"; export PATH
      if [ "$2" = start ] && command -v setsid > /dev/null 2>&1; then setsid "$f" start; else "$f" "$2"; fi < /dev/null > /dev/null 2>&1)
 }
+# Just mounted at boot, nothing of Entware's runs yet, so PID files on /opt
+# are from before the TV restarted.  By now their PIDs can belong to
+# something else, and MiniDLNA then says it's already running and won't
+# start.  The boot script clears them before starting the services.
+BOOT_PIDS='rm -f /opt/var/run/*.pid /opt/var/run/*/*.pid /opt/var/minidlna/minidlna.pid 2>/dev/null'
+# Boot scripts from before 2.15.2 don't: this adds it after the mount
+boot_script_pids() {
+    [ -f "$INIT_SCRIPT" ] && grep -q '^ *note "mounted /opt"$' "$INIT_SCRIPT" || return 0
+    grep -qF "$BOOT_PIDS" "$INIT_SCRIPT" && return 0
+    cp "$INIT_SCRIPT" "$INIT_SCRIPT.old" 2>/dev/null
+    sed -i "s|^\\( *\\)note \"mounted /opt\"\$|&\\n\\1$BOOT_PIDS|" "$INIT_SCRIPT"
+    if grep -qF "$BOOT_PIDS" "$INIT_SCRIPT" && sh -n "$INIT_SCRIPT"; then
+        rm -f "$INIT_SCRIPT.old"
+        info "Updated the boot script, so services start after the TV restarts unexpectedly."
+    else
+        mv -f "$INIT_SCRIPT.old" "$INIT_SCRIPT" 2>/dev/null
+        warn "Couldn't update the boot script. Repair Entware to fix it."
+    fi
+    return 0
+}
 # Boot scripts from before 2.12.0 start Entware's services with no PATH, so
 # the ones whose init scripts don't set their own (Samba, and anything
 # started through nohup or env) never start, and in the boot's own session.
@@ -3619,6 +3653,7 @@ setup_service() {
     trim_logs
     files_dirs || { warn "Couldn't make $FILES_DIR."; return 1; }
     boot_script_services
+    boot_script_pids
     svc_on "$1"
     [ "$1" = samba ] && svc_on wsdd2
     "setup_$1"
@@ -3677,6 +3712,8 @@ setup_samba() {
     printcap name = /dev/null
     disable spoolss = yes
     unix extensions = no
+    # Entware's Samba has no CP850, so it would say so in the log at every start
+    dos charset = ASCII
     log file = /opt/var/log/samba/log.%m
     max log size = 100
     log level = 0
@@ -4527,6 +4564,7 @@ install_boot_script() {
         note "/opt was already mounted"
     elif mount --bind "\$SRC" /opt 2>> $BOOT_LOG; then
         note "mounted /opt"
+        $BOOT_PIDS
     else
         note "failed to mount /opt"
         exit 0

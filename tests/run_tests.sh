@@ -273,12 +273,21 @@ ok "your .bashrc backed up" 'grep -q MINE /home/root/.bashrc.pre-entware'
 ok "saved copy of the installer" '[ -f /mnt/lg/user/opt/bin/webos-entware ]'
 
 echo "== [$SH] 2. reboot: boot script remounts /opt"
+# A PID file from before the restart, whose PID something else has by now
+mkdir -p /opt/var/minidlna /opt/var/run/samba; echo 1 > /opt/var/minidlna/minidlna.pid; echo 1 > /opt/var/run/samba/smbd.pid
 reboot_tv
+ok "the boot script clears PID files from before the restart, so services aren't fooled into thinking they're running" '[ ! -e /opt/var/minidlna/minidlna.pid ] && [ ! -e /opt/var/run/samba/smbd.pid ]'
 ok "/opt mounted after reboot" 'mounted'
 ok "boot log written" 'grep -q "mounted /opt" /tmp/webos-entware-boot.log'
 ok "Entware services started" 'grep -q start /tmp/rc.unslung.log'
 run status; ok "doctor is happy" 'grep -q "Everything looks right" "$W/out"'
 ok "doctor shows boot log" 'grep -q "Boot script log:.*started Entware services" "$W/out"'
+
+sed -i '/minidlna.pid/d' /var/lib/webosbrew/init.d/S99entware
+run helpers
+ok "webos-entware helpers brings a boot script from before 2.15.2 up to date" 'grep -q "minidlna.pid" /var/lib/webosbrew/init.d/S99entware && grep -A1 "note \"mounted /opt\"" /var/lib/webosbrew/init.d/S99entware | grep -q "rm -f /opt/var/run" && sh -n /var/lib/webosbrew/init.d/S99entware && grep -q "Updated the boot script" "$W/out"'
+run helpers
+ok "and leaves it alone after that" '! grep -q "Updated the boot script" "$W/out" && [ "$(grep -c minidlna.pid /var/lib/webosbrew/init.d/S99entware)" = 1 ]'
 
 echo "== [$SH] 3. your .bashrc edits survive a repair (issue #2)"
 echo "alias mine='echo hi'" >> /home/root/.bashrc
@@ -1261,7 +1270,7 @@ run addons --json
 ok "a service that stopped needs setup again" 'jq_ok "[a for a in d if a[\"id\"] == \"filebrowser\"][0][\"state\"] == \"needsSetup\""'
 
 run add samba -y
-ok "add samba shares /opt/files with a password, and no guests" 'grep -q "Samba is sharing /opt/files" "$W/out" && grep -q "map to guest = Never" /opt/etc/samba/smb.conf && grep -q "restrict anonymous = 2" /opt/etc/samba/smb.conf && ! grep -q "guest ok" /opt/etc/samba/smb.conf && grep -q "path = /opt/files" /opt/etc/samba/smb.conf && pidof smbd > /dev/null && pidof wsdd2 > /dev/null'
+ok "add samba shares /opt/files with a password, and no guests" 'grep -q "Samba is sharing /opt/files" "$W/out" && grep -q "map to guest = Never" /opt/etc/samba/smb.conf && grep -q "restrict anonymous = 2" /opt/etc/samba/smb.conf && ! grep -q "guest ok" /opt/etc/samba/smb.conf && grep -q "path = /opt/files" /opt/etc/samba/smb.conf && grep -q "dos charset = ASCII" /opt/etc/samba/smb.conf && pidof smbd > /dev/null && pidof wsdd2 > /dev/null'
 ok "you sign in as tv, root's Samba user" 'grep -qx "root = tv" /opt/etc/samba/users.map && grep -q "^-s -a root $(pw_of samba)" /tmp/smbpasswd.log && grep -q "guest ok = yes" /opt/etc/samba/smb.conf.bak'
 
 run add transmission -y
@@ -1459,6 +1468,14 @@ ok "ent svc finds a service by the program its script starts, when it has no PRO
 entr svc logs smb
 ok "and finds its logs in their own folder" 'grep -q "smbd version 4.22.7 started" "$W/out"'
 kill "$SMBD" 2>/dev/null; wait "$SMBD" 2>/dev/null; rm -f /opt/etc/init.d/S91smb "$W/smbd"; rm -rf /opt/var/log/samba
+# A package's own script, off at boot, next to an add-on's that runs the same program
+printf 'ENABLED=yes\nPROCS=foo\n' > /opt/etc/init.d/S91webos-foo; chmod 755 /opt/etc/init.d/S91webos-foo
+printf 'ENABLED=no\nPROCS=foo\n' > /opt/etc/init.d/S92foo; chmod 644 /opt/etc/init.d/S92foo
+entr svc
+ok "ent svc leaves out a package's own script that's off when another runs the same program" 'grep -q "^  webos-foo " "$W/out" && ! grep -q "^  foo " "$W/out"'
+entr svc status foo
+ok "but still knows it by name" 'grep -q "foo is stopped" "$W/out"'
+rm -f /opt/etc/init.d/S91webos-foo /opt/etc/init.d/S92foo
 
 echo "== [$SH] 38c. tv: autostart, SSH keys and done"
 tvr autostart
