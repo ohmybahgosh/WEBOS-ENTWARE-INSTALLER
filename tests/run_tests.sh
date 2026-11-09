@@ -26,6 +26,15 @@ mkdir -p /mnt/lg/user /var/lib/webosbrew/init.d
 
 # --- fakes ---
 mkdir -p "$W/bin"
+# The fake services are a program that sleeps under the daemon's name.  GNU
+# sleep does that when copied.  uutils' coreutils (Ubuntu 26.04 and later) is
+# one program that picks what to do by its name, so a copy called smbd just
+# exits: there it's a few lines of C instead
+cp -L "$(command -v sleep)" "$W/sleeper"
+if ! "$W/sleeper" 0 2> /dev/null; then
+    printf '#include <stdlib.h>\n#include <unistd.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 1); return 0; }\n' > "$W/sleeper.c"
+    cc -O2 -o "$W/sleeper" "$W/sleeper.c" || { echo "Couldn't make a program that sleeps under another name (no GNU sleep and no cc)."; exit 1; }
+fi
 cat > "$W/bin/uname" << 'F'
 #!/bin/sh
 [ "$1" = -m ] && { echo aarch64; exit 0; }
@@ -39,7 +48,7 @@ mkdir -p /opt/lib/opkg; touch $DB
 # like Entware's (ENABLED, start and stop)
 fake_daemon() { # process, init script
     mkdir -p /opt/etc/init.d /opt/lib/fake
-    cp -L /bin/sleep "/opt/lib/fake/$1"
+    cp -L SLEEPER "/opt/lib/fake/$1"
     printf '#!/bin/sh\nENABLED=yes\ncase "$1" in\n  start) [ "$ENABLED" = yes ] || exit 0; pidof %s >/dev/null || (/opt/lib/fake/%s 300 </dev/null >/dev/null 2>&1 &) ;;\n  stop) pkill -x %s ;;\nesac\nexit 0\n' "$1" "$1" "$1" > "/opt/etc/init.d/$2"
     chmod 755 "/opt/etc/init.d/$2"
 }
@@ -129,7 +138,7 @@ T
                 transmission-daemon) fake_daemon transmission-daemon S88transmission
                     mkdir -p /opt/etc/transmission
                     printf '{\n    "download-dir": "/opt/downloads/torrent",\n    "incomplete-dir": "/opt/downloads/torrent/incomplete",\n    "incomplete-dir-enabled": false,\n    "rpc-authentication-required": false,\n    "rpc-password": "",\n    "rpc-port": 9091,\n    "rpc-username": "root",\n    "watch-dir": "/opt/etc/transmission/watchdir",\n    "watch-dir-enabled": true\n}\n' > /opt/etc/transmission/settings.json ;;
-                syncthing) mkdir -p /opt/etc/init.d /opt/lib/fake; cp -L /bin/sleep /opt/lib/fake/syncthing
+                syncthing) mkdir -p /opt/etc/init.d /opt/lib/fake; cp -L SLEEPER /opt/lib/fake/syncthing
                     printf '#!/bin/sh\nENABLED=yes\nPROCS=syncthing\n. /opt/etc/init.d/rc.func\n' > /opt/etc/init.d/S92syncthing; chmod 755 /opt/etc/init.d/S92syncthing
                     [ -f /opt/etc/init.d/rc.func ] || cat > /opt/etc/init.d/rc.func << 'T'
 case "$1" in
@@ -234,6 +243,7 @@ f=\${1##*/}
 [ -f "$W/rel/\$f" ] || exit 22
 cp "$W/rel/\$f" "\$OUT"
 F
+sed -i "s#SLEEPER#$W/sleeper#g" "$W/fake-opkg"
 chmod 755 "$W/bin/"* "$W/fake-opkg"
 case "$NODE" in
     '') ;;
@@ -1461,7 +1471,7 @@ ok "ent svc enable turns it back on" '[ -x /opt/etc/init.d/S10cron ]'
 ok "a service that isn't there says so" 'grep -q "no service called nosuch" "$W/out"'
 # Samba's script has no PROCS= line: it runs smbd -D
 printf '#!/bin/sh\nstart() {\n    smbd -D\n    nmbd -D\n}\n' > /opt/etc/init.d/S91smb; chmod 755 /opt/etc/init.d/S91smb
-cp "$(command -v sleep)" "$W/smbd"; "$W/smbd" 30 & SMBD=$!
+cp "$W/sleeper" "$W/smbd"; "$W/smbd" 30 & SMBD=$!
 mkdir -p /opt/var/log/samba; echo "smbd version 4.22.7 started." > /opt/var/log/samba/log.smbd
 entr svc
 ok "ent svc finds a service by the program its script starts, when it has no PROCS line" 'grep -q "smb .*running, starts at boot" "$W/out"'
