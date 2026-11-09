@@ -458,6 +458,7 @@ lock_pid() { cat "$LOCK_DIR/pid" 2>/dev/null; }
 # Seconds since a file or folder last changed (large if unknown)
 age_of() {
     t=$(date -r "$1" +%s 2>/dev/null)
+    case "$t" in ''|*[!0-9]*) t=$(stat -c %Y "$1" 2>/dev/null) ;; esac
     case "$t" in ''|*[!0-9]*) echo 999999 ;; *) echo $(( $(date +%s) - t )) ;; esac
 }
 
@@ -549,14 +550,14 @@ start_job() {
         *) error_exit "Unknown task: ${1:-none}. Use install, uninstall, locate, upgrade, add, remove, password, pkg-add, pkg-remove, move or app-update." ;;
     esac
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
-    # Only one start at a time: two at once would share one log and exit code
+    # Only one start at a time: two at once would share one log and exit code.
+    # Whoever makes the folder starts; anyone else backs off, unless it was
+    # left behind (older than 30 seconds) by a start that was killed
     if ! mkdir "$JOB_DIR.start" 2>/dev/null; then
-        [ "$(age_of "$JOB_DIR.start")" -lt 30 ] || { rm -rf "$JOB_DIR.start"; mkdir "$JOB_DIR.start" 2>/dev/null; } ||
-            error_exit "Another task is starting. Try again in a moment."
-        [ -d "$JOB_DIR.start" ] && [ "$(age_of "$JOB_DIR.start")" -lt 30 ] && [ ! -f "$JOB_DIR.start/mine" ] &&
-            error_exit "Another task is starting. Try again in a moment."
+        [ "$(age_of "$JOB_DIR.start")" -ge 30 ] || error_exit "Another task is starting. Try again in a moment."
+        rm -rf "$JOB_DIR.start"
+        mkdir "$JOB_DIR.start" 2>/dev/null || error_exit "Another task is starting. Try again in a moment."
     fi
-    : > "$JOB_DIR.start/mine"
     trap 'rm -rf "$JOB_DIR.start"' EXIT
     [ "$(job_state)" = running ] && error_exit "Another task is running: $(cat "$JOB_DIR/name")."
     lp=$(lock_pid)

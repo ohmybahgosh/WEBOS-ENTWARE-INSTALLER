@@ -649,6 +649,8 @@ rm -rf /tmp/webos-entware-job
 (cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade) > "$W/j2" 2>&1 &
 wait
 ok "two tasks started at the same moment: only one runs" '[ "$(cat "$W/j1" "$W/j2" | grep -c "Started:")" = 1 ]'
+ok "and the other says another task is starting or running" 'cat "$W/j1" "$W/j2" | grep -q "Another task is \\(starting\\|running\\)"'
+
 for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
 mkdir -p /tmp/webos-entware.lock
 ! run install -y

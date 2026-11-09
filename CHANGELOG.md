@@ -2,10 +2,11 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
-## [2.15.2] - 2026-11-05
+## [2.15.2] - 2026-11-08
 
 ### Fixed
 
+- **Two tasks started at the same moment could both run:** when the TV app and another start (or two taps) began a task together, the second one could mistake the first one's start for its own and run alongside it, sharing one log.  Now the second always waits its turn and says another task is starting.
 - **Services that didn't start after the TV restarted:** some services, like MiniDLNA, keep a PID file on Entware's storage, which survives a restart.  When the old PID belonged to something else by the next boot, MiniDLNA said it was already running and quit, so the media server was off until you started it.  The boot script now clears PID files left from before the restart, before it starts Entware's services.  Existing boot scripts are brought up to date when the app updates.
 - **Samba's log no longer repeats** "dos charset 'CP850' unavailable" at every start.  New Samba setups say ASCII outright.
 
