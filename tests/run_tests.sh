@@ -56,8 +56,16 @@ fake_daemon() { # process, init script
 }
 # Another opkg holding the lock: everything but --version gives up
 [ "$1" != --version ] && [ -e /run/opkg-locked ] && { echo " * opkg_conf_load: Could not lock /opt/tmp/opkg.lock: Resource temporarily unavailable."; exit 255; }
+# mlocate half set up (its status says unpacked): opkg tries its setup
+# script again, and that's done when addgroup works.  True while it's half
+fake_half() {
+    grep -q "Status: install user unpacked" /opt/lib/opkg/status 2>/dev/null || return 1
+    addgroup mlocate 2>/dev/null || return 0
+    sed -i "s/Status: install user unpacked/Status: install user installed/" /opt/lib/opkg/status; return 1
+}
 case "$1" in
     --version) echo "opkg version fake (2025-11-05)" ;;
+    configure) if fake_half; then echo ' * pkg_run_script: package "mlocate" postinst script returned status 1.' >&2; exit 1; fi ;;
     print-architecture) echo "arch all 1"; echo "arch aarch64-3.10 10" ;;
     update) [ -e /run/entware-fail-update ] && { echo "fake: update failed"; exit 1; }
         mkdir -p /opt/var/opkg-lists; touch /opt/var/opkg-lists/entware
@@ -90,6 +98,9 @@ case "$1" in
         fi
         exit $rc ;;
     install) shift
+        # mlocate left half set up: opkg retries its setup script on every
+        # install, and exits 1 when it fails (webOS's /etc/group is read-only)
+        fake_half && { echo ' * pkg_run_script: package "mlocate" postinst script returned status 1.' >&2; half=1; }
         for p in "$@"; do
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
             echo "$p" >> $DB
@@ -181,7 +192,8 @@ T
                     chmod 755 /opt/bin/syncthing ;;
                 fd) mkdir -p /opt/usr/bin; printf '#!/bin/sh\n' > /opt/usr/bin/fd; chmod 755 /opt/usr/bin/fd ;;
             esac
-        done ;;
+        done
+        if [ -n "${half:-}" ]; then exit 1; fi ;;
     remove) shift
         for p in "$@"; do
             case "$p" in -*) continue ;; esac
@@ -1017,6 +1029,9 @@ import json,sys; p=json.load(open(sys.argv[1]))[\"progress\"]
 assert p == {\"total\": 3, \"unpacked\": 3, \"configured\": 1, \"phase\": \"setup\", \"current\": \"libfoo\"}, p
 " "$W/out"'
 rm -rf /tmp/webos-entware-job
+printf 'Package: mlocate\nVersion: 0.26-4\nStatus: install user unpacked\n\n' >> /opt/lib/opkg/status
+run install -y
+ok "install and repair with mlocate half set up: finishes it, with no false 'didn't install' warnings" 'grep -q "Finishing setup of: mlocate" "$W/out" && ! grep -q "didn.t install\|may not have installed\|may have failed\|postinst" "$W/out" && ! grep -q "unpacked" /opt/lib/opkg/status'
 run uninstall -y
 
 echo "== [$SH] 35. the login banner add-on"

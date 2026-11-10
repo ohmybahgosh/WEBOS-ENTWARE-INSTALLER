@@ -11,6 +11,7 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 ### Fixed
 
 - **"Update all packages" said something went wrong when it hadn't:** opkg exits with an error when it keeps your own settings file (nanorc, smb.conf, minidlna.conf and the like) and saves the package's version beside it as `-opkg`, and when mlocate's setup script can't add its group (webOS's /etc/group is read-only).  Updates now check what actually happened: every package updated and set up is success, and a kept settings file is said plainly.  When a package really didn't update, it's named.
+- **"dircolors may not have installed" (and the same for bash, nano and ls) during Install and repair**, when they were installed fine: opkg retried mlocate's failed setup each time and exited with an error.  Each one is now checked by whether it's installed, and Install and repair first finishes any package an earlier setup left half done.
 - **mlocate no longer stays half set up after an update or install:** its group comes from the updatedb wrapper, so the setup script's addgroup is skipped.
 - **opkg's errors no longer break into the middle of its output** in the app ("ConfigurinCollected errors:").  They're shown after it.
 

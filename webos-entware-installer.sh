@@ -664,6 +664,15 @@ pkgs_unfinished() {
     awk '/^Package: /{p=$2} /^Status: / && !/ installed$/ && !/not-installed/ {print p}' /opt/lib/opkg/status 2>/dev/null
 }
 
+# Packages a failed setup script left half set up (mlocate, before the
+# addgroup fix): opkg retries them on every install and fails each time,
+# so they're finished first
+finish_unfinished() {
+    [ -n "$(pkgs_unfinished)" ] || return 0
+    info "Finishing setup of: $(pkgs_unfinished | tr '\n' ' ')"
+    opkg_x configure > /dev/null || warn "Some packages still aren't set up.  See: ent doctor"
+}
+
 # === Upgrade packages ===
 # Package names as opkg writes them: nothing a shell would read as more
 pkg_name_ok() { case "$1" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._+-]*) return 1 ;; esac; return 0; }
@@ -1160,12 +1169,19 @@ COMPLETION
 
 # === Bash Profile & Environment ===
 setup_shell_environment() {
-    /opt/bin/opkg install bash || warn "bash may not have installed."
-    /opt/bin/opkg install nano-full || warn "nano-full may not have installed."
-    /opt/bin/opkg install coreutils-dircolors || warn "dircolors may not have installed."
+    # Checked by whether each one is installed, not opkg's exit code: opkg
+    # also fails when it retries another package's setup (like mlocate's)
     # GNU ls sizes its columns to fit; busybox ls pads every column to a
     # fixed width, which leaves wide gaps in ls -l
-    /opt/bin/opkg install coreutils-ls || warn "GNU ls may not have installed. ls will use the busybox version."
+    for _sp in bash nano-full coreutils-dircolors coreutils-ls; do
+        opkg_x install "$_sp"
+        pkg_installed "$_sp" && continue
+        case "$_sp" in
+            coreutils-ls) warn "GNU ls didn't install. ls will use the busybox version." ;;
+            coreutils-dircolors) warn "dircolors didn't install, so ls won't use colors from it." ;;
+            *) warn "$_sp didn't install." ;;
+        esac
+    done
     if ! /opt/bin/bash -c true >/dev/null 2>&1; then
         warn "bash didn't install or doesn't run, so your login shell was left as it was."
         return 0
@@ -4789,7 +4805,9 @@ install_entware() {
 
     bootstrap_opkg
     /opt/bin/opkg update || error_exit "opkg update failed"
-    /opt/bin/opkg install entware-opt || warn "entware-opt may have failed"
+    finish_unfinished
+    opkg_x install entware-opt
+    pkg_installed entware-opt || warn "entware-opt didn't install."
     # Everyone's scratch space, sticky so no one can rename or remove others' files
     chmod 1777 /opt/tmp
 
