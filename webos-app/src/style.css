@@ -79,6 +79,20 @@ footer .right { margin: 0 0 0 auto; }
 .panel-hint { margin-top: 26px; color: #7d8ba1; font-size: 22px; }
 .spinner { width: 40px; height: 40px; border: 6px solid #22324d; border-top-color: #4cc3ff; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; margin-right: 22px; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* A running task's progress (jobProgress) */
+#jobprog { margin-bottom: 22px; }
+.jbar { height: 14px; border-radius: 7px; background: #22324d; overflow: hidden; }
+.jbar i { display: block; height: 100%; border-radius: 7px; background: #4cc3ff; transition: width .6s; }
+.jbar-any i { background: linear-gradient(90deg, #22324d 0%, #4cc3ff 50%, #22324d 100%); background-size: 50% 100%; animation: sweep 1.6s linear infinite; }
+@keyframes sweep { from { background-position: -100% 0; } to { background-position: 200% 0; } }
+.jline { display: flex; justify-content: space-between; margin-top: 14px; font-size: 27px; color: #e8eef7; font-weight: 600; }
+.jstep { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.jstep b { color: #4cc3ff; margin-left: 18px; }
+.jtime { color: #9fb0c8; margin-left: 24px; flex: none; font-variant-numeric: tabular-nums; }
+.jact { margin-top: 8px; font-size: 22px; color: #7d8ba1; display: flex; align-items: center; }
+.jact .dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; background: #34d399; animation: pulse 1.4s infinite; flex: none; }
+.act-warn { color: #fbbf24; } .act-warn .dot { background: #fbbf24; }
+.act-bad { color: #f87171; } .act-bad .dot { background: #f87171; animation: none; }
 .result-ok { color: #34d399; }
 .result-bad { color: #f87171; }
 
@@ -231,3 +245,4 @@ footer .right { margin: 0 0 0 auto; }
 .crow { display: flex; align-items: baseline; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
 .crow code { flex: none; width: 500px; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 21px; color: #e8eef7; padding-right: 24px; }
 .crow span { font-size: 21px; color: #9fb0c8; }
+#jobprog + pre { max-height: 450px; }

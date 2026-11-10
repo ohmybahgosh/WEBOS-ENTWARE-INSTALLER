@@ -2,6 +2,18 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.15.3] - 2026-11-10
+
+### Added
+
+- **Progress you can read while a task runs in the TV app:** a bar and "Downloading 41 of 73: htop", then "Setting up 52 of 73: vim-full", with how long it has run.  Under it, a line says whether anything is happening: "Nothing new for 3 min.  Some packages take a while" after two quiet minutes, and "It may be stuck" after fifteen.  A long download counts as activity even when the log doesn't change.  `job-status --json` reports the same (progress, quiet, now and workKB).
+
+### Fixed
+
+- **"Update all packages" said something went wrong when it hadn't:** opkg exits with an error when it keeps your own settings file (nanorc, smb.conf, minidlna.conf and the like) and saves the package's version beside it as `-opkg`, and when mlocate's setup script can't add its group (webOS's /etc/group is read-only).  Updates now check what actually happened: every package updated and set up is success, and a kept settings file is said plainly.  When a package really didn't update, it's named.
+- **mlocate no longer stays half set up after an update or install:** its group comes from the updatedb wrapper, so the setup script's addgroup is skipped.
+- **opkg's errors no longer break into the middle of its output** in the app ("ConfigurinCollected errors:").  They're shown after it.
+
 ## [2.15.2] - 2026-11-08
 
 ### Fixed

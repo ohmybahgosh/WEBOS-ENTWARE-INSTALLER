@@ -35,6 +35,8 @@ if ! "$W/sleeper" 0 2> /dev/null; then
     printf '#include <stdlib.h>\n#include <unistd.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 1); return 0; }\n' > "$W/sleeper.c"
     cc -O2 -o "$W/sleeper" "$W/sleeper.c" || { echo "Couldn't make a program that sleeps under another name (no GNU sleep and no cc)."; exit 1; }
 fi
+# webOS's addgroup: /etc/group is read-only there
+printf '#!/bin/sh\necho "addgroup: /etc/group: Read-only file system" >&2\nexit 1\n' > "$W/bin/addgroup"
 cat > "$W/bin/uname" << 'F'
 #!/bin/sh
 [ "$1" = -m ] && { echo aarch64; exit 0; }
@@ -64,9 +66,29 @@ case "$1" in
     upgrade) shift
         # A slow upgrade, so two tasks started together really overlap
         [ -e /run/opkg-slow ] && sleep 3
+        # Output like the real opkg: each package as it's unpacked, then
+        # each as it's set up, and its errors (stderr) at the end
+        if [ $# -eq 0 ]; then todo=$(cat /opt/lib/opkg/fake-upgradable 2>/dev/null)
+        else todo=$(for p in "$@"; do grep "^$p - " /opt/lib/opkg/fake-upgradable; done); fi
+        printf '%s\n' "$todo" | awk -F ' - ' 'NF >= 3 {print "Upgrading " $1 " on root from " $2 " to " $3 "..."; print "Downloading http://bin.entware.net/" $1 ".ipk"}'
+        printf '%s\n' "$todo" | awk -F ' - ' 'NF >= 3 {print "Configuring " $1 "."}'
+        rc=0
+        # mlocate's real setup script, which needs a writable /etc/group
+        if printf '%s\n' "$todo" | grep -q '^mlocate - '; then
+            if command -v addgroup >/dev/null 2>&1; then
+                grep -q '^mlocate:' /etc/group || addgroup mlocate || { echo ' * pkg_run_script: package "mlocate" postinst script returned status 1.' >&2; rc=1; }
+            fi
+        fi
+        if printf '%s\n' "$todo" | grep -q '^nano-full - '; then
+            echo "Collected errors:" >&2
+            echo " * resolve_conffiles: Existing conffile /opt/etc/nanorc is different from the conffile in the new package. The new conffile will be placed at /opt/etc/nanorc-opkg." >&2
+            rc=1
+        fi
+        if [ -e /run/opkg-stuck ]; then echo ' * pkg_run_script: package "htop" postinst script returned status 1.' >&2; exit 1; fi
         if [ $# -eq 0 ]; then : > /opt/lib/opkg/fake-upgradable
         else for p in "$@"; do grep -v "^$p - " /opt/lib/opkg/fake-upgradable > /opt/lib/opkg/fake-up.new; mv /opt/lib/opkg/fake-up.new /opt/lib/opkg/fake-upgradable; done
-        fi ;;
+        fi
+        exit $rc ;;
     install) shift
         for p in "$@"; do
             if grep -qx "$p" $DB; then echo "Package $p is up to date"; continue; fi
@@ -633,7 +655,8 @@ for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2;
 ok "job-status --json reports it finished, with its log" 'python3 -c "
 import json,sys; d=json.load(open(sys.argv[1]))
 assert d[\"state\"] == \"done\" and d[\"name\"] == \"upgrade\" and d[\"exit\"] == 0, d
-assert any(\"up to date\" in l or \"Packages upgraded\" in l for l in d[\"log\"]), d
+assert any(\"up to date\" in l or \"packages updated\" in l for l in d[\"log\"]), d
+assert d[\"progress\"][\"phase\"] in (\"\", \"setup\") and isinstance(d[\"quiet\"], int) and d[\"now\"] >= d[\"started\"], d
 " "$W/out"'
 ! (cd /tmp && $SH /tmp/webos-entware-installer.sh job rm-everything) > "$W/out" 2>&1
 ok "job refuses unknown tasks" 'grep -q "Unknown task" "$W/out" && [ "$(cat /tmp/webos-entware-job/name)" = upgrade ]'
@@ -971,7 +994,29 @@ ok "job upgrade <name> runs in the background" '[ "$(cat /tmp/webos-entware-job/
 ok "job upgrade refuses something that isn't a package name" 'grep -q "isn.t a package name" "$W/out"'
 printf 'htop - 3.4.1-1 - 3.4.2-1\n' > /opt/lib/opkg/fake-upgradable
 run upgrade -y
-ok "upgrade with no name updates everything" 'grep -q "Packages upgraded" "$W/out" && [ ! -s /opt/lib/opkg/fake-upgradable ]'
+ok "upgrade with no name updates everything" 'grep -q "1 package updated" "$W/out" && [ ! -s /opt/lib/opkg/fake-upgradable ]'
+# mlocate's setup script fails on webOS (read-only /etc/group), and a kept
+# settings file makes opkg exit 1: neither is a failed update
+printf 'mlocate - 0.26-3 - 0.26-4\nnano-full - 8.7.1-1 - 9.3-3\nhtop - 3.4.1-1 - 3.5.3-1\n' > /opt/lib/opkg/fake-upgradable
+run upgrade -y
+ok "upgrade: mlocate's addgroup is skipped and a kept settings file isn't an error" 'grep -q "3 packages updated" "$W/out" && grep -q "Kept your /opt/etc/nanorc.  The package.s new version is in /opt/etc/nanorc-opkg" "$W/out" && ! grep -q "postinst\|Collected errors\|ERROR" "$W/out"'
+ok "upgrade: opkg's output comes before its errors, not mixed in" 'awk "/Configuring htop/{c=NR} /Kept your/{k=NR} END{exit !(c && k > c)}" "$W/out"'
+printf 'htop - 3.4.1-1 - 3.5.3-1\n' > /opt/lib/opkg/fake-upgradable
+touch /run/opkg-stuck
+! run upgrade -y
+rm -f /run/opkg-stuck
+ok "upgrade: a package that really didn't update is named" 'grep -q "These didn.t update: htop" "$W/out"'
+: > /opt/lib/opkg/fake-upgradable
+# Progress, read from a task's log
+mkdir -p /tmp/webos-entware-job
+printf 'upgrade\n' > /tmp/webos-entware-job/name; date +%s > /tmp/webos-entware-job/started; echo 0 > /tmp/webos-entware-job/exit
+printf '\033[0;36m[INFO] Updating 3 packages:\033[0m\nhtop - 1 - 2\nUpgrading htop on root from 1 to 2...\nDownloading x\nInstalling libfoo (1) to root...\nUpgrading curl on root from 1 to 2...\nConfiguring libfoo.\n' > /tmp/webos-entware-job/log
+(cd /tmp && $SH /tmp/webos-entware-installer.sh job-status --json) > "$W/out" 2>&1
+ok "job-status --json counts what opkg has unpacked and set up" 'python3 -c "
+import json,sys; p=json.load(open(sys.argv[1]))[\"progress\"]
+assert p == {\"total\": 3, \"unpacked\": 3, \"configured\": 1, \"phase\": \"setup\", \"current\": \"libfoo\"}, p
+" "$W/out"'
+rm -rf /tmp/webos-entware-job
 run uninstall -y
 
 echo "== [$SH] 35. the login banner add-on"

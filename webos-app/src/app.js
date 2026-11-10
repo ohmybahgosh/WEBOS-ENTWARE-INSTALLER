@@ -360,9 +360,54 @@
         });
     }
 
+    // How long ago, said simply: 45 s, 3 min, 1 h 5 min
+    function ago(sec) {
+        if (sec < 60) { return sec + ' s'; }
+        if (sec < 3600) { return Math.floor(sec / 60) + ' min'; }
+        return Math.floor(sec / 3600) + ' h ' + Math.floor((sec % 3600) / 60) + ' min';
+    }
+    function clock(sec) {
+        var m = Math.floor(sec / 60), s = sec % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    // A running task's progress: how far opkg has got, how long it has run,
+    // and how long since it last did anything, so a slow step doesn't look
+    // like a hang (and a real hang shows)
+    var jobSeen = { kb: null, at: 0 };
+    function jobProgress(j) {
+        var p = j.progress || {}, t = p.total || 0, cur = p.current || '';
+        var step = 'Working…', pct = -1;
+        if (t > 0) {
+            var un = Math.min(p.unpacked || 0, t), cf = Math.min(p.configured || 0, t);
+            pct = Math.round((un + cf) * 100 / (2 * t));
+            if (p.phase === 'setup') { step = 'Setting up ' + cf + ' of ' + t + (cur ? ':  ' + cur : ''); }
+            else if (p.phase === 'unpack') { step = 'Downloading ' + un + ' of ' + t + (cur ? ':  ' + cur : ''); }
+            else { step = 'Getting ready to update ' + t + ' package' + (t === 1 ? '' : 's'); }
+        } else if (cur) {
+            step = ({ setup: 'Setting up ', unpack: 'Downloading ', remove: 'Removing ' })[p.phase] + cur;
+        }
+        // Activity: the log changing, or opkg's download growing
+        var now = Date.now();
+        var quiet = typeof j.quiet === 'number' ? j.quiet : 0;
+        if (!jobSeen.at) { jobSeen = { kb: j.workKB, at: now - quiet * 1000 }; }
+        else if (j.workKB !== jobSeen.kb) { jobSeen.kb = j.workKB; jobSeen.at = now; }
+        quiet = Math.min(quiet, Math.round((now - jobSeen.at) / 1000));
+        var run = j.now && j.started ? Math.max(0, j.now - j.started) : 0;
+        var cls = 'act-ok', act = 'Working';
+        if (quiet >= 900) { cls = 'act-bad'; act = 'Nothing new for ' + ago(quiet) + '.  It may be stuck.  Closing the app doesn\'t stop it.'; }
+        else if (quiet >= 120) { cls = 'act-warn'; act = 'Nothing new for ' + ago(quiet) + '.  Some packages take a while; it\'s still running.'; }
+        else if (quiet >= 15) { act = 'Last change ' + ago(quiet) + ' ago'; }
+        return '<div class="jbar' + (pct < 0 ? ' jbar-any' : '') + '"><i style="width:' + (pct < 0 ? 100 : pct) + '%"></i></div>' +
+            '<div class="jline"><span class="jstep">' + esc(step) + (pct >= 0 ? '<b>' + pct + '%</b>' : '') + '</span>' +
+            '<span class="jtime">' + clock(run) + '</span></div>' +
+            '<div class="jact ' + cls + '"><span class="dot"></span>' + esc(act) + '</div>';
+    }
+
     // Check on the running task every second or so and show its log
     function followJob(name) {
         busy = true;
+        jobSeen = { kb: null, at: 0 };
         if (jobTimer) { clearTimeout(jobTimer); }
         function poll() {
             jobTimer = null;
@@ -372,13 +417,14 @@
                 var title = jobTitle(j.name || name);
                 if (j.state === 'running') {
                     var pre = overlayMode === 'busy' && $('log');
-                    if (pre) {
+                    if (pre && $('jobprog')) {
                         // Update the text in place, so scrolling up to read stays put
+                        $('jobprog').innerHTML = jobProgress(j);
                         var atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
                         pre.textContent = log.map(plain).join('\n');
                         if (atEnd) { pre.scrollTop = pre.scrollHeight; }
                     } else {
-                        overlay('busy', '<span class="spinner"></span>' + esc(title), logHtml(log), 'This keeps going even if you close the app.');
+                        overlay('busy', '<span class="spinner"></span>' + esc(title), '<div id="jobprog">' + jobProgress(j) + '</div>' + logHtml(log), 'This keeps going even if you close the app.');
                         $('log').scrollTop = $('log').scrollHeight;
                     }
                     jobTimer = setTimeout(poll, 1200);

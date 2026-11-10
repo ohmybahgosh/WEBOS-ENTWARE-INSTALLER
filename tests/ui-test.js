@@ -152,7 +152,9 @@ function demo(scenario) {
                 if (pk && pk[1] === 'remove') { INSTALLED.splice(INSTALLED.findIndex((x) => x.name === pk[2]), 1); }
                 if (job.name === 'move appstore') { Object.assign(base, { location: 'appstore', userFreeMB: 181, appFreeMB: 1639, freeMB: 1639 }); }
             }
-            return reply(JSON.stringify({ state: job.state, name: job.name, exit: job.state === 'done' ? 0 : null, started: 1, log }));
+            // While it runs: how far opkg has got (job_progress in the installer)
+            const progress = job.state === 'running' && /^upgrade/.test(job.name) ? { total: 2, unpacked: 1, configured: 0, phase: 'unpack', current: 'htop' } : null;
+            return reply(JSON.stringify({ state: job.state, name: job.name, exit: job.state === 'done' ? 0 : null, started: 1, now: 75, quiet: 200, workKB: 10, progress, log }));
         }
         return reply('unexpected: ' + args);
     };
@@ -339,6 +341,9 @@ function check(name, cond) {
     await press(page, 'Enter');
     check('asks before updating one package', /Update htop\?/.test(await overlayTitle(page)) && /3\.4\.1-1 to 3\.4\.2-1/.test(await page.textContent('#overlay-body')));
     await press(page, 'Enter');
+    await page.waitForSelector('#jobprog .jstep');
+    const prog = await page.$eval('#jobprog', (e) => e.textContent);
+    check('while it runs: which package, how far, how long, and how long since anything changed', /Downloading 1 of 2:\s+htop/.test(prog) && /25%/.test(prog) && /1:14/.test(prog) && /Nothing new for 3 min/.test(prog));
     await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
     check('updates just that package in the background', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job upgrade htop') && /Update htop: done/.test(await overlayTitle(page)));
     await press(page, 'Enter');

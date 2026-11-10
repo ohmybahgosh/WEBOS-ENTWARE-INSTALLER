@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.15.2"
+VERSION="2.15.3"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -584,6 +584,27 @@ start_job() {
     echo "Started: $1${2:+ $2}. Follow it with: sh $SELF job-status"
 }
 
+# How far a task's opkg run has got, from its log: the packages to update
+# (from "Updating N packages"), how many opkg has downloaded and unpacked,
+# how many it has set up, and the one it's on
+job_progress() {
+    awk '
+        match($0, /Updating [0-9]+ packages?:/) { total = substr($0, RSTART + 9) + 0 }
+        /^(Upgrading|Installing) [^ ]+ / { unpacked++; cur = $2; phase = "unpack" }
+        /^Configuring [^ ]+\.$/ { configured++; cur = $2; sub(/\.$/, "", cur); phase = "setup" }
+        /^Removing package / { cur = $3; phase = "remove" }
+        END {
+            gsub(/[^A-Za-z0-9._+-]/, "", cur)
+            printf "{\"total\":%d,\"unpacked\":%d,\"configured\":%d,\"phase\":\"%s\",\"current\":\"%s\"}", total, unpacked, configured, phase, cur
+        }'
+}
+# What opkg has downloaded so far into its newest work folder, in KB: it
+# grows during a long download, when the log doesn't change
+opkg_work_kb() {
+    d=$(ls -td /opt/tmp/opkg-* 2>/dev/null | head -n 1)
+    [ -n "$d" ] && du -sk "$d" 2>/dev/null | awk '{print $1}'
+}
+
 job_status() {
     st=$(job_state)
     name=$(cat "$JOB_DIR/name" 2>/dev/null)
@@ -592,6 +613,9 @@ job_status() {
         printf '{"state":%s,"name":%s,"exit":%s,"started":%s,"log":' "$(json_str "$st")" "$(json_str "$name")" \
             "$(json_num "$code")" "$(json_num "$(cat "$JOB_DIR/started" 2>/dev/null)")"
         tail -n 60 "$JOB_DIR/log" 2>/dev/null | json_lines
+        printf ',"now":%s,"quiet":%s,"workKB":%s,"progress":' "$(date +%s)" \
+            "$(json_num "$( [ -f "$JOB_DIR/log" ] && age_of "$JOB_DIR/log")")" "$(json_num "$(opkg_work_kb)")"
+        job_progress < "$JOB_DIR/log" 2>/dev/null || printf null
         printf '}\n'
         return 0
     fi
@@ -601,6 +625,43 @@ job_status() {
         done) echo "Finished: $name (exit code $code)"; tail -n 20 "$JOB_DIR/log" 2>/dev/null ;;
         lost) echo "Stopped before finishing: $name"; tail -n 20 "$JOB_DIR/log" 2>/dev/null ;;
     esac
+}
+
+# === opkg, with webOS fixes for package setup scripts ===
+# mlocate's setup script runs addgroup, which fails on webOS (/etc/group is
+# read-only) and leaves mlocate half set up.  Its group comes from the
+# updatedb wrapper instead (setup_locate), so addgroup mlocate does nothing.
+OPKG_SHIMS=/opt/tmp/ent-shims
+opkg_shims() {
+    mkdir -p "$OPKG_SHIMS" 2>/dev/null || return 0
+    cat > "$OPKG_SHIMS/addgroup" <<'SHIM'
+#!/bin/sh
+# Written by webos-entware: see opkg_shims in the installer
+for a in "$@"; do [ "$a" = mlocate ] && exit 0; done
+PATH=${PATH#*:} exec addgroup "$@"
+SHIM
+    chmod 755 "$OPKG_SHIMS/addgroup"
+}
+# opkg, with its errors printed after its own output (not mixed in mid-line,
+# as they were when both went to one log), and settings files it left alone
+# said plainly.  Returns opkg's exit code.
+opkg_x() {
+    opkg_shims
+    _oerr="/opt/tmp/opkg-err.$$"
+    PATH="$OPKG_SHIMS:$PATH" /opt/bin/opkg "$@" 2>"$_oerr"
+    _orc=$?
+    if [ -s "$_oerr" ]; then
+        sed -n 's/.*Existing conffile \([^ ]*\) is different.*/\1/p' "$_oerr" | while read -r f; do
+            info "Kept your $f.  The package's new version is in $f-opkg."
+        done
+        grep -v 'Existing conffile\|^Collected errors:$\|^ *$' "$_oerr" >&2
+    fi
+    rm -f "$_oerr"
+    return $_orc
+}
+# Packages opkg left half installed or half set up
+pkgs_unfinished() {
+    awk '/^Package: /{p=$2} /^Status: / && !/ installed$/ && !/not-installed/ {print p}' /opt/lib/opkg/status 2>/dev/null
 }
 
 # === Upgrade packages ===
@@ -663,7 +724,11 @@ upgrade_packages() {
         [ -n "$line" ] || error_exit "$PKG has no update (or isn't installed). See: $(run_cmd) updates"
         set -- $line
         info "Updating $PKG from $2 to $3..."
-        /opt/bin/opkg upgrade "$PKG" || error_exit "$PKG didn't update. Run 'ent upgrade $PKG' to see why."
+        if ! opkg_x upgrade "$PKG"; then
+            [ -z "$(upgradable | awk -v n="$PKG" '$1 == n')" ] && [ -z "$(pkgs_unfinished)" ] ||
+                error_exit "$PKG didn't update. Run 'ent upgrade $PKG' to see why."
+            warn "opkg reported a problem, but $PKG updated and is set up."
+        fi
         ensure_ca
         [ "$PKG" = mlocate ] && locate_ready && write_updatedb_conf
         success "$PKG is now $3."
@@ -677,11 +742,20 @@ upgrade_packages() {
         success "Every package is up to date."
         return 0
     fi
-    info "Upgrading:"
+    # The app reads "Updating N packages" for its progress bar (job_progress)
+    n=$(printf '%s\n' "$UPGRADABLE" | grep -c ' - ')
+    if [ "$n" = 1 ]; then info "Updating 1 package:"; else info "Updating $n packages:"; fi
     echo "$UPGRADABLE"
-    /opt/bin/opkg upgrade || error_exit "Some packages didn't upgrade. Run it again, or 'ent upgrade' to see why."
+    if ! opkg_x upgrade; then
+        left=$(upgradable | awk '{print $1}' | tr '\n' ' ')
+        bad=$(pkgs_unfinished | tr '\n' ' ')
+        [ -n "$bad" ] && error_exit "These didn't finish setting up: ${bad% }.  Run 'ent upgrade' to try again."
+        [ -n "$left" ] && error_exit "These didn't update: ${left% }.  Run 'ent upgrade' to try again."
+        warn "opkg reported a problem (above), but every package updated and is set up."
+    fi
     ensure_ca
-    success "Packages upgraded."
+    printf '%s\n' "$UPGRADABLE" | grep -q '^mlocate ' && locate_ready && write_updatedb_conf
+    if [ "$n" = 1 ]; then success "1 package updated."; else success "$n packages updated."; fi
 }
 
 # How to run this installer again from a shell. The copy saved in Entware's
@@ -3032,7 +3106,7 @@ setup_locate() {
     fi
     if ! locate_installed; then
         info "Installing mlocate..."
-        if ! /opt/bin/opkg install mlocate || ! locate_installed; then
+        if ! opkg_x install mlocate || ! locate_installed; then
             warn "mlocate didn't install, so locate wasn't set up."
             return 1
         fi
@@ -3176,7 +3250,7 @@ addon_add() {
         fi
         /opt/bin/opkg update >/dev/null 2>&1 || warn "Couldn't refresh the package list. Trying with the one already here."
         # shellcheck disable=SC2086  # package names from the catalog
-        /opt/bin/opkg install $missing || error_exit "$AD_TITLE didn't install. Check the TV's internet connection and free space."
+        opkg_x install $missing || error_exit "$AD_TITLE didn't install. Check the TV's internet connection and free space."
     fi
     case "$AD_ID" in
         nano) setup_nanorc ;;
@@ -4443,7 +4517,7 @@ pkg_add() {
     if pkg_installed "$PKG"; then info "$PKG is already installed."; return 0; fi
     info "Installing $PKG..."
     fresh_lists
-    /opt/bin/opkg install "$PKG" || error_exit "$PKG didn't install. Check the name, the TV's internet connection and free space."
+    opkg_x install "$PKG" || error_exit "$PKG didn't install. Check the name, the TV's internet connection and free space."
     pkg_installed "$PKG" || error_exit "$PKG didn't install."
     post_install_action "$PKG"
     success "$PKG is installed."
