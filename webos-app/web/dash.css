@@ -1,6 +1,6 @@
 :root {
-  --bg: #0b1220; --card: #121c2e; --line: #22324d; --text: #e8eef7; --dim: #8a99b0;
-  --blue: #4cc3ff; --green: #34d399; --amber: #fbbf24; --red: #f87171;
+  --bg: #0d1013; --card: #13181c; --line: #212931; --text: #edeff2; --dim: #909daa;
+  --blue: #3d9bff; --green: #3d9bff; --amber: #febc2e; --red: #ff5f57;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
@@ -18,14 +18,14 @@ header .link { flex: none; }
 [hidden] { display: none !important; }
 .jump { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 10px 0; background: var(--bg); border-bottom: 1px solid var(--line); }
 .jump a { color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
-button, .btn { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px; background: var(--blue); color: #06131f; cursor: pointer; text-decoration: none; display: inline-block; }
+button, .btn { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px; background: var(--blue); color: #0b0e10; cursor: pointer; text-decoration: none; display: inline-block; }
 button.ghost, .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
 button.danger { background: transparent; color: var(--red); border: 1px solid #5b2a2a; }
 button.link { background: none; color: var(--dim); padding: 6px; font-weight: 500; }
 button:disabled { opacity: .45; cursor: default; }
 button, .btn { min-height: 42px; }
 button.link { min-height: 0; }
-input { font: inherit; width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0e1727; color: var(--text); }
+input { font: inherit; width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #101318; color: var(--text); }
 input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 #login-form { display: flex; gap: 10px; margin-top: 14px; }
 #code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 22px; letter-spacing: 3px; text-transform: uppercase; }
@@ -35,20 +35,20 @@ input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .card-head b { font-size: 17px; }
-.card p { margin: 6px 0; color: #c9d6e8; font-size: 15px; word-break: break-word; }
+.card p { margin: 6px 0; color: #d3d8de; font-size: 15px; word-break: break-word; }
 .pill { font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
-.pill-ok { color: var(--green); background: rgba(52, 211, 153, .12); }
-.pill-warn { color: var(--amber); background: rgba(251, 191, 36, .12); }
-.pill-off { color: var(--dim); background: rgba(138, 153, 176, .12); }
-.login { margin: 12px 0; border-radius: 12px; background: #0e1727; border: 1px solid var(--line); }
+.pill-ok { color: var(--green); background: rgba(61, 155, 255, .12); }
+.pill-warn { color: var(--amber); background: rgba(254, 188, 46, .12); }
+.pill-off { color: var(--dim); background: rgba(144, 157, 170, .12); }
+.login { margin: 12px 0; border-radius: 12px; background: #101318; border: 1px solid var(--line); }
 .field { padding: 12px 14px; }
 .field + .field { border-top: 1px solid var(--line); }
 .field label { display: block; color: var(--dim); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
 .field .value { display: flex; align-items: center; gap: 10px; }
 .field code { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 18px; color: var(--text); word-break: break-all; user-select: all; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-button.chip { min-height: 36px; padding: 6px 12px; font-size: 14px; font-weight: 600; border-radius: 999px; background: transparent; color: var(--blue); border: 1px solid #23476b; }
-button.chip:active { background: #10243a; }
+button.chip { min-height: 36px; padding: 6px 12px; font-size: 14px; font-weight: 600; border-radius: 999px; background: transparent; color: var(--blue); border: 1px solid #1a344f; }
+button.chip:active { background: #0e1b29; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pwform { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .pwform input { margin-bottom: 8px; }
@@ -57,12 +57,12 @@ button.chip:active { background: #10243a; }
 .tool small { display: block; color: var(--dim); font-size: 13px; }
 /* A task's progress stays in view at the bottom, wherever you are */
 .task { position: fixed; z-index: 3; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); max-width: 736px; margin: 0 auto;
-  background: #10243a; border: 1px solid var(--blue); border-radius: 12px; padding: 12px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
+  background: #0e1b29; border: 1px solid var(--blue); border-radius: 12px; padding: 12px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
 body.has-task main { padding-bottom: 200px; }
 .task-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.task-ok { border-color: var(--green); background: #0f2a22; }
+.task-ok { border-color: var(--green); background: #0e2036; }
 .task-bad { border-color: var(--red); background: #2a1316; }
-.task pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; color: #9fb0c8; max-height: 120px; overflow: auto; }
+.task pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; color: #aab3bd; max-height: 120px; overflow: auto; }
 footer { color: var(--dim); font-size: 13px; padding: 30px 0 24px; text-align: center; }
 footer a { color: var(--dim); }
 
@@ -70,7 +70,7 @@ footer a { color: var(--dim); }
 .toast { position: fixed; z-index: 4; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); max-width: 736px; margin: 0 auto;
   display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 16px; border-radius: 12px;
   background: #2a1316; border: 1px solid var(--red); color: #fecaca; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
-.toast.ok { background: #0f2a22; border-color: var(--green); color: #bbf7d0; }
+.toast.ok { background: #0e2036; border-color: var(--green); color: #cfe4ff; }
 .toast span { flex: 1; }
 .toast button { color: inherit; padding: 0 4px; font-size: 18px; }
 /* Changing a password */

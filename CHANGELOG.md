@@ -2,7 +2,11 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
-## [2.15.3] - 2026-11-10
+## [2.15.3] - 2026-11-14
+
+### Changed
+
+- **A new look for the TV app and the phone dashboard,** to match LG-USB-2-ETH0 and SSH Doctor: their near-black background and surfaces, their yellow and red for warnings and errors, and one color of its own, Entware blue (#3d9bff) from the logo, for focus, progress and "ready".  The screenshots in this README are updated to match.
 
 ### Added
 
