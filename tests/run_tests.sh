@@ -68,6 +68,9 @@ case "$1" in
     configure) if fake_half; then echo ' * pkg_run_script: package "mlocate" postinst script returned status 1.' >&2; exit 1; fi ;;
     print-architecture) echo "arch all 1"; echo "arch aarch64-3.10 10" ;;
     update) [ -e /run/entware-fail-update ] && { echo "fake: update failed"; exit 1; }
+        # A slow task, so two started together really overlap (an upgrade
+        # with nothing to update stops after this)
+        [ -e /run/opkg-slow ] && sleep 3
         mkdir -p /opt/var/opkg-lists; touch /opt/var/opkg-lists/entware
         echo "Updated list of available packages" ;;
     list-upgradable) cat /opt/lib/opkg/fake-upgradable 2>/dev/null ;;
