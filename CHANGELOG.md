@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **The TV app's menu has tabs, and bigger text,** like LG-USB-2-ETH0, SSH Doctor and FW Block, so it reads well on a smaller TV: Packages, Entware and Help, with buttons at 40px instead of 27px.  The status card shows what matters and keeps nano, certificates and locate for Full check unless one needs attention.  The Packages screen and the pop-ups are bigger too.
+
 ## [2.15.3] - 2026-11-14
 
 ### Changed

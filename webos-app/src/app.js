@@ -116,9 +116,10 @@
 
     function render() {
         var s = state;
-        $('meta').innerHTML = esc('v' + s.version) + '<br>' + esc([s.model, s.webos && s.webos + (s.webosRelease ? ' (' + s.webosRelease + ')' : '')]
+        // The SSH address sits up here, so the footer has room for the keys
+        $('meta').innerHTML = esc('v' + s.version + (s.ip ? ' · ssh root@' + s.ip : '')) + '<br>' +
+            esc([s.model, s.webos && s.webos + (s.webosRelease ? ' (' + s.webosRelease + ')' : '')]
             .filter(function (x) { return x; }).join(' · '));
-        $('ssh').textContent = s.ip ? 'ssh root@' + s.ip : '';
 
         // Headline
         var dot, head, sub;
@@ -147,38 +148,38 @@
         var html = '';
         if (s.installed) {
             html += row('Build', esc(s.buildLabel || s.build || 'unknown'));
-            html += row('Mounted on /opt', yes(s.mounted, 'yes', 'no'));
+            // Mounted, and mounted again at every boot, in one row
+            var boot = s.bootScript ? '' : (s.homebrewChannel ? ' · <span class="bad">not at boot</span>' : ' · <span class="warn">at SSH login</span>');
+            html += row('Mounted', s.mounted ? yes(true, 'on /opt' + (s.bootScript ? ' · at boot' : '')) + boot : yes(false, '', 'no'));
             if (s.packages !== null) {
                 html += row('Packages', esc(s.packages + (s.diskUsed ? ' · ' + s.diskUsed + ' used' : '')));
             }
-            html += row('Remounts at boot', yes(s.bootScript, 'yes', s.homebrewChannel ? 'no' : 'at SSH login', s.homebrewChannel ? 'bad' : 'warn'));
             html += row('SSH shell', s.shellFiles ? yes(s.bash, 'bash', 'stock (bash missing)') : '<span class="dim">stock shell</span>');
-            var nano = { on: yes(true, 'syntax colors on'), off: '<span class="warn">no colors (your own nanorc)</span>', none: '<span class="dim">not installed</span>' }[s.nano];
-            html += row('nano', nano || esc(s.nano));
-            var certs = { yes: yes(true, 'installed'), missing: '<span class="bad">missing</span>', notNeeded: '<span class="dim">not needed yet</span>' }[s.certs];
-            html += row('HTTPS certificates', certs || esc(s.certs));
-            var loc = {
-                ready: yes(true, 'ready' + (s.locateDb ? ' · indexed ' + s.locateDb : '')),
-                notSetUp: '<span class="bad">installed, not set up</span>',
-                noDatabase: '<span class="warn">set up, not indexed yet</span>',
-                notInstalled: '<span class="dim">not installed</span>'
-            }[s.locate];
-            html += row('locate', loc || esc(s.locate));
+            // nano, certificates and locate only when something's off: the
+            // full list is in Full check and logs (and big enough to read)
+            var nano = { off: '<span class="warn">no colors (your nanorc)</span>' }[s.nano];
+            if (nano) { html += row('nano', nano); }
+            var certs = { missing: '<span class="bad">missing</span>' }[s.certs];
+            if (certs) { html += row('HTTPS certs', certs); }
+            var loc = { notSetUp: '<span class="bad">not set up</span>', noDatabase: '<span class="warn">not indexed yet</span>' }[s.locate];
+            if (loc) { html += row('locate', loc); }
         } else {
-            html += row('Recommended build', esc(buildLabel(s.recommended)));
+            html += row('Build to use', esc(buildLabel(s.recommended)));
             html += row('Kernel', esc(s.kernel + (s.kernelBits ? ' (' + s.kernelBits + '-bit)' : '')));
-            html += row('Homebrew Channel', yes(s.homebrewChannel, 'yes', 'not found', 'warn'));
+            html += row('Homebrew', yes(s.homebrewChannel, 'Channel found', 'Channel not found', 'warn'));
         }
         if (s.installed) {
             html += row('Location', (s.location === 'appstore' ? 'app storage' : 'user data') +
                 (s.srcSafe === false ? ' · <span class="bad">not root\'s alone</span>' : ''));
         }
+        // 1113 MB reads as 1.1 GB, so the row fits on one line
+        function mb(n) { return n >= 1000 ? (Math.round(n / 102.4) / 10) + ' GB' : n + ' MB'; }
         var free = [];
         if (s.userFreeMB !== null && s.userFreeMB !== undefined) {
-            free.push(s.userFreeMB < 50 ? '<span class="bad">' + esc(s.userFreeMB + ' MB') + '</span> user data' : esc(s.userFreeMB + ' MB') + ' user data');
+            free.push(s.userFreeMB < 50 ? '<span class="bad">' + esc(mb(s.userFreeMB)) + '</span> data' : esc(mb(s.userFreeMB)) + ' data');
         }
         if (s.appFreeMB !== null && s.appFreeMB !== undefined) {
-            free.push(s.appFreeMB < 50 ? '<span class="bad">' + esc(s.appFreeMB + ' MB') + '</span> apps' : esc(s.appFreeMB + ' MB') + ' apps');
+            free.push(s.appFreeMB < 50 ? '<span class="bad">' + esc(mb(s.appFreeMB)) + '</span> apps' : esc(mb(s.appFreeMB)) + ' apps');
         }
         if (free.length) { html += row('Free space', free.join(' · ')); }
         html += row('Telnet recovery', yes(s.telnet, 'on', 'off', 'warn'));
@@ -217,6 +218,17 @@
             $('update-title').textContent = 'Update to v' + latest;
             $('update-hint').textContent = 'you have v' + s.version + ', downloads, checks and installs it';
         }
+        // The first time: Packages when Entware is ready, Entware when it
+        // needs installing, a repair or an app update
+        if (!tabChosen) {
+            tab = s.installed && s.mounted && !s.issues.length && !latest ? 'pkgs' : 'entware';
+            tabChosen = true;
+        }
+        // An app update found after that opens the Entware tab, unless the
+        // remote has been used since
+        if (latest && !navigated && !updateShown) { tab = 'entware'; current = 0; }
+        if (latest) { updateShown = true; }
+        fitRows();
         if (current >= buttons().length) { current = buttons().length - 1; }
         if (!overlayMode) { focusCurrent(); }
 
@@ -1727,15 +1739,58 @@
 
     // ------------------------------------------------------------------ remote / keyboard
 
-    // Only the buttons on screen, in order (hidden ones are skipped)
-    function buttons() {
-        return Array.prototype.slice.call(document.querySelectorAll('.btn')).filter(function (b) {
+    // The menu's tabs, as in LG-USB-2-ETH0 and SSH Doctor: only the open
+    // tab's rows show, a tab with nothing to show is hidden, and Entware gets
+    // a dot when an app update is waiting there
+    var TABS = ['pkgs', 'entware', 'help'];
+    // True while the focus is up on the tab bar (UP from a tab's first row)
+    var onTabs = false;
+    var tab = 'pkgs';
+    var tabChosen = false;   // until the first status, or the viewer picks one
+    var navigated = false;   // the remote or pointer has moved in the menu
+    var updateShown = false; // the Entware tab opened for an app update
+    function tabRows(t) {
+        return Array.prototype.slice.call(document.querySelectorAll('.btn[data-tab="' + t + '"]')).filter(function (b) {
             return b.style.display !== 'none';
         });
     }
+    function visibleTabs() { return TABS.filter(function (t) { return tabRows(t).length > 0; }); }
+    function fitRows() {
+        var vis = visibleTabs();
+        if (vis.indexOf(tab) < 0) { tab = vis[0] || 'entware'; }
+        Array.prototype.slice.call(document.querySelectorAll('#tabs .tab')).forEach(function (el) {
+            var t = el.getAttribute('data-tab');
+            var news = t !== tab && tabRows(t).some(function (b) { return / btn-(update|attn)/.test(b.className); });
+            el.className = 'tab' + (t === tab ? ' on' : '') + (news ? ' news' : '') + (vis.indexOf(t) < 0 ? ' gone' : '');
+        });
+        Array.prototype.slice.call(document.querySelectorAll('.btn')).forEach(function (b) {
+            b.className = b.className.replace(/ ?off-tab/g, '') + (b.getAttribute('data-tab') === tab ? '' : ' off-tab');
+        });
+    }
+    // Open tab T.  The focus stays on the tab bar if it's there, or goes to
+    // the tab's first row.
+    function openTab(t) {
+        tab = t;
+        tabChosen = true;
+        current = 0;
+        fitRows();
+        focusCurrent();
+    }
+    function stepTab(dir) {
+        var vis = visibleTabs();
+        var i = vis.indexOf(tab) + dir;
+        if (i >= 0 && i < vis.length) { openTab(vis[i]); }
+    }
+
+    // Only the open tab's buttons, in order (hidden ones are skipped)
+    function buttons() { return tabRows(tab); }
     var current = 0;
     function focusCurrent() {
+        fitRows();
+        var tabEl = onTabs ? document.querySelector('#tabs .tab[data-tab="' + tab + '"]') : null;
+        if (onTabs && !tabEl) { onTabs = false; }
         var list = buttons();
+        if (tabEl) { tabEl.focus(); return; }
         if (!list.length) { return; }
         if (current >= list.length) { current = list.length - 1; }
         if (current < 0) { current = 0; }
@@ -1786,17 +1841,34 @@
             return;
         }
         if (store.open) { storeKey(e); return; }
+        navigated = true;
         var list = buttons();
+        // Up on the tab bar: LEFT and RIGHT pick a tab, DOWN or OK go into it
+        if (onTabs) {
+            if (k === KEY.LEFT) { stepTab(-1); }
+            else if (k === KEY.RIGHT) { stepTab(1); }
+            else if (k === KEY.DOWN || k === KEY.ENTER) { onTabs = false; current = 0; focusCurrent(); }
+            else if (k === KEY.BACK || k === KEY.ESC) { exitApp(); }
+            e.preventDefault();
+            return;
+        }
         if (k === KEY.DOWN) { current = Math.min(current + 1, list.length - 1); focusCurrent(); e.preventDefault(); }
+        else if (k === KEY.UP && current === 0) { onTabs = true; focusCurrent(); e.preventDefault(); }
         else if (k === KEY.UP) { current = Math.max(current - 1, 0); focusCurrent(); e.preventDefault(); }
+        else if (k === KEY.LEFT) { stepTab(-1); e.preventDefault(); }
+        else if (k === KEY.RIGHT) { stepTab(1); e.preventDefault(); }
         else if (k === KEY.ENTER) { act(list[current]); e.preventDefault(); }
         else if (k === KEY.BACK || k === KEY.ESC) { exitApp(); e.preventDefault(); }
     });
 
     // Magic Remote pointer: hovering moves focus, clicking acts
     Array.prototype.slice.call(document.querySelectorAll('.btn')).forEach(function (btn) {
-        btn.addEventListener('mouseover', function () { if (!overlayMode) { current = buttons().indexOf(btn); focusCurrent(); } });
+        btn.addEventListener('mouseover', function () { if (!overlayMode) { navigated = true; onTabs = false; current = buttons().indexOf(btn); focusCurrent(); } });
         btn.addEventListener('click', function () { current = buttons().indexOf(btn); act(btn); });
+    });
+    // Magic Remote pointer on the tabs
+    Array.prototype.slice.call(document.querySelectorAll('#tabs .tab')).forEach(function (el) {
+        el.addEventListener('click', function () { if (!overlayMode && !store.open) { onTabs = true; openTab(el.getAttribute('data-tab')); } });
     });
     $('overlay').addEventListener('click', function () {
         if (overlayMode === 'confirm' && onConfirm) { acceptConfirm(); }

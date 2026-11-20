@@ -179,6 +179,18 @@ function check(name, cond) {
         return { page, errors };
     }
     const press = async (page, key, n) => { for (let i = 0; i < (n || 1); i++) { await page.keyboard.press(key); await page.waitForTimeout(60); } };
+    // The main menu has tabs: up to the tab bar, across to the button's
+    // tab, then down to it
+    async function goTo(page, action) {
+        const t = await page.$eval('.btn[data-action="' + action + '"]', (b) => b.getAttribute('data-tab'));
+        await press(page, 'ArrowUp', 10);
+        await press(page, 'ArrowLeft', 4);
+        const tabs = await page.$$eval('#tabs .tab', (ts) => ts.filter((x) => !/gone/.test(x.className)).map((x) => x.getAttribute('data-tab')));
+        if (tabs.indexOf(t) > 0) { await press(page, 'ArrowRight', tabs.indexOf(t)); }
+        await press(page, 'ArrowDown');
+        const rows = await page.$$eval('.btn[data-tab="' + t + '"]', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
+        if (rows.indexOf(action) > 0) { await press(page, 'ArrowDown', rows.indexOf(action)); }
+    }
     const visible = (page, action) => page.$eval('[data-action="' + action + '"]', (b) => b.style.display !== 'none');
     const overlayTitle = (page) => page.$eval('#overlay-title', (e) => e.textContent);
     const overflows = (page) => page.$eval('#status', (c) => c.scrollHeight > c.clientHeight + 1);
@@ -213,7 +225,7 @@ function check(name, cond) {
 
     console.log('== Add-ons screen');
     const order = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
-    await press(page, 'ArrowDown', order.indexOf('addons'));
+    await goTo(page, 'addons');
     await press(page, 'Enter');
     await page.waitForSelector('.addon');
     check('opens with Manage from your phone, then every add-on', (await page.$$('.addon')).length === 15 && /Manage from your phone/.test(await page.$eval('.addon', (r) => r.textContent)));
@@ -327,8 +339,7 @@ function check(name, cond) {
     console.log('== Package updates');
     check('the button says how many updates there are', /2 updates available/.test(await page.textContent('#upgrade-hint')));
     let order4 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
-    await press(page, 'ArrowUp', 10);
-    await press(page, 'ArrowDown', order4.indexOf('upgrade'));
+    await goTo(page, 'upgrade');
     await press(page, 'Enter');
     await page.waitForFunction(() => document.querySelector('#store .tab.on') && /Updates/.test(document.querySelector('#store .tab.on').textContent) && document.querySelector('#store .srow'));
     let rows = await page.$$eval('#store .srow b', (bs) => bs.map((b) => b.textContent));
@@ -360,14 +371,13 @@ function check(name, cond) {
     check('and the button now says 1 update', true);
 
     console.log('== Move to app storage');
-    check('the main screen shows where Entware is and both free spaces', await page.$eval('#facts', (t) => /user data/.test(t.textContent) && /1700 MB apps/.test(t.textContent)));
+    check('the main screen shows where Entware is and both free spaces', await page.$eval('#facts', (t) => /user data/.test(t.textContent) && /1.7 GB apps/.test(t.textContent)));
     check('Move to app storage shows when user data is tight', await visible(page, 'move'));
     check('a notice says it can move to app storage', await page.$eval('#notes', (n) => /Move it to app storage: 1700 MB free/.test(n.textContent)));
     check('the status card still fits with the notice', !(await overflows(page)));
     await page.screenshot({ path: path.join(OUT, '2b-move-notice.png') });
     let order3 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
-    await press(page, 'ArrowUp', 10);
-    await press(page, 'ArrowDown', order3.indexOf('move'));
+    await goTo(page, 'move');
     await press(page, 'Enter');
     check('asks before moving, with both free spaces', /Move Entware to app storage\?/.test(await overlayTitle(page)) && /120 MB/.test(await page.textContent('#overlay-body')) && /1700 MB/.test(await page.textContent('#overlay-body')));
     await page.screenshot({ path: path.join(OUT, '8-confirm-move.png') });
@@ -392,7 +402,7 @@ function check(name, cond) {
         return bs[bs.length - 1].getBoundingClientRect().bottom <= document.querySelector('footer').getBoundingClientRect().top - 8;
     }));
     await page.screenshot({ path: path.join(OUT, '9-update-available.png') });
-    await press(page, 'ArrowUp', 10);
+    check('the Entware tab opens for it', await page.evaluate(() => document.querySelector('#tabs .tab.on').getAttribute('data-tab') === 'entware' && document.activeElement.getAttribute('data-action') === 'update'));
     await press(page, 'Enter');
     check('asks before updating, and says what happens', /Update the app to v9\.9\.9\?/.test(await overlayTitle(page)) && /checks it against the release/.test(await page.textContent('#overlay-body')));
     await press(page, 'Enter');
@@ -403,8 +413,7 @@ function check(name, cond) {
     console.log('== SSH commands');
     const order5 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
     check('SSH commands shows once Entware is installed', order5.includes('commands'));
-    await press(page, 'ArrowUp', 10);
-    await press(page, 'ArrowDown', order5.indexOf('commands'));
+    await goTo(page, 'commands');
     await press(page, 'Enter');
     await page.waitForFunction(() => /SSH commands/.test(document.getElementById('overlay-title').textContent));
     check('it opens on tv, with the TV\'s groups', /tv: the TV/.test(await page.textContent('.ctab.on')) &&
@@ -432,8 +441,7 @@ function check(name, cond) {
 
     console.log('== Full check');
     const order2 = await page.$$eval('.btn', (bs) => bs.filter((b) => b.style.display !== 'none').map((b) => b.getAttribute('data-action')));
-    await press(page, 'ArrowUp', 10);
-    await press(page, 'ArrowDown', order2.indexOf('doctor'));
+    await goTo(page, 'doctor');
     await press(page, 'Enter');
     await page.waitForFunction(() => /Full check and logs/.test(document.getElementById('overlay-title').textContent));
     check('Full check and logs lists the check, the boot log and recent tasks', await page.$$eval('.addon', (rs) => rs.length === 3 && /Full check/.test(rs[0].textContent) && /Boot log/.test(rs[1].textContent) && /Install and repair/.test(rs[2].textContent)));
@@ -461,8 +469,7 @@ function check(name, cond) {
     await press(page, 'Escape');
 
     console.log('== Report for GitHub');
-    await press(page, 'ArrowUp', 10);
-    await press(page, 'ArrowDown', order2.indexOf('report'));
+    await goTo(page, 'report');
     await press(page, 'Enter');
     await page.waitForFunction(() => /Report for GitHub/.test(document.getElementById('overlay-title').textContent));
     check('offers a compatibility report and a bug report', await page.$$eval('.addon', (rs) => rs.length === 2 && /It works on my TV/.test(rs[0].textContent) && /Something went wrong/.test(rs[1].textContent)));
@@ -484,8 +491,7 @@ function check(name, cond) {
     const shown = () => page.evaluate(() => document.getElementById('overlay').classList.contains('hidden') && !document.getElementById('store').classList.contains('hidden'));
     const focused = () => page.$eval('#store .focus', (e) => e.textContent);
     const settle = () => page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden') && document.querySelector('#store .focus'));
-    await press(page, 'ArrowUp', 10);
-    await press(page, 'ArrowDown', order2.indexOf('packages'));
+    await goTo(page, 'packages');
     await press(page, 'Enter');
     await page.waitForFunction(() => document.querySelector('#store .tile'));
     check('Packages opens full screen on Browse, at Start here', await shown() && /Browse\s*12/.test(await page.$eval('#store .tab.on', (t) => t.textContent)) &&
