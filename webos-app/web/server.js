@@ -196,7 +196,14 @@ function api(req, res, u, who) {
 }
 
 var FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/dash.js': ['dash.js', 'application/javascript; charset=utf-8'],
-    '/dash.css': ['dash.css', 'text/css; charset=utf-8'], '/icon.png': ['icon.png', 'image/png'] };
+    '/dash.css': ['dash.css', 'text/css; charset=utf-8'], '/icon.png': ['icon.png', 'image/png'],
+    '/i18n.js': ['i18n.js', 'application/javascript; charset=utf-8'] };
+// The TV app's translations: copied in by the build, or the app's own in the repo
+function filePath(name) {
+    var p = path.join(HERE, name);
+    if (name === 'i18n.js' && !fs.existsSync(p)) { p = path.join(HERE, '..', 'src', 'i18n.js'); }
+    return p;
+}
 
 var server = http.createServer(function (req, res) {
     var who = req.socket.remoteAddress || '';
@@ -205,7 +212,7 @@ var server = http.createServer(function (req, res) {
     var u = String(req.url || '/').split('?')[0];
     try {
         if (req.method === 'GET' && FILES[u]) {
-            return fs.readFile(path.join(HERE, FILES[u][0]), function (err, buf) {
+            return fs.readFile(filePath(FILES[u][0]), function (err, buf) {
                 if (err) { return send(res, 404, 'missing', 'text/plain'); }
                 send(res, 200, buf, FILES[u][1]);
             });

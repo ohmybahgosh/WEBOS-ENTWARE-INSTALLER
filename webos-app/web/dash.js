@@ -8,7 +8,11 @@
     var polling = null;
     var busy = false;          // a task runs, or a change is on its way: buttons wait
     var reveal = {};           // services whose password shows (just changed, or Show)
-    var NAMES = { add: 'Add', remove: 'Remove', password: 'New password for', 'pkg-add': 'Install', 'pkg-remove': 'Remove', upgrade: 'Update' };
+    // Translations (i18n.js, the TV app's): in the phone's language
+    var I18N = window.ENT_I18N || { T: function (t, v) { return v ? t.replace(/\{(\w+)\}/g, function (m, k) { return k in v ? v[k] : m; }) : t; },
+        TS: function (t) { return t; }, translatePage: function () {} };
+    var T = I18N.T, TS = I18N.TS;
+    var NAMES = { add: T('Add {name}'), remove: T('Remove {name}'), password: T('New password for {name}'), 'pkg-add': T('Install {name}'), 'pkg-remove': T('Remove {name}'), upgrade: T('Update {name}') };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, text) {
@@ -22,7 +26,7 @@
     }
     function stored() { try { return sessionStorage.getItem('entware.token') || ''; } catch (e) { return ''; } }
 
-    var OFFLINE = 'Can\'t reach the TV.  Is your phone on the same Wi-Fi?  The dashboard also stops after 30 minutes without use: start it again on the TV, under Add-ons.';
+    var OFFLINE = T('Can\'t reach the TV.  Is your phone on the same Wi-Fi?  The dashboard also stops after 30 minutes without use: start it again on the TV, under Add-ons.');
     function call(method, url, body) {
         return fetch(url, {
             method: method,
@@ -31,8 +35,8 @@
             cache: 'no-store'
         }).then(function (r) {
             return r.json().catch(function () { return {}; }).then(function (j) {
-                if (r.status === 401 && url !== '/api/login') { signedOut('Signed out.  Enter the code on the TV to sign in again.'); throw new Error(''); }
-                if (!r.ok) { throw new Error(j.error || ('Something went wrong (' + r.status + ').')); }
+                if (r.status === 401 && url !== '/api/login') { signedOut(T('Signed out.  Enter the code on the TV to sign in again.')); throw new Error(''); }
+                if (!r.ok) { throw new Error(j.error ? TS(j.error) : T('Something went wrong ({n}).', { n: r.status })); }
                 return j;
             });
         }, function () { throw new Error(OFFLINE); });
@@ -54,14 +58,14 @@
     function signIn(code) {
         var go = $('login-go');
         $('login-msg').textContent = '';
-        if (!code.replace(/[\s-]/g, '')) { $('login-msg').textContent = 'Enter the code shown on the TV.'; return; }
-        go.disabled = true; go.textContent = 'Signing in…';
+        if (!code.replace(/[\s-]/g, '')) { $('login-msg').textContent = T('Enter the code shown on the TV.'); return; }
+        go.disabled = true; go.textContent = T('Signing in…');
         return call('POST', '/api/login', { code: code }).then(function (j) {
             token = j.token; store(token);
             show('dash');
             refresh();
         }, function (e) { show('login'); $('login-msg').textContent = e.message; })
-            .then(function () { go.disabled = false; go.textContent = 'Sign in'; });
+            .then(function () { go.disabled = false; go.textContent = T('Sign in'); });
     }
 
     // Messages float at the top of the screen, so they show wherever you are
@@ -80,9 +84,14 @@
         return call('GET', '/api/state').then(function (s) {
             data = s;
             $('loading').hidden = true;
-            var tv = s.tv.model ? s.tv.model + ' · ' + s.tv.webos + (s.tv.release ? ' (' + s.tv.release + ')' : '') : 'on your LG TV';
+            var tv = s.tv.model ? s.tv.model + ' · ' + s.tv.webos + (s.tv.release ? ' (' + s.tv.release + ')' : '') : T('on your LG TV');
             $('tv').textContent = tv;
-            $('free').textContent = s.entware.freeMB !== undefined && s.entware.freeMB !== null ? s.entware.freeMB + ' MB free for Entware' : '';
+            $('free').textContent = s.entware.freeMB !== undefined && s.entware.freeMB !== null ? T('{n} MB free for Entware', { n: s.entware.freeMB }) : '';
+            // Titles, descriptions and address lines come from the installer, in English
+            s.addons.forEach(function (a) {
+                a.title = T(a.title); a.about = T(a.about);
+                if (a.info && a.info.lines) { a.info.lines = a.info.lines.map(function (l) { return TS(l); }); }
+            });
             busy = s.entware.job === 'running';
             render();
             if (busy) { follow(); }
@@ -90,9 +99,9 @@
     }
 
     function pill(a) {
-        if (a.state === 'installed') { return el('span', 'pill pill-ok', a.service ? 'Running' : (a.removable ? 'Installed' : 'Included')); }
-        if (a.state === 'needsSetup') { return el('span', 'pill pill-warn', a.id === 'tailscale' ? 'Sign in' : 'Finish setup'); }
-        return el('span', 'pill pill-off', 'Not added');
+        if (a.state === 'installed') { return el('span', 'pill pill-ok', a.service ? T('Running') : (a.removable ? T('Installed') : T('Included'))); }
+        if (a.state === 'needsSetup') { return el('span', 'pill pill-warn', a.id === 'tailscale' ? T('Sign in') : T('Finish setup')); }
+        return el('span', 'pill pill-off', T('Not added'));
     }
 
     // Buttons that change something wait while anything else runs
@@ -112,9 +121,9 @@
 
     function task(action, a) {
         if (busy) { return; }
-        var what = action === 'add' ? (a.state === 'notInstalled' ? 'Add ' + a.title + '?' : 'Finish setting up ' + a.title + '?') : 'Remove ' + a.title + '?';
-        var more = action === 'remove' ? (a.service ? '\n\nIts settings and password are deleted.  Your files in /opt/files stay.' : '') :
-            (a.system && a.state === 'notInstalled' ? '\n\nwebOS already has its own (' + a.system + ').  This adds Entware\'s too.' : '');
+        var what = action === 'add' ? (a.state === 'notInstalled' ? T('Add {name}?', { name: a.title }) : T('Finish setting up {name}?', { name: a.title })) : T('Remove {name}?', { name: a.title });
+        var more = action === 'remove' ? (a.service ? '\n\n' + T('Its settings and password are deleted.  Your files in /opt/files stay.') : '') :
+            (a.system && a.state === 'notInstalled' ? '\n\n' + T('webOS already has its own ({path}).  This adds Entware\'s too.', { path: a.system }) : '');
         if (!window.confirm(what + more)) { return; }
         msg('');
         setBusy(true);
@@ -134,10 +143,11 @@
         var tick = function () {
             call('GET', '/api/task').then(function (j) {
                 var m = /^(add|remove|password|pkg-add|pkg-remove|upgrade) ?(.*)$/.exec(j.name || '');
-                var name = m ? (NAMES[m[1]] || m[1]) + ' ' + titleOf(m[2]) : (j.name || 'A task');
+                var name = j.name === 'upgrade' ? T('Update all packages') :
+                    (m ? (NAMES[m[1]] ? T(NAMES[m[1]], { name: titleOf(m[2]) }) : m[1] + ' ' + titleOf(m[2])) : (j.name || T('A task')));
                 var running = j.state === 'running';
                 var good = j.state === 'done' && j.exit === 0;
-                $('task-title').textContent = name + (running ? '…' : (good ? ': done' : ': didn\'t finish'));
+                $('task-title').textContent = running ? name + '…' : (good ? T('{task}: done', { task: name }) : T('{task}: didn\'t finish', { task: name }));
                 $('task-log').textContent = (j.log || []).slice(-14).join('\n');
                 $('task-log').scrollTop = $('task-log').scrollHeight;
                 if (!running) {
@@ -165,7 +175,7 @@
     function copy(text, btn) {
         var label = btn.getAttribute('data-label') || btn.textContent;
         btn.setAttribute('data-label', label);
-        var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = label; }, 2000); };
+        var done = function () { btn.textContent = T('Copied'); setTimeout(function () { btn.textContent = label; }, 2000); };
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(text).then(done, function () { copyOld(text, done); });
             return;
@@ -188,25 +198,25 @@
     function loginBox(a, info) {
         var box = el('div', 'login');
         var uf = el('div', 'field');
-        uf.appendChild(el('label', '', 'User'));
+        uf.appendChild(el('label', '', T('User')));
         var uv = el('div', 'value');
         uv.appendChild(el('code', '', info.user));
-        uv.appendChild(button('Copy', 'chip', function (e) { copy(info.user, e.target); }, true));
+        uv.appendChild(button(T('Copy'), 'chip', function (e) { copy(info.user, e.target); }, true));
         uf.appendChild(uv);
         var pf = el('div', 'field');
-        pf.appendChild(el('label', '', 'Password'));
+        pf.appendChild(el('label', '', T('Password')));
         var pv = el('div', 'value');
         var code = el('code', 'pw', reveal[a.id] ? info.password : '••••••••••••');
         pv.appendChild(code);
         pf.appendChild(pv);
         var chips = el('div', 'chips');
-        var eye = button(reveal[a.id] ? 'Hide password' : 'Show password', 'chip', function () {
+        var eye = button(reveal[a.id] ? T('Hide password') : T('Show password'), 'chip', function () {
             reveal[a.id] = !reveal[a.id];
             code.textContent = reveal[a.id] ? info.password : '••••••••••••';
-            eye.textContent = reveal[a.id] ? 'Hide password' : 'Show password';
+            eye.textContent = reveal[a.id] ? T('Hide password') : T('Show password');
         }, true);
         chips.appendChild(eye);
-        chips.appendChild(button('Copy password', 'chip', function (e) { copy(info.password, e.target); }, true));
+        chips.appendChild(button(T('Copy password'), 'chip', function (e) { copy(info.password, e.target); }, true));
         pf.appendChild(chips);
         box.appendChild(uf); box.appendChild(pf);
         return box;
@@ -225,11 +235,11 @@
     function passwordPanel(a, user) {
         var f = el('form', 'pwform');
         f.setAttribute('novalidate', '');
-        f.appendChild(el('h4', '', 'Change the password'));
-        f.appendChild(el('p', 'dim small', 'The old one stops working, and ' + a.title + ' restarts for a moment.  Your settings stay.'));
-        var rnd = button('Make a random one for me', '', function () { setPassword(a, '', rnd, note); });
+        f.appendChild(el('h4', '', T('Change the password')));
+        f.appendChild(el('p', 'dim small', T('The old one stops working, and {name} restarts for a moment.', { name: a.title }) + '  ' + T('Your settings stay.')));
+        var rnd = button(T('Make a random one for me'), '', function () { setPassword(a, '', rnd, note); });
         f.appendChild(rnd);
-        f.appendChild(el('div', 'or', 'or type your own'));
+        f.appendChild(el('div', 'or', T('or type your own')));
         // The service's user, for password managers (and screen readers)
         var u = el('input');
         u.type = 'text'; u.autocomplete = 'username'; u.value = user || ''; u.readOnly = true; u.hidden = true;
@@ -240,27 +250,27 @@
         p1.autocomplete = p2.autocomplete = 'new-password';
         p1.autocapitalize = p2.autocapitalize = 'off';
         p1.spellcheck = p2.spellcheck = false;
-        p1.placeholder = 'New password';
-        p2.placeholder = 'Type it again';
-        p1.setAttribute('aria-label', 'New password'); p2.setAttribute('aria-label', 'New password again');
+        p1.placeholder = T('New password');
+        p2.placeholder = T('Type it again');
+        p1.setAttribute('aria-label', T('New password')); p2.setAttribute('aria-label', T('New password again'));
         var w1 = el('div', 'pwfield'); w1.appendChild(p1);
-        var eye = button('Show', 'link eye', function () {
+        var eye = button(T('Show'), 'link eye', function () {
             var on = p1.type === 'password';
             p1.type = p2.type = on ? 'text' : 'password';
-            eye.textContent = on ? 'Hide' : 'Show';
+            eye.textContent = on ? T('Hide') : T('Show');
         }, true);
-        eye.setAttribute('aria-label', 'Show the password as you type');
+        eye.setAttribute('aria-label', T('Show the password as you type'));
         w1.appendChild(eye);
         f.appendChild(w1); f.appendChild(p2);
         var rules = el('ul', 'rules');
-        var r1 = el('li', '', '12 to 64 characters'), r2 = el('li', '', 'Letters, numbers and symbols, no spaces, not starting with -'), r3 = el('li', '', 'Both the same');
+        var r1 = el('li', '', T('12 to 64 characters')), r2 = el('li', '', T('Letters, numbers and symbols, no spaces, not starting with -')), r3 = el('li', '', T('Both the same'));
         rules.appendChild(r1); rules.appendChild(r2); rules.appendChild(r3);
         f.appendChild(rules);
         var row = el('div', 'row');
-        var go = el('button', '', 'Save my password');
+        var go = el('button', '', T('Save my password'));
         go.type = 'submit';
         row.appendChild(go);
-        row.appendChild(button('Cancel', 'ghost', function () { f.hidden = true; p1.value = p2.value = ''; check(); note(''); }, true));
+        row.appendChild(button(T('Cancel'), 'ghost', function () { f.hidden = true; p1.value = p2.value = ''; check(); note(''); }, true));
         f.appendChild(row);
         var out = el('p', 'msg', '');
         out.setAttribute('role', 'alert');
@@ -278,7 +288,7 @@
         p2.addEventListener('input', check);
         f.addEventListener('submit', function (e) {
             e.preventDefault();
-            if (!check()) { note('Check the password against the list above.'); return; }
+            if (!check()) { note(T('Check the password against the list above.')); return; }
             note('');
             setPassword(a, p1.value, go, note);
         });
@@ -289,20 +299,20 @@
     }
     function setPassword(a, value, btn, note) {
         if (busy) { return; }
-        if (!value && !window.confirm('Make a new random password for ' + a.title + '?\n\nThe old one stops working, and ' + a.title + ' restarts for a moment.')) { return; }
+        if (!value && !window.confirm(T('Make a new random password for {name}?', { name: a.title }) + '\n\n' + T('The old one stops working, and {name} restarts for a moment.', { name: a.title }))) { return; }
         note('');
         setBusy(true);
         var was = btn.textContent;
-        btn.textContent = 'Saving…';
+        btn.textContent = T('Saving…');
         call('POST', '/api/password', { id: a.id, password: value || '' }).then(function () {
             reveal[a.id] = true;
             busy = false;
-            done[a.id] = 'Password changed.  It\'s shown above: copy it before you leave.';
+            done[a.id] = T('Password changed.  It\'s shown above: copy it before you leave.');
             refresh();
         }, function (e) {
             setBusy(false);
             btn.textContent = was;
-            note(e.message || 'It didn\'t change.', false);
+            note(e.message || T('It didn\'t change.'), false);
         });
     }
     var done = {};   // a message to show on a service's card after it redraws
@@ -319,29 +329,29 @@
             card.appendChild(el('p', '', a.about + '.'));
         } else {
             // The installer's wording is for the TV; on the phone, the link is right here
-            var lines = a.id === 'tailscale' && info.url ? ['Not signed in yet.  Tap Sign in to Tailscale, sign in, and the TV joins your tailnet.'] : (info.lines || []);
+            var lines = a.id === 'tailscale' && info.url ? [T('Not signed in yet.  Tap Sign in to Tailscale, sign in, and the TV joins your tailnet.')] : (info.lines || []);
             lines.forEach(function (l) { card.appendChild(el('p', '', l)); });
             if (info.user) { card.appendChild(loginBox(a, info)); }
             if (done[a.id]) { card.appendChild(el('p', 'msg ok', done[a.id])); delete done[a.id]; }
         }
         var row = el('div', 'row'), form = null;
         if (a.state === 'notInstalled') {
-            row.appendChild(button('Add', '', function () { task('add', a); }));
+            row.appendChild(button(T('Add'), '', function () { task('add', a); }));
         } else {
             if (info.url) {
-                var open = el('a', 'btn', a.id === 'tailscale' ? 'Sign in to Tailscale' : 'Open ' + a.title);
+                var open = el('a', 'btn', a.id === 'tailscale' ? T('Sign in to Tailscale') : T('Open {name}', { name: a.title }));
                 open.href = info.url; open.target = '_blank'; open.rel = 'noreferrer';
                 row.appendChild(open);
             }
-            if (a.state === 'needsSetup') { row.appendChild(button(a.id === 'tailscale' ? 'New sign-in link' : 'Finish setup', 'ghost', function () { task('add', a); })); }
+            if (a.state === 'needsSetup') { row.appendChild(button(a.id === 'tailscale' ? T('New sign-in link') : T('Finish setup'), 'ghost', function () { task('add', a); })); }
             if (info.hasPassword && a.state === 'installed') {
                 form = passwordPanel(a, info.user);
-                row.appendChild(button('Change password', 'ghost', function () {
+                row.appendChild(button(T('Change password'), 'ghost', function () {
                     form.hidden = !form.hidden;
                     if (!form.hidden) { form.check(); form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
                 }));
             }
-            row.appendChild(button('Remove', 'danger', function () { task('remove', a); }));
+            row.appendChild(button(T('Remove'), 'danger', function () { task('remove', a); }));
         }
         card.appendChild(row);
         if (form) { card.appendChild(form); }
@@ -352,12 +362,12 @@
         var r = el('div', 'tool');
         var t = el('div');
         t.appendChild(el('b', '', a.title));
-        t.appendChild(el('small', '', a.about + (a.system && a.state === 'notInstalled' ? '.  webOS already has its own.' : '')));
+        t.appendChild(el('small', '', a.about + (a.system && a.state === 'notInstalled' ? '.  ' + T('webOS already has its own.') : '')));
         r.appendChild(t);
         if (!a.removable && a.state === 'installed') { r.appendChild(pill(a)); }
-        else if (a.state === 'notInstalled') { r.appendChild(button('Add', '', function () { task('add', a); })); }
-        else if (a.state === 'needsSetup') { r.appendChild(button('Finish setup', 'ghost', function () { task('add', a); })); }
-        else { r.appendChild(button('Remove', 'danger', function () { task('remove', a); })); }
+        else if (a.state === 'notInstalled') { r.appendChild(button(T('Add'), '', function () { task('add', a); })); }
+        else if (a.state === 'needsSetup') { r.appendChild(button(T('Finish setup'), 'ghost', function () { task('add', a); })); }
+        else { r.appendChild(button(T('Remove'), 'danger', function () { task('remove', a); })); }
         return r;
     }
 
@@ -370,8 +380,8 @@
             else if (a.state === 'notInstalled') { more.appendChild(toolRow(a)); n.more++; }
             else { have.appendChild(toolRow(a)); n.have++; }
         });
-        $('nav-svc').textContent = 'Services (' + n.svc + ')';
-        $('nav-tools').textContent = 'Tools (' + (n.have + n.more) + ')';
+        $('nav-svc').textContent = T('Services ({n})', { n: n.svc });
+        $('nav-tools').textContent = T('Tools ({n})', { n: n.have + n.more });
         $('h-have').hidden = !n.have;
         $('h-more').hidden = !n.more;
     }
@@ -381,6 +391,9 @@
     $('reload').addEventListener('click', function () { msg(''); refresh(); });
     $('dash-msg-close').addEventListener('click', function () { msg(''); });
     $('task-close').addEventListener('click', function () { $('task').hidden = true; document.body.className = ''; });
+
+    I18N.translatePage(document.body);
+    document.title = T(document.title);
 
     // The QR code's #k=CODE signs in; it comes off the address straight away
     var k = /[#&]k=([A-Za-z0-9-]+)/.exec(location.hash);

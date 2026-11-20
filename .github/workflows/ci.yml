@@ -114,7 +114,10 @@ jobs:
           node --check tests/web-test.js
           node --check webos-app/web/server.js
           node --check webos-app/web/dash.js
+          node --check tests/check-i18n.js
           cd webos-app && npx --yes "eslint@$ESLINT" --max-warnings 0 src/
+      - name: Every text translated (Russian, Spanish)
+        run: node tests/check-i18n.js
       - name: Build the IPK and manifest
         run: |
           npm install -g "@webos-tools/cli@$WEBOS_CLI"

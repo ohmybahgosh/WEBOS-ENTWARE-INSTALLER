@@ -317,3 +317,10 @@ td { padding: 10px 0; }
 /* The category goes under the name, so the pill at the top right never covers it */
 .tile .k { display: block; margin: 2px 0 0; }
 .tile p { margin-top: 6px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+/* Longer words in other languages: a category's name gives way to its
+   count, and a note gets two lines */
+.rc > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rc .cnt { flex: none; margin-left: 12px; }
+#notes li { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.tile b { display: inline-block; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+html:lang(ru) td:first-child { width: 33%; }
