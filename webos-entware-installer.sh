@@ -462,10 +462,19 @@ age_of() {
     case "$t" in ''|*[!0-9]*) echo 999999 ;; *) echo $(( $(date +%s) - t )) ;; esac
 }
 
+# Makes folder $1 and claims it with file $2 holding this process's pid.
+# The claim is what decides, not mkdir: some mkdirs (uutils coreutils 0.8 to
+# 0.10, Ubuntu 26.04's) report success when another process made the folder
+# a moment before.  With noclobber, only one process can create the file.
+claim_dir() {
+    mkdir "$1" 2>/dev/null || return 1
+    (set -C; echo $$ > "$1/$2") 2>/dev/null
+}
+
 # Install, repair, uninstall, locate and upgrade take this lock, so the TV
 # app and an SSH session can never change things at the same time
 take_lock() {
-    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if ! claim_dir "$LOCK_DIR" pid; then
         lp=$(lock_pid)
         if [ "$lp" = "$$" ]; then
             # This process again, after uninstall restarted itself from /tmp
@@ -481,9 +490,8 @@ take_lock() {
         fi
         # Left by a task that was killed or a TV that rebooted
         rm -rf "$LOCK_DIR"
-        mkdir "$LOCK_DIR" 2>/dev/null || error_exit "Couldn't take the lock $LOCK_DIR."
+        claim_dir "$LOCK_DIR" pid || error_exit "Couldn't take the lock $LOCK_DIR."
     fi
-    echo $$ > "$LOCK_DIR/pid"
     LOCKED=1
 }
 release_lock() {
@@ -553,10 +561,10 @@ start_job() {
     # Only one start at a time: two at once would share one log and exit code.
     # Whoever makes the folder starts; anyone else backs off, unless it was
     # left behind (older than 30 seconds) by a start that was killed
-    if ! mkdir "$JOB_DIR.start" 2>/dev/null; then
+    if ! claim_dir "$JOB_DIR.start" pid; then
         [ "$(age_of "$JOB_DIR.start")" -ge 30 ] || error_exit "Another task is starting. Try again in a moment."
         rm -rf "$JOB_DIR.start"
-        mkdir "$JOB_DIR.start" 2>/dev/null || error_exit "Another task is starting. Try again in a moment."
+        claim_dir "$JOB_DIR.start" pid || error_exit "Another task is starting. Try again in a moment."
     fi
     trap 'rm -rf "$JOB_DIR.start"' EXIT
     [ "$(job_state)" = running ] && error_exit "Another task is running: $(cat "$JOB_DIR/name")."

@@ -16,6 +16,7 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 ### Fixed
 
 - **Uninstall cleans up after itself completely:** it stops the phone dashboard and any program still running from Entware (like `tv serve` or tmux) before removing it, so nothing keeps running from deleted files.  Startup scripts made with `tv autostart` are turned off (they use `tv`, which goes with Entware) but kept, and its scratch files in `/tmp` are removed.  Someone's SSH shell is left alone.
+- **Two tasks started at the same moment can't both run where `mkdir` reports success when it loses a race,** as uutils coreutils 0.8 to 0.10 does (Ubuntu 26.04).  The task lock and the start lock are now claimed with a file only one process can create, not by `mkdir` alone.
 
 ## [2.15.3] - 2026-11-14
 

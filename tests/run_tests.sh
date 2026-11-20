@@ -697,6 +697,20 @@ mkdir -p /tmp/webos-entware.lock; echo $HOLDER > /tmp/webos-entware.lock/pid
 ok "install waits its turn while another task holds the lock" 'grep -q "Another install, repair or uninstall is running (process $HOLDER)" "$W/out"'
 ! (cd /tmp && $SH /tmp/webos-entware-installer.sh job install) > "$W/out" 2>&1
 ok "the app can't start a task while SSH holds the lock" 'grep -q "running from SSH" "$W/out"'
+# A mkdir like uutils coreutils 0.8 to 0.10 (Ubuntu 26.04): it can report
+# success when another process made the folder a moment before.  The locks
+# must still hold
+mkdir -p "$W/lenient"
+printf '#!/bin/sh\nfor a; do case "$a" in -*) ;; *) [ -d "$a" ] && exit 0 ;; esac; done\nexec /bin/mkdir "$@"\n' > "$W/lenient/mkdir"
+chmod 755 "$W/lenient/mkdir"
+OLDPATH=$PATH; PATH="$W/lenient:$PATH"
+! run install -y
+ok "with a mkdir that doesn't fail on a folder that's there, the lock still holds" 'grep -q "Another install, repair or uninstall is running (process $HOLDER)" "$W/out"'
+mkdir -p /tmp/webos-entware-job.start; echo $HOLDER > /tmp/webos-entware-job.start/pid
+! (cd /tmp && $SH /tmp/webos-entware-installer.sh job upgrade) > "$W/out" 2>&1
+ok "and so does the one for starting a task" 'grep -q "Another task is starting" "$W/out" && [ "$(cat /tmp/webos-entware-job.start/pid)" = $HOLDER ]'
+PATH=$OLDPATH
+rm -rf /tmp/webos-entware-job.start
 kill $HOLDER; wait $HOLDER 2>/dev/null
 run install -y
 ok "a lock left by a stopped task is cleared" 'grep -q "Entware installed successfully" "$W/out" && [ ! -d /tmp/webos-entware.lock ]'
@@ -707,11 +721,6 @@ touch /run/opkg-slow
 wait
 ok "two tasks started at the same moment: only one runs" '[ "$(cat "$W/j1" "$W/j2" | grep -c "Started:")" = 1 ]'
 ok "and the other says another task is starting or running" 'cat "$W/j1" "$W/j2" | grep -q "Another task is \\(starting\\|running\\)"'
-# If it ever fails, show what each start and the task said
-if [ "$(cat "$W/j1" "$W/j2" | grep -c "Started:")" != 1 ]; then
-    for f in "$W/j1" "$W/j2" /tmp/webos-entware-job/log; do echo "  --- $f"; sed 's/^/  | /' "$f" 2>/dev/null; done
-    ls -la /tmp/webos-entware-job /tmp/webos-entware.lock 2>&1 | sed 's/^/  | /'
-fi
 rm -f /run/opkg-slow
 
 for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
