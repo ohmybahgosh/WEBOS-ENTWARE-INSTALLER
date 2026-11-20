@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.15.3"
+VERSION="2.16.0"
 
 # === Color Codes ===
 RED='\033[0;31m'

@@ -27,7 +27,7 @@ Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of L
 >
 > Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
 >
-> - **Tests on every push:** 430+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, [tests the phone dashboard](tests/web-test.js) on a phone-sized screen, lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
+> - **Tests on every push:** 440+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, [tests the phone dashboard](tests/web-test.js) on a phone-sized screen, [checks every text is translated](tests/check-i18n.js), lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
 > - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
 >
 > Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
@@ -89,9 +89,10 @@ Then log in again for the bash shell, and try `ent search htop` or `webos-entwar
 
 <img src="webos-app/src/icon160.png" width="80" align="right" alt="">
 
-The easiest way in.  It runs the same installer underneath, as root through the Homebrew Channel, so you don't need SSH to install or manage Entware.
+The easiest way in.  It runs the same installer underneath, as root through the Homebrew Channel, so you don't need SSH to install or manage Entware.  Its menu has three tabs, **Packages**, **Entware** and **Help** (LEFT and RIGHT switch them), with text big enough to read from the couch, in the same style as [LG-USB-2-ETH0](https://github.com/ohmybahgosh/LG-USB-2-ETH0) and [SSH Doctor](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR).
 
-- **Status at a glance:** whether Entware is installed and mounted, the build, packages and disk use, the boot script, the SSH shell, nano, HTTPS certificates, locate, free space and telnet recovery, plus any problems found.
+- **In English, Russian and Spanish:** it follows the TV's language, or pick one under **Help**, **Language**.  The phone dashboard follows your phone's.  Task logs, the full check and GitHub reports stay in English, the same as over SSH.
+- **Status at a glance:** whether Entware is installed and mounted (and at every boot), the build, packages and disk use, the SSH shell, where it lives, free space and telnet recovery, plus any problems found.  nano, HTTPS certificates and locate show up when one needs attention.
 - **Install Entware**, or **Repair** when something's wrong.  It uses the recommended build for your TV and keeps your packages and settings on a repair.
 - **Add-ons:** 25 of them, each with the setup it needs on webOS.  Tools like git, Python, htop, tmux, Vim and a [login banner](#login-banner), and [network services](#network-services) like Tailscale, Samba, File Browser, a DLNA media server, Transmission and Syncthing.  One press adds, finishes setting up or removes one.  A service opens to its address and password, with a QR code for your phone.
 - **Manage from your phone:** a QR code that opens a [dashboard](#manage-from-your-phone) on your phone, signed in, for add-ons and passwords.
@@ -101,7 +102,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
   - **Search** from any tab, with the TV's keyboard.  Name matches come first, then matches in the description, with a filter for each category.
   - **Installed** groups what's here: installed on their own, from add-ons, no longer needed, part of Entware, and libraries.  A package's page has **Remove**, or says why it stays.
   - **Updates** lists every package with an update, with **Update** for one or **Update all**.  The main screen's **Package updates** button shows how many there are and opens this tab, and the app checks Entware's server for new ones once a day.
-- **Uninstall Entware**, with a confirmation before anything is removed.
+- **Uninstall Entware**, with a confirmation before anything is removed.  It [cleans up everything](#uninstall) it added, and stops anything still running from Entware first.
 - **Live progress:** every task runs in the background on the TV and its log shows as it goes.  Closing the app doesn't stop it, and reopening the app picks the progress back up.
 - **Full check and logs:** everything `doctor` looks at, on screen, plus this boot's log from the boot script and the logs of the last 10 tasks the app ran.
 - **SSH commands:** every [`tv` and `ent` command](#the-tv-and-ent-commands) on one screen, with your TV's SSH address.  LEFT and RIGHT switch between `tv` (the TV) and `ent` (Entware).
@@ -110,10 +111,10 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
-<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote, on an LG C2: Packages opens on Start here, rclone's page with tips for using it on a TV, the Files and backup category, then SSH commands switching from tv to ent, and Add-ons with Samba, File Browser and the media server running"></p>
+<p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote, on an LG C2: Packages opens on Start here, rclone's page with tips for using it on a TV, the Files and backup category, then the Help tab's SSH commands switching from tv to ent, and Add-ons with Samba, File Browser and the media server running"></p>
 
 <p align="center">
-  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 121 packages on app storage, no problems found, with Check and repair, Package updates, Packages, Add-ons, SSH commands, Full check and logs, Report for GitHub and Uninstall Entware">
+  <img src="images/app-status.png" width="49%" alt="The Entware app on an LG C2: Entware is ready, 121 packages on app storage, no problems found, with the Packages, Entware and Help tabs, and Package updates (2 available), Packages and Add-ons on the Packages tab">
   <img src="images/app-addons.png" width="49%" alt="The Add-ons screen at the network services: Tailscale asking you to sign in, and Samba, File Browser, the DLNA media server, Transmission and Syncthing running">
 </p>
 <p align="center">
@@ -141,7 +142,7 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 
 ## Features
 
-- ✅ **A TV app** for the Homebrew Channel: install, repair, add-ons, updates and uninstall from the remote, with live progress.
+- ✅ **A TV app** for the Homebrew Channel: install, repair, add-ons, updates and uninstall from the remote, with live progress, in English, Russian and Spanish.
 - ✅ **One-press add-ons** (git, Python, htop, tmux, Vim, a login banner and more), each set up for webOS.
 - ✅ **Network services, set up safely:** Tailscale, Samba, File Browser, a DLNA media server, Transmission and Syncthing, each with a password made on the TV and no guest access, before it first starts.
 - ✅ **Checks the TV before touching anything**: root, model, webOS version, kernel, Homebrew Channel, free space and the Entware download server.
@@ -709,6 +710,8 @@ webos-entware uninstall
 (or `sh /tmp/webos-entware-installer.sh uninstall` if you still have the downloaded copy)
 
 This asks first, then removes Entware, every package installed with it, the boot script and the shell files the installer wrote, links in your home folder that point into Entware, and unmounts `/opt`. Your original shell files are put back. Disconnect and SSH in again afterwards.
+
+Before that it stops Entware's services, the phone dashboard and any other program still running from Entware (like `tv serve` or a tmux session), so nothing is left running from deleted files.  Someone's SSH shell is left alone: it goes when they log out.  Startup scripts you made with `tv autostart` are turned off, since they use `tv`, but kept in `/var/lib/webosbrew/init.d` for you to delete or keep.  Your SSH keys stay.
 
 If `/opt` can't be unmounted, or something (like a USB drive) is still mounted inside Entware's folder, the folder is kept rather than deleted. Fix that and run uninstall again.
 

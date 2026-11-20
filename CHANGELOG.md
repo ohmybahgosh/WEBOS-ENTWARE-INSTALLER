@@ -2,11 +2,20 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.16.0] - 2026-11-20
+
+### Added
+
+- **The TV app and the phone dashboard in Russian and Spanish,** as well as English.  The app follows the TV's language, or pick one under **Help**, **Language**; the phone dashboard follows the phone's.  The add-ons, the categories and tips in Packages, the SSH command reference, and the problems and notes the full check finds on the main screen are all translated.  Task logs, the full check itself and GitHub reports stay in English, the same as over SSH.  A new test, `tests/check-i18n.js`, fails CI if any text the app or the dashboard shows has no translation.
 
 ### Changed
 
-- **The TV app's menu has tabs, and bigger text,** like LG-USB-2-ETH0, SSH Doctor and FW Block, so it reads well on a smaller TV: Packages, Entware and Help, with buttons at 40px instead of 27px.  The status card shows what matters and keeps nano, certificates and locate for Full check unless one needs attention.  The Packages screen and the pop-ups are bigger too.
+- **The TV app's menu has tabs, and bigger text,** like LG-USB-2-ETH0, SSH Doctor and FW Block, so it reads well on a smaller TV: **Packages** (package updates, packages, add-ons), **Entware** (an app update, check and repair, a move, uninstall) and **Help** (SSH commands, the full check and logs, GitHub reports, language).  Buttons are 40px instead of 27px, and the status card, the pop-ups and the Packages screen are bigger too.  The status card shows what matters, and keeps nano, certificates and locate for when one needs attention.  The app opens on Packages, or on Entware when it needs installing, a repair or an app update.
+- **A list in a pop-up never shows a row cut in half:** it starts at a row's top, and a row that doesn't fit is left for the next scroll.
+
+### Fixed
+
+- **Uninstall cleans up after itself completely:** it stops the phone dashboard and any program still running from Entware (like `tv serve` or tmux) before removing it, so nothing keeps running from deleted files.  Startup scripts made with `tv autostart` are turned off (they use `tv`, which goes with Entware) but kept, and its scratch files in `/tmp` are removed.  Someone's SSH shell is left alone.
 
 ## [2.15.3] - 2026-11-14
 
