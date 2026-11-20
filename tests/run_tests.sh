@@ -385,8 +385,24 @@ printf '%s\n' '# Entware bash settings (webos-entware-installer)' \
 run install -y; ok "2.1 .bashrc edit kept" 'grep -q old21 /home/root/.bashrc'
 
 echo "== [$SH] 9. uninstall"
+# Left running from Entware: a program (like tv serve or tmux), a shell and
+# the phone dashboard.  A startup script from tv autostart, and one of yours.
+cp -L "$W/sleeper" /opt/bin/fakeserve
+(/opt/bin/fakeserve 300 </dev/null >/dev/null 2>&1 &)
+sleep 0.3; FAKEPID=$(pgrep -x fakeserve)
+mkdir -p /tmp/webos-entware-web; "$W/sleeper" 300 </dev/null >/dev/null 2>&1 & WEBPID=$!; echo $WEBPID > /tmp/webos-entware-web/pid
+printf '#!/bin/sh\n# hello: added by tv autostart\ntoast hi\n' > /var/lib/webosbrew/init.d/hello; chmod 755 /var/lib/webosbrew/init.d/hello
+printf '#!/bin/sh\necho mine\n' > /var/lib/webosbrew/init.d/mine; chmod 755 /var/lib/webosbrew/init.d/mine
+touch /tmp/webos-entware-boot.log
 run uninstall -y
 ok "uninstall succeeds" 'grep -q "Entware removed" "$W/out"'
+# Stopped means gone, or a zombie waiting for the test to collect it
+ok "uninstall stops programs running from Entware" '{ [ ! -e /proc/$FAKEPID ] || grep -q "^State:.Z" /proc/$FAKEPID/status; } && grep -q "Stopping fakeserve" "$W/out"'
+ok "and the phone dashboard" '! kill -0 $WEBPID 2>/dev/null && [ ! -e /tmp/webos-entware-web ]'
+ok "turns off tv autostart scripts but keeps them, and leaves yours alone" '[ -f /var/lib/webosbrew/init.d/hello ] && [ ! -x /var/lib/webosbrew/init.d/hello ] && [ -x /var/lib/webosbrew/init.d/mine ] && grep -q "Turned off hello" "$W/out"'
+ok "and clears its files in /tmp" '[ ! -e /tmp/webos-entware-boot.log ]'
+rm -f /var/lib/webosbrew/init.d/hello /var/lib/webosbrew/init.d/mine
+wait $WEBPID 2>/dev/null
 ok "/opt unmounted" '! mounted'
 ok "Entware folder removed" '[ ! -e /mnt/lg/user/opt ]'
 ok "boot script removed" '[ ! -e /var/lib/webosbrew/init.d/S99entware ]'

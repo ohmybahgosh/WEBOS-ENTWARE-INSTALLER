@@ -4877,6 +4877,49 @@ restore_shell_files() {
     done
 }
 
+# Programs running from Entware (their program file is in it), other than
+# this one, the shells it was started from and anyone's SSH shell: stopped
+# before /opt goes, so nothing keeps running from deleted files
+stop_opt_programs() {
+    opt_ours || return 0
+    odev=$(stat -c %d /opt/ 2>/dev/null)
+    mine=" $$ "
+    p=$$
+    while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+        p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null)
+        mine="$mine$p "
+    done
+    list=""
+    for d in /proc/[0-9]*; do
+        pid=${d#/proc/}
+        case "$mine" in *" $pid "*) continue ;; esac
+        case "$(readlink "$d/exe" 2>/dev/null)" in
+            /opt/*|"$BIND_SRC"/*)
+                [ "$(stat -L -c %d "$d/exe" 2>/dev/null)" = "$odev" ] || continue
+                # Someone's SSH shell is left alone: it goes when they log out
+                case "$(cat "$d/comm" 2>/dev/null)" in bash|zsh|fish) continue ;; esac
+                list="$list $pid"
+                info "Stopping $(cat "$d/comm" 2>/dev/null) ($pid), which runs from Entware." ;;
+        esac
+    done
+    [ -n "$list" ] || return 0
+    # shellcheck disable=SC2086
+    kill $list 2>/dev/null
+    sleep 1
+    # shellcheck disable=SC2086
+    kill -9 $list 2>/dev/null
+    return 0
+}
+# Startup scripts made with tv autostart run tv's commands, which go with
+# Entware: they're turned off (kept, so nothing of yours is deleted)
+autostart_off() {
+    for f in /var/lib/webosbrew/init.d/*; do
+        [ -f "$f" ] && [ -x "$f" ] || continue
+        grep -q '^# .*: added by tv autostart$' "$f" 2>/dev/null || continue
+        chmod 644 "$f" && info "Turned off ${f##*/}, a startup script from tv autostart (it's kept in ${f%/*})."
+    done
+}
+
 uninstall_entware() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root."
     # Running from the saved copy in /opt: rerun from /tmp so /opt can be unmounted
@@ -4891,7 +4934,14 @@ uninstall_entware() {
     if opt_ours && [ -x /opt/etc/init.d/rc.unslung ]; then
         /opt/etc/init.d/rc.unslung stop >/dev/null 2>&1
     fi
+    # The phone dashboard, then anything else still running a program from
+    # Entware (tv serve, a tmux left open): it would keep running from
+    # deleted files, and hold /opt
+    if pid=$(web_pid); then kill "$pid" 2>/dev/null && info "Stopped the phone dashboard."; fi
+    rm -rf "${WEB_DIR:?}"
+    stop_opt_programs
     rm -f "$INIT_SCRIPT"
+    autostart_off
     restore_shell_files
     opt_links | while IFS= read -r f; do
         rm -f "$f" && info "Removed $f, a link into Entware"
@@ -4909,6 +4959,8 @@ uninstall_entware() {
         warn "Couldn't confirm $BIND_SRC is the Entware folder (it may have been changed), so it was kept. Look at what's in it, and delete it yourself if it is."
     fi
 
+    # Scratch files in /tmp (a running task's own folder is left for the app)
+    rm -f /tmp/webos-entware-boot.log /tmp/webos-entware-app-update.sh
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
     success "Entware removed."
     info "Disconnect and SSH in again to get the stock shell back."
