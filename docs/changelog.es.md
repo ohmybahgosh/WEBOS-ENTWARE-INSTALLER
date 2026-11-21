@@ -10,6 +10,10 @@ Los cambios de WebOS Entware en español, para la pantalla Novedades de la aplic
 - **Ayuda, Novedades** muestra los cambios de esta versión en cualquier momento, no solo una vez después de actualizar.
 - **La aplicación muestra qué trae una actualización antes de instalarla,** en su idioma cuando la versión tiene esa traducción.  Cada versión lleva ahora sus registros de cambios, comprobados con su SHA256SUMS igual que la propia aplicación.
 
+### Security
+
+- **Las versiones van firmadas, y la aplicación solo se actualiza a una firmada.**  El `SHA256SUMS` de cada versión se firma con la clave del proyecto en el ordenador del autor, nunca en GitHub, y el instalador comprueba la firma con `openssl` contra la clave que lleva dentro (o su copia de respaldo sin conexión) antes de ofrecer, mostrar o instalar una actualización.  Cada archivo que la aplicación toma de una versión se comprueba con esas sumas firmadas, así que una versión subida por otra persona no se instala.  Las claves están en [`release-signing-key.pub`](../release-signing-key.pub) y [`SECURITY.md`](../SECURITY.md#release-signing), igual que en LG-USB-2-ETH0.
+
 ## [2.16.0] - 2026-11-20
 
 ### Added

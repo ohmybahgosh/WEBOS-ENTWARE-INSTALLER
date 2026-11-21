@@ -51,6 +51,36 @@ ENTWARE_BASE="http://bin.entware.net"
 SCRIPT_URL="https://raw.githubusercontent.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/main/webos-entware-installer.sh"
 RELEASES_URL="https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/releases"
 APP_ID="org.ohmybahgosh.entware"
+# Every release's SHA256SUMS is signed with this key (RSA 3072), whose
+# private half never leaves the maintainer's computer, so the app only
+# updates to a release whose checksums were signed there, not just one put
+# up on GitHub.  Also in release-signing-key.pub.  ENTWARE_RELEASE_PUBKEY
+# (files, space-separated) is for the tests only.
+RELEASE_PUBKEY='-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAm/CGma5ck0637xVS7sNt
+Lws/4MwFGBn0vzAKOwSNVSp0EanWokFb/uIXztWSSe3EY81dzvlkBJES0GOixWO1
+t9AfYzx9neWNf21b5KsIpk980Dli8DRSmi9vcDhpRsgksIZ1nSAo6B6HcU6f4Dxq
+H/xwG5FgNCmvmfPKxhccXsrOtZfI16fQkx07X0U8JwHkuHyDHJwIaFuUtvpq8xo4
+CYhmlkN6vLxT22HBAWQ/v0kYBWa4TRQLq0UDAtlcridejtLfW1WtiUkzzjhKBJT7
+fUwSErWq+feIWHDAYvNecVT6H196xh+mmFPeJ2VaT9wHBdPzSvtwLhiYXY8wPpy9
+ko+v+M+db/AEkDV1gg9l4aYG6jk0jvstr3p9vgKiKkYZ2GYI0s9RjiZARx85dxQ1
+uUvwU4acgzUjB2DAUoMgbcIlbgAtKKQAqPkMNl5BulSDowHGNyH6AoAO9WJhmPMc
+ckreTv0ecKnqUAZ+P7pXZ+0axa2MReYCT1Y13yiYjwJbAgMBAAE=
+-----END PUBLIC KEY-----'
+# The backup key (release-signing-key-backup.pub), whose private half is kept
+# offline.  Its signature is accepted too, so if the main key is ever lost, a
+# release signed with the backup can bring in a new main key.
+RELEASE_PUBKEY_BACKUP='-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAplzszWgJwHLFjl2Lk6Q8
+FfXGopKAiGTtHVf9DuycZoi98NThVF92hhSb5EVVkM7NQoQc1hEXg/6WEcZ7werY
+yqmiKhCwbla8B9y179MjOUjPvyQq16ASJAtUKzBCAPXjt8B4UMyIIzllA3hTmfbx
+gW9dkZy+JSyPLHMx4LKAsx71Rd0xY6WhL+uuwoXEG9aISe0I392JejFS2mwUfUgF
+XuXBzOWQWUnxKXQGpDbf0S5eOdXcMNeVi5xf4+RatZmg1blU+Mcyx2Bk4KvG0XRy
+pwPvFxt4p1rxtlHdzFRAXojUV6eOCw097pfyVzLPb9mLiR7f2QBhMtiVfByNsXLS
+eGzzXUf5N4zArE+4JJWy4gObVQ7ie+3zxVVF3b6Kj6boRQchMxbhoH2Gc0wLQL3s
+SrD3+ZXNfGgR05A56nKMLK+qgOb5wFJSw5sBQ9KsF2/wpUjd/4kqibJxVEeaTyhO
+0WDkisg0tDp0T4Ke9w6JLCXDqbHcBDjCyQVTA6rLWm7HAgMBAAE=
+-----END PUBLIC KEY-----'
 APP_DIR="/media/developer/apps/usr/palm/applications/$APP_ID"
 MARKER="webos-entware-installer"
 BACKUP_SUFFIX=".pre-entware"
@@ -5177,8 +5207,48 @@ version_gt() {
 # The webos-entware command's own version
 manager_version() { sed -n 's/^VERSION="\([0-9.]*\)".*/\1/p' "$MANAGER" 2>/dev/null | head -n 1; }
 
-# app-update --check: is a newer release out?  Only reads; the TV app asks
-# this when it opens and every few hours, and shows an Update button if so.
+# The latest release's SHA256SUMS, into $UW/SHA256SUMS, only if its
+# signature (SHA256SUMS.sig) is from the release key or its backup.  Every
+# file the app takes from a release is checked against it.  On failure,
+# SUMS_ERR says why (download, openssl or signature) and nothing is kept.
+release_sums() {
+    SUMS_ERR=""
+    rm -f "$UW/SHA256SUMS" "$UW/SHA256SUMS.sig"
+    if ! fetch "$RELEASES_URL/latest/download/SHA256SUMS" "$UW/SHA256SUMS" 2>/dev/null ||
+        ! fetch "$RELEASES_URL/latest/download/SHA256SUMS.sig" "$UW/SHA256SUMS.sig" 2>/dev/null; then
+        SUMS_ERR=download
+    elif ! command -v openssl >/dev/null 2>&1; then
+        SUMS_ERR=openssl
+    else
+        SUMS_ERR=signature
+        for k in 1 2; do
+            if [ -n "${ENTWARE_RELEASE_PUBKEY:-}" ]; then
+                # shellcheck disable=SC2086 # a list of files
+                set -- $ENTWARE_RELEASE_PUBKEY
+                [ "$k" = 2 ] && { [ $# -ge 2 ] || continue; shift; }
+                cp "$1" "$UW/release.pub" || continue
+            elif [ "$k" = 1 ]; then printf '%s\n' "$RELEASE_PUBKEY" > "$UW/release.pub"
+            else printf '%s\n' "$RELEASE_PUBKEY_BACKUP" > "$UW/release.pub"
+            fi
+            if openssl dgst -sha256 -verify "$UW/release.pub" -signature "$UW/SHA256SUMS.sig" "$UW/SHA256SUMS" > /dev/null 2>&1; then
+                SUMS_ERR=""
+                break
+            fi
+        done
+    fi
+    rm -f "$UW/SHA256SUMS.sig" "$UW/release.pub"
+    [ -z "$SUMS_ERR" ] && return 0
+    rm -f "$UW/SHA256SUMS"
+    return 1
+}
+sums_error() {
+    case "$SUMS_ERR" in
+        openssl) echo "Checking a release's signature needs openssl, and this TV doesn't have it. Update from the Homebrew Channel instead." ;;
+        signature) echo "The newest release's signature doesn't match the keys built into the app, so it wasn't used." ;;
+        *) echo "Couldn't reach GitHub. Check the TV's internet connection, or update from the Homebrew Channel." ;;
+    esac
+}
+
 # Release $1's section of its changelog in language $2 (en is CHANGELOG.md,
 # the others changelog.<lang>.md), attached to the release and checked
 # against its SHA256SUMS ($UW/SHA256SUMS).  Fails when there's none.
@@ -5192,17 +5262,22 @@ release_changes() {
     [ -n "$out" ] && printf '%s' "$out"
 }
 
+# app-update --check: is a newer release out?  Only reads; the TV app asks
+# this when it opens and every few hours, and shows an Update button if so.
+# Only a release with signed checksums counts.
 app_update_check() {
     cur=$(app_version)
     UW=$(mktemp -d /tmp/.webos-entware-update.XXXXXX) || error_exit "Couldn't make a temporary folder."
     trap 'rm -rf "${UW:?}"' EXIT
-    v=""
-    if fetch "$RELEASES_URL/latest/download/SHA256SUMS" "$UW/SHA256SUMS" 2>/dev/null; then
+    v="" err=""
+    if release_sums; then
         v=$(sed -n "s/^[0-9a-f]\{64\}  ${APP_ID}_\([0-9]*\.[0-9]*\.[0-9]*\)_all\.ipk\$/\1/p" "$UW/SHA256SUMS" | head -n 1)
+        [ -n "$v" ] || err="The newest release has no TV app in it."
+    else
+        err=$(sums_error)
     fi
-    newer=false err="" changes="" clang=""
+    newer=false changes="" clang=""
     [ -n "$v" ] && version_gt "$v" "${cur:-0}" && newer=true
-    [ -n "$v" ] || err="Couldn't check GitHub for a new release."
     if [ "$JSON" = 1 ]; then
         # What's in it, for the app to show before updating: the release's own
         # changelog, in the app's language (--lang) when it's translated
@@ -5218,7 +5293,7 @@ app_update_check() {
         [ -n "$v" ]
         return
     fi
-    [ -n "$v" ] || error_exit "Couldn't reach GitHub. Check the TV's internet connection."
+    [ -n "$v" ] || error_exit "$err"
     if [ "$newer" = true ]; then
         info "Version $v is out (the app is v${cur:-not installed}). What's new: $RELEASES_URL/tag/v$v"
         echo "Update with: $(run_cmd) app-update"
@@ -5242,8 +5317,8 @@ app_update() {
     UW=$(mktemp -d /tmp/.webos-entware-update.XXXXXX) || error_exit "Couldn't make a temporary folder."
     trap 'rm -rf "${UW:?}"; [ "$SELF" = /tmp/webos-entware-app-update.sh ] && rm -f "$SELF"; release_lock' EXIT
     info "Checking GitHub for the newest release (the app is v${cur:-unknown})..."
-    fetch "$RELEASES_URL/latest/download/SHA256SUMS" "$UW/SHA256SUMS" ||
-        error_exit "Couldn't reach GitHub. Check the TV's internet connection, or update from the Homebrew Channel."
+    release_sums || error_exit "$(sums_error) Nothing was changed."
+    success "The newest release's checksums are signed with the release key."
     line=$(grep -E "^[0-9a-f]{64}  ${APP_ID}_[0-9]+\.[0-9]+\.[0-9]+_all\.ipk$" "$UW/SHA256SUMS" | head -n 1)
     [ -n "$line" ] || error_exit "The newest release has no TV app in it. Try the Homebrew Channel."
     sum=${line%% *}

@@ -32,7 +32,7 @@ jobs:
       - name: ShellCheck the installer (POSIX sh, like the TV)
         run: shellcheck -s sh -S warning webos-entware-installer.sh
       - name: ShellCheck the test scripts
-        run: shellcheck -S warning tests/run_tests.sh tests/check-ipk.sh webos-app/build.sh
+        run: shellcheck -S warning tests/run_tests.sh tests/check-ipk.sh webos-app/build.sh scripts/sign-release.sh
       - name: ShellCheck the tv command and its tab completion (written by the installer)
         run: |
           sed -n "/<< 'TVCLI'$/,/^TVCLI$/p" webos-entware-installer.sh | sed '1d;$d' > "$RUNNER_TEMP/tv"

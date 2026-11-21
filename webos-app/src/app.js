@@ -1807,7 +1807,9 @@
                 latest = d.newer && newer(d.latest, current) ? d.latest : null;
                 latestNotes = latest && d.changes ? { md: d.changes, translated: I18N.lang === 'en' || d.changesLang === I18N.lang } : null;
                 if (state) { render(); }
-            } else if (!window.ENTWARE_DEMO) {
+            } else if (!d && !window.ENTWARE_DEMO) {
+                // Only when the installer couldn't answer at all: when it did,
+                // a release it turned down (unsigned) isn't offered here
                 checkUpdateApi(current);
             }
         });

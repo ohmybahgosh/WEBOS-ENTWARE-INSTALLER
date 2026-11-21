@@ -108,7 +108,7 @@ The easiest way in.  It runs the same installer underneath, as root through the 
 - **SSH commands:** every [`tv` and `ent` command](#the-tv-and-ent-commands) on one screen, with your TV's SSH address.  LEFT and RIGHT switch between `tv` (the TV) and `ent` (Entware).
 - **What's new:** after the app updates, it shows what changed, once.
 - **Report for GitHub:** a QR code that opens a report on your phone with your TV, version, build and the full check already filled in.  **It works on my TV** opens a compatibility report, and **Something went wrong** a bug report.
-- **Updates itself:** when a new version is out, **Update to v…** downloads it from GitHub, checks it against the release's checksums and that it really is this app, installs it and reopens.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
+- **Updates itself:** when a new version is out, **Update to v…** shows what's in it, then downloads it from GitHub, checks it against the release's signed checksums and that it really is this app, installs it and reopens.  Releases are [signed](SECURITY.md#release-signing) on the maintainer's computer, so the app only takes one signed with the project's key.  The `webos-entware` command updates with it.  The Homebrew Channel offers updates too.
 - **Made for the remote:** arrow keys and OK, or point and click with the Magic Remote.  BACK closes whatever is open.
 
 <p align="center"><img src="images/app-demo.gif" width="720" alt="The TV app with the remote, on an LG C2: Packages opens on Start here, rclone's page with tips for using it on a TV, the Files and backup category, then the Help tab's SSH commands switching from tv to ent, and Add-ons with Samba, File Browser and the media server running"></p>
@@ -328,7 +328,7 @@ After the first install, the installer is saved on the TV as the `webos-entware`
 | `webos-entware pkg-remove <name>` | Uninstall one package.  Packages Entware needs, and ones other packages need, are kept |
 | `webos-entware logs` | This boot's boot script log and the TV app's last 10 tasks.  `log <name>` shows one |
 | `webos-entware status --json` | Everything `doctor` checks, as JSON for scripts |
-| `webos-entware app-update` | Update the TV app (and this command) to the newest release, checked against its checksums |
+| `webos-entware app-update` | Update the TV app (and this command) to the newest release, checked against its signed checksums |
 | `webos-entware app-update --check` | Only say whether a newer release is out (add `--json` for the app) |
 | `webos-entware move appstore` | Move Entware to app storage, or `move user` to user data.  A repair also moves older installs to app storage.  See [Where Entware lives](#where-entware-lives) |
 | `webos-entware job <task>` | Run `install`, `uninstall`, `locate`, `upgrade`, `add <name>`, `remove <name>`, `pkg-add <name>`, `pkg-remove <name>` or `move <place>` in the background; `job-status` follows it.  Its log is kept for `logs` |

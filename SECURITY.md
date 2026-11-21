@@ -35,15 +35,28 @@ It never changes the system partitions, opens ports, or sends anything about you
 - It runs the installer bundled inside it through the Homebrew Channel's root service.  Every command it runs is fixed in the app's code.  Nothing typed, received or downloaded is ever passed to the shell.
 - On the Packages screen, the app only sends a package name or a search word made of letters, numbers, dots, dashes, underscores and plus signs.  The app checks that before running anything, and the installer checks it again before it reaches `opkg`.  Packages Entware or the shell setup needs can't be removed from the app.
 - Add-ons are a list fixed in the installer.  The app only sends an add-on's short name, which the installer checks against that list before anything reaches `opkg`, so it can't be used to install or remove anything else.
-- It only talks to GitHub.  It reads the latest release number from the GitHub API, to say when an update is out.  When you choose **Update**, the installer downloads that release's `SHA256SUMS` and app over HTTPS from this repository's release page, checks the app against the checksum and that its package is `org.ohmybahgosh.entware` at the expected version, and only then installs it.  The download URLs are built from the version number alone, which must look like `1.2.3`.  The Homebrew Channel offers the same updates, checked against its manifest.
+- It only talks to GitHub.  It reads the latest release number from the GitHub API, to say when an update is out.  When you choose **Update**, the installer downloads that release's `SHA256SUMS` and its signature over HTTPS from this repository's release page, and only goes on if the signature is from the release key (below).  Then it downloads the app, checks it against the signed checksum and that its package is `org.ohmybahgosh.entware` at the expected version, and only then installs it.  A release that isn't signed, or is signed with any other key, isn't offered or installed.  The download URLs are built from the version number alone, which must look like `1.2.3`.  The Homebrew Channel offers the same updates, checked against its manifest.
 - The bug report QR code holds the output of `doctor` (TV model, versions, what's installed).  It's only sent if you scan it and submit the report yourself.
+
+## Release signing
+
+Every release's `SHA256SUMS` is signed with the project's release key, and the signature is the release's `SHA256SUMS.sig`.  The release is built on GitHub as a draft, and the maintainer signs it on their own computer and publishes it (`scripts/sign-release.sh`), so the private key never touches GitHub.  Someone who could put up a release on GitHub still couldn't get a TV to install it.
+
+The public key is [`release-signing-key.pub`](release-signing-key.pub) (RSA 3072, SHA-256 of the key: `bcd6d7d2360fb0816dd33f46274b14807ee360f2572fade92859ddbc22936e11`).  It's built into the installer, which checks the signature itself, with `openssl`, before the app shows or installs an update, or shows what's in one.
+
+There's also a backup key, [`release-signing-key-backup.pub`](release-signing-key-backup.pub) (RSA 3072, SHA-256 of the key: `3029b6702df6ac2460abc4ec561c39fc1f899c4eb720cac67b09c7b4a2ebb382`), whose private half is kept offline.  Its signature is accepted too.  Releases are signed with the main key; the backup is only for when the main key is lost, so a release signed with it can bring in a new main key and TVs keep updating.
+
+Releases are signed from 2.16.1 on.  Updates through the Homebrew Channel are checked by the Homebrew Channel against the SHA-256 in its repository's listing, not against this signature.
 
 ## Verifying a download
 
-Every release has a `SHA256SUMS` file covering the installer and the app.  Download it next to them and run:
+Every release has a `SHA256SUMS` file covering the installer, the app, its manifest and the changelogs, and its signature.  Download them next to the key and run:
 
 ```sh
-sha256sum -c SHA256SUMS
+openssl dgst -sha256 -verify release-signing-key.pub -signature SHA256SUMS.sig SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
 ```
+
+The first should print `Verified OK`.
 
 The Homebrew Channel checks the app's SHA-256 against its manifest before installing it.

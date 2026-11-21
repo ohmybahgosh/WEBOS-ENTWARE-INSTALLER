@@ -10,6 +10,10 @@ All notable changes to the WebOS Entware installer.  Versions follow [semantic v
 - **Help, What's new** shows this version's changes any time, not just once after an update.
 - **The app shows what's in an update before you install it,** in its language when the release has that translation.  Each release now carries its changelogs, checked against its SHA256SUMS like the app itself.
 
+### Security
+
+- **Releases are signed, and the app only updates to a signed one.**  Each release's `SHA256SUMS` is signed with the project's release key on the maintainer's computer, never on GitHub, and the installer checks the signature with `openssl` against the key built into it (or its offline backup) before it offers, shows or installs an update.  Every file the app takes from a release is checked against those signed checksums, so a release put up by anyone else isn't installed.  The keys are in [`release-signing-key.pub`](release-signing-key.pub) and [`SECURITY.md`](SECURITY.md#release-signing), the same way as LG-USB-2-ETH0.
+
 ## [2.16.0] - 2026-11-20
 
 ### Added

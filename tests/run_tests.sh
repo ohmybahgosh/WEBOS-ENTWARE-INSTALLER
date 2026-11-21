@@ -957,7 +957,15 @@ fake_release() { # version, package id
     (cd "$W/pk" && tar czf control.tar.gz ./control && tar czf data.tar.gz ./control && ar rc "$W/rel/org.ohmybahgosh.entware_$1_all.ipk" debian-binary control.tar.gz data.tar.gz)
     sed "s/^VERSION=.*/VERSION=\"$1\"/" "$W/installer.sh" > "$W/rel/webos-entware-installer.sh"
     (cd "$W/rel" && sha256sum webos-entware-installer.sh "org.ohmybahgosh.entware_$1_all.ipk" > SHA256SUMS)
+    sign_rel
 }
+# Test release keys: the release key, its backup, and one that isn't either
+for k in main backup other; do
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$W/$k.key" 2>/dev/null
+    openssl pkey -in "$W/$k.key" -pubout -out "$W/$k.pub"
+done
+export ENTWARE_RELEASE_PUBKEY="$W/main.pub $W/backup.pub"
+sign_rel() { openssl dgst -sha256 -sign "$W/${1:-main}.key" -out "$W/rel/SHA256SUMS.sig" "$W/rel/SHA256SUMS"; }
 app_up() { (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update -y) > "$W/out" 2>&1; }
 appv() { sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' $AD/appinfo.json; }
 fake_release 2.9.1 org.ohmybahgosh.entware
@@ -991,6 +999,7 @@ ok "with no changelogs in the release, it says nothing about what's in it" 'jq_o
 printf '# Changelog\n\n## [9.9.9] - 2026-12-01\n\n### Added\n\n- **Something new.**\n\n## [2.9.1] - 2026-01-01\n\n### Fixed\n\n- **Old.**\n' > "$W/rel/CHANGELOG.md"
 printf '# Список\n\n## [9.9.9] - 2026-12-01\n\n### Added\n\n- **Что-то новое.**\n' > "$W/rel/changelog.ru.md"
 (cd "$W/rel" && sha256sum CHANGELOG.md changelog.ru.md >> SHA256SUMS)
+sign_rel
 app_check
 ok "app-update --check --json includes the new version's changes, from the release's changelog" 'jq_ok "d[\"changes\"] == \"### Added\\n\\n- **Something new.**\" and d[\"changesLang\"] == \"en\""'
 (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check --json --lang=ru) > "$W/out" 2>&1
@@ -1000,6 +1009,27 @@ ok "and in English when it doesn't" 'jq_ok "\"Something new\" in d[\"changes\"] 
 echo "- **Tampered.**" >> "$W/rel/changelog.ru.md"
 (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check --json --lang=ru) > "$W/out" 2>&1
 ok "a changelog that doesn't match the release's checksums isn't shown" 'jq_ok "\"Tampered\" not in d[\"changes\"] and d[\"changesLang\"] == \"en\""'
+# Signed checksums: only the release key or its backup will do
+ROOTDIR=$(dirname "$SCRIPT")
+ok "the keys built into the installer are release-signing-key.pub and its backup" '[ "$(sed -n "/^RELEASE_PUBKEY=/,/END PUBLIC KEY/p" "$SCRIPT" | sed "1s/^RELEASE_PUBKEY=.//; \$s/.\$//")" = "$(cat "$ROOTDIR/release-signing-key.pub")" ] && [ "$(sed -n "/^RELEASE_PUBKEY_BACKUP=/,/END PUBLIC KEY/p" "$SCRIPT" | sed "1s/^RELEASE_PUBKEY_BACKUP=.//; \$s/.\$//")" = "$(cat "$ROOTDIR/release-signing-key-backup.pub")" ]'
+fake_release 9.9.9 org.ohmybahgosh.entware
+rm "$W/rel/SHA256SUMS.sig"
+! app_check
+ok "a release without a signature isn't offered" 'jq_ok "d[\"latest\"] == \"\" and d[\"newer\"] is False and d[\"error\"] != \"\""'
+! app_up
+ok "or installed" 'grep -q "Couldn.t reach GitHub" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+sign_rel other
+! app_check
+ok "nor one signed with another key" 'jq_ok "d[\"latest\"] == \"\" and \"signature\" in d[\"error\"]"'
+! app_up
+ok "which isn't installed either" 'grep -q "signature doesn.t match the keys" "$W/out" && [ "$(appv)" = 2.9.1 ]'
+sign_rel
+echo "0000000000000000000000000000000000000000000000000000000000000000  extra.txt" >> "$W/rel/SHA256SUMS"
+! app_check
+ok "checksums changed after signing aren't trusted" 'jq_ok "\"signature\" in d[\"error\"]"'
+sign_rel backup
+app_check
+ok "the backup key's signature is accepted" 'jq_ok "d[\"latest\"] == \"9.9.9\" and d[\"newer\"] is True"'
 fake_release 9.9.9 org.ohmybahgosh.entware
 echo tampered >> "$W/rel/org.ohmybahgosh.entware_9.9.9_all.ipk"
 ! app_up
