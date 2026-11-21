@@ -112,9 +112,10 @@ function demo(scenario) {
             const a = ADDONS.find((x) => x.id === inf[1]);
             return reply(JSON.stringify(Object.assign({ id: a.id, title: a.title, state: a.state, service: true }, INFO[inf[1]])));
         }
-        if (args === 'app-update --check --json') {
-            const latest = window.ENTWARE_LATEST || base.version;
-            return reply(JSON.stringify({ current: base.version, command: base.version, latest, newer: latest !== base.version, notes: '', error: '' }));
+        if (/^app-update --check --json( --lang=\w+)?$/.test(args)) {
+            const latest = window.ENTWARE_LATEST || base.version, newer = latest !== base.version;
+            return reply(JSON.stringify({ current: base.version, command: base.version, latest, newer, notes: '',
+                changes: newer ? '### Added\n\n- **Something new.**  With `code` in it.\n\n### Fixed\n\n- **Something fixed.**' : '', changesLang: newer ? 'en' : '', error: '' }));
         }
         if (/^updates --json( --refresh)?$/.test(args)) {
             return reply(JSON.stringify({ checked: '2026-11-02 20:58', ageHours: 0, refreshFailed: false, packages: UPDATES }));
@@ -405,6 +406,9 @@ function check(name, cond) {
     check('the Entware tab opens for it', await page.evaluate(() => document.querySelector('#tabs .tab.on').getAttribute('data-tab') === 'entware' && document.activeElement.getAttribute('data-action') === 'update'));
     await press(page, 'Enter');
     check('asks before updating, and says what happens', /Update the app to v9\.9\.9\?/.test(await overlayTitle(page)) && /checks it against the release/.test(await page.textContent('#overlay-body')));
+    check('and shows what\'s in it, from the release\'s changelog', (await page.$$eval('#overlay-body .notes h4', (hs) => hs.map((h) => h.textContent))).join(',') === 'Added,Fixed' &&
+        (await page.$$('#overlay-body .notes li')).length === 2);
+    await page.screenshot({ path: path.join(OUT, '9b-update-notes.png') });
     await press(page, 'Enter');
     await page.waitForFunction(() => /done/.test(document.getElementById('overlay-title').textContent), null, { timeout: 8000 });
     check('updates as a background task', (await page.evaluate(() => window.ENTWARE_CALLS)).includes('job app-update') && /Update the app: done/.test(await overlayTitle(page)));
@@ -651,12 +655,27 @@ function check(name, cond) {
     await page.reload();
     await page.waitForFunction(() => /What's new/.test(document.getElementById('overlay-title').textContent));
     const notes = await page.evaluate(() => window.ENTWARE_NOTES);
-    check('after an update, what\'s new in this version shows once', notes && notes.notes.length > 0 && (await page.$$('.whatsnew li')).length === notes.notes.length);
+    const items = notes ? notes.md.split('\n').filter((l) => /^- /.test(l)).length : 0;
+    check('after an update, what\'s new in this version shows once, with its headings', items > 0 && (await page.$$('.notes .whatsnew li')).length === items &&
+        (await page.$$('.notes h4')).length === notes.md.split('\n').filter((l) => /^### /.test(l)).length);
     await page.screenshot({ path: path.join(OUT, '15-whats-new.png') });
     await page.reload();
     await page.waitForFunction(() => !/Checking/.test(document.getElementById('headline').textContent));
     await page.waitForTimeout(300);
     check('and not again', await page.$eval('#overlay', (o) => o.className.indexOf('hidden') >= 0));
+    await goTo(page, 'whatsnew');
+    await press(page, 'Enter');
+    check('Help, What\'s new shows it any time', /What's new in v/.test(await overlayTitle(page)) && (await page.$$('.notes li')).length === items);
+    await press(page, 'Escape');
+    // In Russian: the notes come from docs/changelog.ru.md, headings translated
+    await page.evaluate(() => { window.localStorage.setItem('entware.lang', 'ru'); window.localStorage.setItem('entware.seenVersion', '1.0.0'); });
+    await page.reload();
+    await page.waitForFunction(() => /Что нового/.test(document.getElementById('overlay-title').textContent));
+    check('in Russian, what\'s new is the Russian changelog, with its headings translated', notes.i18n && notes.i18n.ru &&
+        (await page.$$eval('.notes h4', (hs) => hs.map((h) => h.textContent))).every((t) => /^[А-Яа-яё ]+$/.test(t)) &&
+        !(await page.textContent('#overlay-body')).includes('in English') && /[А-Яа-я]/.test(await page.textContent('.notes li')));
+    await page.screenshot({ path: path.join(OUT, '16-whats-new-ru.png') });
+    await page.evaluate(() => window.localStorage.removeItem('entware.lang'));
     check('no page errors', errors.length === 0);
     if (errors.length) { console.log(errors.join('\n')); }
 

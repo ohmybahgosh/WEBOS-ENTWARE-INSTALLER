@@ -985,6 +985,21 @@ ok "app-update --check --json finds a newer release, even while a task runs" 'jq
 ok "and changes nothing" '[ "$(appv)" = 2.9.1 ] && [ -z "$(ls -d /tmp/.webos-entware-update.* 2>/dev/null)" ]'
 (cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check) > "$W/out" 2>&1
 ok "app-update --check says so in words too" 'grep -q "Version 9.9.9 is out (the app is v2.9.1)" "$W/out"'
+app_check
+ok "with no changelogs in the release, it says nothing about what's in it" 'jq_ok "d[\"changes\"] == \"\" and d[\"changesLang\"] == \"\""'
+# A release with its changelogs: the app shows what's in it before updating
+printf '# Changelog\n\n## [9.9.9] - 2026-12-01\n\n### Added\n\n- **Something new.**\n\n## [2.9.1] - 2026-01-01\n\n### Fixed\n\n- **Old.**\n' > "$W/rel/CHANGELOG.md"
+printf '# Список\n\n## [9.9.9] - 2026-12-01\n\n### Added\n\n- **Что-то новое.**\n' > "$W/rel/changelog.ru.md"
+(cd "$W/rel" && sha256sum CHANGELOG.md changelog.ru.md >> SHA256SUMS)
+app_check
+ok "app-update --check --json includes the new version's changes, from the release's changelog" 'jq_ok "d[\"changes\"] == \"### Added\\n\\n- **Something new.**\" and d[\"changesLang\"] == \"en\""'
+(cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check --json --lang=ru) > "$W/out" 2>&1
+ok "in the app's language, when the release has it" 'jq_ok "\"Что-то новое\" in d[\"changes\"] and d[\"changesLang\"] == \"ru\""'
+(cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check --json --lang=es) > "$W/out" 2>&1
+ok "and in English when it doesn't" 'jq_ok "\"Something new\" in d[\"changes\"] and d[\"changesLang\"] == \"en\""'
+echo "- **Tampered.**" >> "$W/rel/changelog.ru.md"
+(cd /tmp && $SH $AD/assets/webos-entware-installer.sh app-update --check --json --lang=ru) > "$W/out" 2>&1
+ok "a changelog that doesn't match the release's checksums isn't shown" 'jq_ok "\"Tampered\" not in d[\"changes\"] and d[\"changesLang\"] == \"en\""'
 fake_release 9.9.9 org.ohmybahgosh.entware
 echo tampered >> "$W/rel/org.ohmybahgosh.entware_9.9.9_all.ipk"
 ! app_up

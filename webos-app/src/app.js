@@ -28,6 +28,7 @@
 
     var state = null;        // last status --json
     var latest = null;       // newest release on GitHub, if newer than this app
+    var latestNotes = null;  // and its notes: { md, translated }
     var overlayMode = null;  // null, 'busy', 'loading', 'message', 'confirm', 'commands', or a list: 'addons', 'report', 'logs', 'addoninfo'
     var onConfirm = null;
     var jobTimer = null;
@@ -307,7 +308,7 @@
     }
     // Scroll a long log, report or command list in the open panel
     function scrollPanel(by) {
-        var pre = $('overlay-body').querySelector('pre, .cmdref');
+        var pre = $('overlay-body').querySelector('pre, .cmdref, .notes');
         if (pre) { pre.scrollTop += by; }
     }
 
@@ -727,6 +728,7 @@
         addons: function () { listIndex = 0; openAddons(); },
         packages: function () { openStore('browse'); },
         commands: function () { openCommands('tv'); },
+        whatsnew: function () { showWhatsNew(); },
         move: function () {
             if (!state) { return; }
             confirmThen(T('Move Entware to app storage?'),
@@ -767,6 +769,12 @@
                 T('Downloads v{v} from GitHub, checks it against the release\'s checksums, and installs it.', { v: latest }) + '  ' +
                 T('The app closes for a moment and opens again.  Entware and your packages aren\'t touched, and the webos-entware command updates too.'),
                 function () { startJob('app-update'); });
+            // What's in it, from the release, in the app's language when it has it
+            if (latestNotes) {
+                $('overlay-body').innerHTML = notesHtml(latestNotes.md, latestNotes.translated) + '<p>' + $('overlay-body').innerHTML + '</p>';
+                $('overlay-body').querySelector('.notes').className += ' notes-short';
+                $('overlay-hint').textContent = T('Use ▲ ▼ to scroll.') + '  ' + T('Press OK to go ahead, or BACK to cancel.');
+            }
         }
     };
 
@@ -1641,8 +1649,10 @@
 
     // ------------------------------------------------------------------ what's new
 
-    // After the app updates, its changelog shows once.  The notes are built
-    // into the app (whatsnew.js) from CHANGELOG.md.
+    // After the app updates, its changelog shows once, and Help, What's new
+    // shows it any time.  The notes are built into the app (whatsnew.js) from
+    // CHANGELOG.md and the translated changelogs in docs/, so they show in
+    // the app's language, as in LG-USB-2-ETH0 and FW Block.
     function remember(k, v) {
         try {
             if (v === undefined) { return window.localStorage.getItem(k); }
@@ -1650,16 +1660,50 @@
         } catch (e) { /* no storage: just don't remember */ }
         return null;
     }
+    // Changelog markdown, lightly: ### headings (translated), - items with a
+    // **bold** summary, `code`, [links](...) as plain text
+    function mdHtml(md) {
+        var heads = { Added: T('Added'), Changed: T('Changed'), Fixed: T('Fixed'), Removed: T('Removed'), Security: T('Security') };
+        function inline(t) {
+            return esc(t).replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+        }
+        var html = '', list = false;
+        String(md || '').replace(/\r/g, '').split('\n').forEach(function (line) {
+            var h = /^###\s+(.+)/.exec(line), it = /^- (.+)/.exec(line), sub = /^\s+- (.+)/.exec(line);
+            if (!h && !it && !sub && list && !/^\s+\S/.test(line)) { html += '</ul>'; list = false; }
+            if (h) { html += '<h4>' + esc(heads[h[1].trim()] || h[1].trim()) + '</h4>'; }
+            else if (it) { if (!list) { html += '<ul class="whatsnew">'; list = true; } html += '<li>' + inline(it[1]) + '</li>'; }
+            else if (sub) { html += '<li class="subitem">' + inline(sub[1]) + '</li>'; }
+            else if (/\S/.test(line)) { html += '<p>' + inline(line.replace(/^>\s?/, '')) + '</p>'; }
+        });
+        if (list) { html += '</ul>'; }
+        return html;
+    }
+    // TRANSLATED: the notes are in the app's language; otherwise they're labeled English
+    function notesHtml(md, translated) {
+        return (translated ? '' : '<p class="dim">' + esc(T('From the release notes, in English:')) + '</p>') +
+            '<div class="notes">' + mdHtml(md) + '</div>';
+    }
+    // This version's notes, in the app's language when its changelog has them
+    function ownNotes() {
+        var n = window.ENTWARE_NOTES;
+        if (!n || !n.version || !n.md) { return null; }
+        var t = (I18N.lang !== 'en' && n.i18n && n.i18n[I18N.lang]) || '';
+        return { version: n.version, html: notesHtml(t || n.md, I18N.lang === 'en' || !!t) };
+    }
+    function showWhatsNew() {
+        var n = ownNotes();
+        if (!n) { return false; }
+        overlay('message', esc(T('What\'s new in v{v}', { v: n.version })), n.html, T('Use ▲ ▼ to scroll.  Press OK or BACK to close.'));
+        return true;
+    }
     function maybeWhatsNew() {
         var n = window.ENTWARE_NOTES;
         if (!n || !n.version) { return; }
         var seen = remember('entware.seenVersion');
         remember('entware.seenVersion', n.version);
-        if (!seen || seen === n.version || !n.notes || !n.notes.length || overlayMode || busy) { return; }
-        overlay('message', esc(T('What\'s new in v{v}', { v: n.version })),
-            (I18N.lang !== 'en' ? '<p class="dim">' + esc(T('From the release notes, in English:')) + '</p>' : '') +
-            '<ul class="whatsnew">' + n.notes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>',
-            T('Press OK or BACK to close.'));
+        if (!seen || seen === n.version || overlayMode || busy) { return; }
+        showWhatsNew();
     }
 
     // Pre-filled GitHub issues, as QR codes to scan with a phone: a compatibility
@@ -1757,10 +1801,11 @@
         return false;
     }
     function checkUpdate(current) {
-        runScript('app-update --check --json', function (ok, out) {
+        runScript('app-update --check --json' + (I18N.lang !== 'en' ? ' --lang=' + I18N.lang : ''), function (ok, out) {
             var d = parseJson(out);
             if (d && d.latest) {
                 latest = d.newer && newer(d.latest, current) ? d.latest : null;
+                latestNotes = latest && d.changes ? { md: d.changes, translated: I18N.lang === 'en' || d.changesLang === I18N.lang } : null;
                 if (state) { render(); }
             } else if (!window.ENTWARE_DEMO) {
                 checkUpdateApi(current);

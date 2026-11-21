@@ -49,7 +49,10 @@ jobs:
           tests/check-ipk.sh
           mkdir release
           cp webos-entware-installer.sh webos-app/out/*.ipk webos-app/out/*.manifest.json release/
-          (cd release && sha256sum webos-entware-installer.sh ./*.ipk | sed "s# \./# #" > SHA256SUMS)
+          # The changelogs, so the app can show what's in an update, in its
+          # language, before installing it (checked against SHA256SUMS)
+          cp CHANGELOG.md docs/changelog.es.md docs/changelog.ru.md release/
+          (cd release && sha256sum webos-entware-installer.sh ./*.ipk CHANGELOG.md changelog.*.md | sed "s# \./# #" > SHA256SUMS)
       - name: Release notes from the changelog
         run: |
           v=$(printf '%s' "${GITHUB_REF_NAME#v}" | sed 's/\./\\./g')
@@ -81,5 +84,5 @@ jobs:
           cd release
           [ -s NOTES.md ] || echo "See CHANGELOG.md" > NOTES.md
           gh release create "$GITHUB_REF_NAME" --repo "$REPO" \
-            webos-entware-installer.sh ./*.ipk ./*.manifest.json SHA256SUMS \
+            webos-entware-installer.sh ./*.ipk ./*.manifest.json CHANGELOG.md changelog.*.md SHA256SUMS \
             --title "WebOS Entware $GITHUB_REF_NAME" --notes-file NOTES.md

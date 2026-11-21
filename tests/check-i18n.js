@@ -86,5 +86,17 @@ Object.keys(I.dicts).forEach((lang) => {
     });
     if (!missing) { console.log('  PASS ' + lang + ': all ' + texts.size + ' texts, and ' + msgs.length + ' installer messages'); }
 });
+// What's new: each translated changelog has this version's section, with
+// the same ### headings and number of items as CHANGELOG.md
+const gw = require(path.join(ROOT, 'webos-app', 'gen-whatsnew.js'));
+const ver = /^VERSION="([^"]+)"/m.exec(INSTALLER)[1];
+const enMd = gw.section(path.join(ROOT, 'CHANGELOG.md'), ver);
+if (!enMd) { fail('CHANGELOG.md has no section for ' + ver); }
+Object.keys(I.dicts).forEach((lang) => {
+    const md = gw.section(path.join(ROOT, 'docs', 'changelog.' + lang + '.md'), ver);
+    if (!md) { fail('docs/changelog.' + lang + '.md has no section for ' + ver); return; }
+    if (gw.shape(md) !== gw.shape(enMd)) { fail('changelog ' + lang + ' ' + ver + ' is shaped ' + gw.shape(md) + ', English is ' + gw.shape(enMd)); return; }
+    console.log('  PASS ' + lang + ': the changelog has ' + ver + ', shaped like the English');
+});
 console.log(fails ? '== ' + fails + ' failed' : '== all passed');
 process.exit(fails ? 1 : 0);

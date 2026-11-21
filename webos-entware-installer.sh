@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.16.0"
+VERSION="2.16.1"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -65,6 +65,7 @@ SETUP_SHELL=1
 WITH_LOCATE=0
 JSON=0
 CHECK_ONLY=0
+NOTES_LANG=""
 PW_FROM=random
 LOCKED=0
 # One install, repair or uninstall at a time, from SSH or the TV app
@@ -5178,6 +5179,19 @@ manager_version() { sed -n 's/^VERSION="\([0-9.]*\)".*/\1/p' "$MANAGER" 2>/dev/n
 
 # app-update --check: is a newer release out?  Only reads; the TV app asks
 # this when it opens and every few hours, and shows an Update button if so.
+# Release $1's section of its changelog in language $2 (en is CHANGELOG.md,
+# the others changelog.<lang>.md), attached to the release and checked
+# against its SHA256SUMS ($UW/SHA256SUMS).  Fails when there's none.
+release_changes() {
+    case "$2" in en) f=CHANGELOG.md ;; es|ru) f=changelog.$2.md ;; *) return 1 ;; esac
+    sline=$(grep -E "^[0-9a-f]{64}  $f\$" "$UW/SHA256SUMS" | head -n 1)
+    [ -n "$sline" ] && fetch "$RELEASES_URL/download/v$1/$f" "$UW/$f" 2>/dev/null || return 1
+    [ "$(sha256sum "$UW/$f" | awk '{print $1}')" = "${sline%% *}" ] || return 1
+    out=$(awk -v h="## [$1]" 'index($0, "## ") == 1 { if (on) exit; on = (index($0, h) == 1); next } on' "$UW/$f" |
+        sed -e '/./,$!d' | head -c 6000)
+    [ -n "$out" ] && printf '%s' "$out"
+}
+
 app_update_check() {
     cur=$(app_version)
     UW=$(mktemp -d /tmp/.webos-entware-update.XXXXXX) || error_exit "Couldn't make a temporary folder."
@@ -5186,13 +5200,21 @@ app_update_check() {
     if fetch "$RELEASES_URL/latest/download/SHA256SUMS" "$UW/SHA256SUMS" 2>/dev/null; then
         v=$(sed -n "s/^[0-9a-f]\{64\}  ${APP_ID}_\([0-9]*\.[0-9]*\.[0-9]*\)_all\.ipk\$/\1/p" "$UW/SHA256SUMS" | head -n 1)
     fi
-    newer=false err=""
+    newer=false err="" changes="" clang=""
     [ -n "$v" ] && version_gt "$v" "${cur:-0}" && newer=true
     [ -n "$v" ] || err="Couldn't check GitHub for a new release."
     if [ "$JSON" = 1 ]; then
-        printf '{"current":%s,"command":%s,"latest":%s,"newer":%s,"notes":%s,"error":%s}\n' \
+        # What's in it, for the app to show before updating: the release's own
+        # changelog, in the app's language (--lang) when it's translated
+        if [ "$newer" = true ]; then
+            for l in ${NOTES_LANG:+$NOTES_LANG} en; do
+                changes=$(release_changes "$v" "$l") && { clang=$l; break; }
+                changes=""
+            done
+        fi
+        printf '{"current":%s,"command":%s,"latest":%s,"newer":%s,"notes":%s,"changes":%s,"changesLang":%s,"error":%s}\n' \
             "$(json_str "$cur")" "$(json_str "$(manager_version)")" "$(json_str "$v")" "$newer" \
-            "$(json_str "${v:+$RELEASES_URL/tag/v$v}")" "$(json_str "$err")"
+            "$(json_str "${v:+$RELEASES_URL/tag/v$v}")" "$(json_str "$changes")" "$(json_str "$clang")" "$(json_str "$err")"
         [ -n "$v" ]
         return
     fi
@@ -5569,6 +5591,7 @@ for arg in "$@"; do
         --refresh) REFRESH=1 ;;
         --all) ALL=1 ;;
         --check) CHECK_ONLY=1 ;;
+        --lang=es|--lang=ru|--lang=en) NOTES_LANG="${arg#--lang=}" ;;
         --stdin) PW_FROM=stdin ;;
         --ask) PW_FROM=ask ;;
         --location=user|--location=appstore) LOCATION="${arg#--location=}" ;;

@@ -2,6 +2,14 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.16.1] - 2026-11-21
+
+### Added
+
+- **What's new, in your language.**  After the app updates, its changes show in Russian or Spanish when the app is in one of them, with the Added, Changed and Fixed headings, the same as LG-USB-2-ETH0 and FW Block.  The translated changelogs are in [`docs/changelog.ru.md`](docs/changelog.ru.md) and [`docs/changelog.es.md`](docs/changelog.es.md).
+- **Help, What's new** shows this version's changes any time, not just once after an update.
+- **The app shows what's in an update before you install it,** in its language when the release has that translation.  Each release now carries its changelogs, checked against its SHA256SUMS like the app itself.
+
 ## [2.16.0] - 2026-11-20
 
 ### Added

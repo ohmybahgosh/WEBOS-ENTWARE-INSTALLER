@@ -126,6 +126,15 @@ footer .right { margin: 0 0 0 auto; }
 .panel-title .dim { font-size: 21px; font-weight: 500; color: #808f9e; margin-left: 12px; }
 .whatsnew { margin: 0; padding: 0 0 0 30px; font-size: 23px; line-height: 1.45; color: #d3d8de; }
 .whatsnew li { margin-bottom: 12px; }
+/* What's new: the changelog, with its headings, scrolled with ▲ ▼ */
+.notes { max-height: 560px; overflow: hidden; }
+.notes h4 { margin: 18px 0 10px; font-size: 22px; font-weight: 700; color: #3d9bff; text-transform: uppercase; letter-spacing: 0.06em; }
+.notes h4:first-child { margin-top: 0; }
+.notes p { margin: 0 0 12px; }
+.notes b { color: #edeff2; }
+.notes code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 0.9em; color: #edeff2; }
+.notes .subitem { margin-left: 30px; list-style: circle; }
+.notes.notes-short { max-height: 380px; }
 
 /* An add-on's address and password */
 .panel-body .qr-small { align-items: flex-start; margin-bottom: 26px; }
@@ -298,6 +307,9 @@ td { padding: 10px 0; }
 .sub { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 /* The other screens, a step bigger to match */
 .whatsnew { font-size: 27px; }
+.notes { max-height: 600px; }
+.notes.notes-short { max-height: 400px; }
+.notes h4 { font-size: 25px; }
 .list-head { font-size: 27px; }
 .list-head .dim { font-size: 23px; }
 .addon.pkg b { font-size: 29px; }

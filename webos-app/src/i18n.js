@@ -695,7 +695,15 @@
         "It didn't start.": "Не запустилось.",
         "Use 12 to 64 characters: letters, numbers and symbols, with no spaces, not starting with -": "Используйте от 12 до 64 символов: буквы, цифры и символы, без пробелов, не начиная с -",
         "not found": "не найдено",
-        "server error": "ошибка сервера"
+        "server error": "ошибка сервера",
+        "Added": "Добавлено",
+        "Changed": "Изменено",
+        "Fixed": "Исправлено",
+        "Removed": "Удалено",
+        "Security": "Безопасность",
+        "What's new": "Что нового",
+        "what changed in this version": "что изменилось в этой версии",
+        "Use ▲ ▼ to scroll.": "Прокрутка: ▲ ▼."
     };
 
     var ruScript = [
@@ -1427,7 +1435,15 @@
         "It didn't start.": "No se inició.",
         "Use 12 to 64 characters: letters, numbers and symbols, with no spaces, not starting with -": "Usa de 12 a 64 caracteres: letras, números y símbolos, sin espacios, sin empezar por -",
         "not found": "no encontrado",
-        "server error": "error del servidor"
+        "server error": "error del servidor",
+        "Added": "Añadido",
+        "Changed": "Cambiado",
+        "Fixed": "Corregido",
+        "Removed": "Eliminado",
+        "Security": "Seguridad",
+        "What's new": "Novedades",
+        "what changed in this version": "qué cambió en esta versión",
+        "Use ▲ ▼ to scroll.": "Usa ▲ ▼ para desplazarte."
     };
 
     var esScript = [
