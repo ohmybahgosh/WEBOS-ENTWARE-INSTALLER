@@ -142,9 +142,11 @@ write_root_helper() {
 #
 # Firmware older than webOS 22 (webOS 4 to 6) has no /opt, and its system is
 # read-only, so there's nowhere to mount Entware.  Entware runs in a root of
-# its own instead: a tmpfs in RAM with the TV's own folders bound into it,
-# plus an /opt.  Nothing in the TV's system changes, and it's gone at the
-# next restart (the boot script sets it up again).
+# its own instead.  Entware itself stays on the TV's storage, as on any
+# other TV; only this frame for it is in RAM: a tmpfs with the TV's own
+# folders bound into it, plus an /opt that Entware is mounted on.  Nothing
+# in the TV's system changes, and the frame is gone at the next restart (the
+# boot script sets it up again).
 #
 #   up           set it up, if it isn't yet
 #   run CMD...   run CMD in it, in the current folder
@@ -1036,7 +1038,7 @@ preflight() {
     print_tv
     case "$WEBOS_RELEASE" in
         ''|[0-3].*) warn "Couldn't confirm a supported webOS version. This installer is tested on webOS 23, 24 and 25." ;;
-        [4-6].*) info "$WEBOS_NAME has no /opt, so Entware runs in a root of its own here, in RAM, with the TV's own folders. It's tested with webOS 6 firmware in an emulator." ;;
+        [4-6].*) info "$WEBOS_NAME has no /opt, so Entware is mounted in a root of its own here. Entware itself stays on the TV's storage; only a small frame for it is in RAM, built again at each boot. It's tested with webOS 6 firmware in an emulator." ;;
         7.*) info "$WEBOS_NAME is older than the tested versions (webOS 23 to 25), but it should work." ;;
     esac
     [ -n "$KERNEL_BITS" ] || error_exit "Unsupported CPU type: $KERNEL_ARCH. Entware for webOS needs an ARM TV."
@@ -5162,10 +5164,10 @@ uninstall_entware() {
     rm -f /tmp/webos-entware-boot.log /tmp/webos-entware-app-update.sh
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
     # A TV with no /opt: the helper for Entware's own root goes too.  The
-    # root itself is only in RAM, and goes when the TV restarts.
+    # root's frame is only in RAM, and goes when the TV restarts.
     rm -rf "${ROOT_HELPER%/*}"
     success "Entware removed."
-    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && info "Entware's own root is only in the TV's memory, and goes when the TV restarts."
+    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && info "The frame for Entware's own root (empty, in RAM) goes when the TV restarts."
     info "Disconnect and SSH in again to get the stock shell back."
 }
 
@@ -5623,7 +5625,7 @@ show_status() {
     fi
 
     [ "$(id -u)" -eq 0 ] || note "Run as root for a full check."
-    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && note "This TV has no /opt, so Entware runs in a root of its own, in RAM. SSH logins and the TV app go in by themselves. For one command over SSH: sh $ROOT_HELPER run COMMAND"
+    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && note "This TV has no /opt, so Entware (on the TV's storage, as usual) is mounted in a root of its own, a small frame in RAM that's built again at each boot. SSH logins and the TV app go in by themselves. For one command over SSH: sh $ROOT_HELPER run COMMAND"
     if hbc_present; then :
     elif is_ours "$HOME_DIR/.profile"; then
         note "Homebrew Channel isn't installed, so /opt is mounted when you log in over SSH, not at boot."

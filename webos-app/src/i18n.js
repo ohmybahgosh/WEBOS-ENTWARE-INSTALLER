@@ -757,7 +757,7 @@
         [/^Run mc over SSH for a two-pane file manager\.$/, "Запустите mc по SSH: двухпанельный файловый менеджер."],
         [/^Edit files over SSH with micro \(Ctrl\+S saves, Ctrl\+Q quits\)\.$/, "Правьте файлы по SSH в micro (Ctrl+S сохраняет, Ctrl+Q выходит)."],
         [/^rg searches inside files, fd finds files by name, and fzf picks from a list \(Ctrl\+R in bash\)\.$/, "rg ищет внутри файлов, fd находит файлы по имени, а fzf выбирает из списка (Ctrl+R в bash)."],
-        [/^This TV has no \/opt, so Entware runs in a root of its own, in RAM\. SSH logins and the TV app go in by themselves\. For one command over SSH: (.+)$/, "На этом телевизоре нет /opt, поэтому Entware работает в собственном корне, в памяти. Входы по SSH и приложение попадают туда сами. Для одной команды по SSH: $1"],
+        [/^This TV has no \/opt, so Entware \(on the TV's storage, as usual\) is mounted in a root of its own, a small frame in RAM that's built again at each boot\. SSH logins and the TV app go in by themselves\. For one command over SSH: (.+)$/, "На этом телевизоре нет /opt, поэтому Entware (как обычно, во встроенном хранилище телевизора) монтируется в собственном корне: небольшой рамке в оперативной памяти, которая заново создаётся при каждой загрузке. Входы по SSH и приложение попадают туда сами. Для одной команды по SSH: $1"],
         [/^Too many wrong codes\.  Wait (\d+) seconds\.$/, "Слишком много неверных кодов.  Подождите $1 с."]
     ];
 
@@ -1498,7 +1498,7 @@
         [/^Run mc over SSH for a two-pane file manager\.$/, "Ejecuta mc por SSH para tener un gestor de archivos de dos paneles."],
         [/^Edit files over SSH with micro \(Ctrl\+S saves, Ctrl\+Q quits\)\.$/, "Edita archivos por SSH con micro (Ctrl+S guarda, Ctrl+Q sale)."],
         [/^rg searches inside files, fd finds files by name, and fzf picks from a list \(Ctrl\+R in bash\)\.$/, "rg busca dentro de archivos, fd encuentra archivos por nombre y fzf elige de una lista (Ctrl+R en bash)."],
-        [/^This TV has no \/opt, so Entware runs in a root of its own, in RAM\. SSH logins and the TV app go in by themselves\. For one command over SSH: (.+)$/, "Este televisor no tiene /opt, así que Entware funciona en una raíz propia, en la memoria. Los inicios de sesión por SSH y la aplicación entran solos. Para un solo comando por SSH: $1"],
+        [/^This TV has no \/opt, so Entware \(on the TV's storage, as usual\) is mounted in a root of its own, a small frame in RAM that's built again at each boot\. SSH logins and the TV app go in by themselves\. For one command over SSH: (.+)$/, "Este televisor no tiene /opt, así que Entware (en el almacenamiento del televisor, como siempre) se monta en una raíz propia: un pequeño marco en la RAM que se vuelve a crear en cada arranque. Los inicios de sesión por SSH y la aplicación entran solos. Para un solo comando por SSH: $1"],
         [/^Too many wrong codes\.  Wait (\d+) seconds\.$/, "Demasiados códigos incorrectos.  Espera $1 segundos."]
     ];
 

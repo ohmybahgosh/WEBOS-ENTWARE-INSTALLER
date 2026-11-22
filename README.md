@@ -173,7 +173,11 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 
 ### TVs with no /opt (webOS 4 to 6)
 
-Firmware before webOS 22 has no `/opt` folder, and its system is read-only, so there's nowhere to mount Entware (thanks to SiriosDev for [reporting it](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5)).  On those TVs, Entware runs in a root of its own instead: a small tmpfs in RAM with the TV's own folders bound into it, plus an `/opt`.  Nothing in the TV's system changes.  It's set up at boot by the boot script, and goes away at a restart.
+Firmware before webOS 22 has no `/opt` folder, and its system is read-only, so there's nowhere to mount Entware (thanks to SiriosDev for [reporting it](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5)).  On those TVs, Entware is mounted in a root of its own instead.
+
+> **Entware is not in RAM.**  It's installed on the TV's storage, the same as on any other TV (`/mnt/lg/appstore/entware`), and your packages, settings and files stay there through restarts.  The only thing in RAM is a small frame for it, about 100 KB: a tmpfs with the TV's own folders mounted into it and an `/opt` that Entware is mounted on.  It holds none of your files.  A restart clears the frame, and the boot script builds it again in a few seconds before Entware's services start.
+
+Nothing in the TV's system changes.
 
 - **The installer and the TV app** go in by themselves, so everything works as on any other TV.
 - **SSH logins** go in too, into bash with Entware on the `PATH`.
@@ -671,7 +675,7 @@ Entware goes in a new root-only folder at the top of app storage, not `/media/de
 | `/mnt/lg/appstore/entware` | Entware, all packages, and the `ent` and `webos-entware` commands.  `/mnt/lg/user/opt` instead when it's on [user data](#where-entware-lives) |
 | `/opt` | Bind mount of the folder above. On webOS 25 the stock `/opt` only holds LG's factory test programs (`/opt/webos/tests`), which are hidden while Entware is mounted. Nothing on the TV needs them |
 | `/var/lib/webosbrew/init.d/S99entware` | Boot script that remounts `/opt` and starts Entware services |
-| `/var/lib/webos-entware/webos-entware-root` | Only on a TV with no `/opt` (webOS 4 to 6): sets up [Entware's own root](#tvs-with-no-opt-webos-4-to-6) in `/tmp/.webos-entware-root` (in RAM) |
+| `/var/lib/webos-entware/webos-entware-root` | Only on a TV with no `/opt` (webOS 4 to 6): sets up the frame for [Entware's own root](#tvs-with-no-opt-webos-4-to-6) in `/tmp/.webos-entware-root` (in RAM; Entware itself stays on storage) |
 | `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |
 | `/home/root/.bash_profile` | Loads `.profile` and `.bashrc` in bash |
 | `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |
