@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.17.1] - 2026-11-22
+
+### Fixed
+
+- **Uninstall takes Entware's own root apart too** on a TV with no /opt (webOS 4 to 6), instead of leaving its empty frame in RAM until the next restart.  It's done from outside the frame once nothing runs in it: right away after an uninstall over SSH, or at the TV app's next check after one it ran.  Nothing is left in `/tmp` or `/var/lib`, and the TV app's checks after an uninstall don't set it up again.
+
 ## [2.17.0] - 2026-11-22
 
 ### Added

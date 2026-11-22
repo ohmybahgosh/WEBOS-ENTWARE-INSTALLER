@@ -1808,7 +1808,21 @@ tvrun job pkg-add tmux
 for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
 ok "the TV app's background tasks run in it too" 'grep -q "Started: pkg-add tmux" "$W/out" && [ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && in_tv "[ -f $OR/opt/lib/opkg/info/tmux.control ]"'
 tvrun uninstall -y
-ok "uninstall works, and takes the helper with it" 'grep -q "Entware removed" "$W/out" && grep -q "goes when the TV restarts" "$W/out" && [ ! -e /var/lib/webos-entware/webos-entware-root ] && [ ! -e /mnt/lg/appstore/entware/bin/opkg ] && [ ! -e /mnt/lg/user/opt/bin/opkg ]'
+ok "uninstall works, and takes the helper with it" 'grep -q "Entware removed" "$W/out" && grep -q "taken apart as soon as this finishes" "$W/out" && [ ! -e /var/lib/webos-entware/webos-entware-root ] && [ ! -e /mnt/lg/appstore/entware/bin/opkg ] && [ ! -e /mnt/lg/user/opt/bin/opkg ]'
+ok "and takes Entware's own root apart: no mounts and no folder left" '! in_tv "grep -q \".webos-entware-root\" /proc/mounts" && ! in_tv "[ -e $OR ]" && ! in_tv "[ -e $OR.lock ]" && ! in_tv "[ -e $OR.down ]"'
+tvrun status --json
+ok "the TV app's checks after that don't set it up again" '! in_tv "[ -e $OR ]" && [ ! -e /var/lib/webos-entware/webos-entware-root ] && python3 -c "
+import json,sys; d=json.load(open(sys.argv[1])); assert not d[\"installed\"], d
+" "$W/out"'
+# Uninstalled from the TV app, as a background task: the frame comes apart
+# at the app's next check, once the task has finished
+tvrun install -y
+rm -rf /tmp/webos-entware-job
+tvrun job uninstall
+for _ in $(seq 1 100); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+ok "an uninstall from the TV app finishes as a task" '[ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && grep -q "Entware removed" /tmp/webos-entware-job/log'
+tvrun status --json
+ok "and the app's next check takes the frame apart" '! in_tv "grep -q \".webos-entware-root\" /proc/mounts" && ! in_tv "[ -e $OR ]" && ! in_tv "[ -e $OR.down ]"'
 # Clear it all away, innermost first
 grep " ${TR}[ /]" /proc/mounts | awk '{print $2}' | sort -r | while read -r m; do umount "$m" 2>/dev/null || umount -l "$m"; done
 umount -l "$TR" 2>/dev/null

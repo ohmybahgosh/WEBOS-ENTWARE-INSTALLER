@@ -49,6 +49,7 @@ if [ "$stage" = 2 ]; then
     sh $I uninstall -y > $S/uninstall.log 2>&1
     tail -n 6 $S/uninstall.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^/  | /'
     check "uninstall removes Entware and the helper" 'grep -q "Entware removed" $S/uninstall.log && [ ! -e /mnt/lg/appstore/entware ] && [ ! -e $H ] && [ ! -e /var/lib/webosbrew/init.d/S99entware ]'
+    check "and takes Entware's own root apart, with nothing left in /tmp" '! grep -q "webos-entware-root" /proc/mounts && [ ! -e $R ] && [ ! -e $R.down ] && [ ! -e /var/lib/webos-entware ]'
     echo 3 > $S/stage
 fi
 say "done"

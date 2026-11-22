@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.17.0"
+VERSION="2.17.1"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -253,11 +253,39 @@ esac
 ROOTHELPER
     chmod 755 "$ROOT_HELPER.new" && mv -f "$ROOT_HELPER.new" "$ROOT_HELPER"
 }
-# Run in it: on this firmware, every command runs there, where /opt is
-if [ ! -d /opt ] && [ ! -L /opt ] && [ -d /mnt/lg/user ] && [ "$(id -u)" = 0 ]; then
+# After an uninstall there (it leaves .down), the frame is taken apart from
+# outside, once nothing runs in it: right away after an uninstall over SSH,
+# or at the TV app's next check after one it ran as a background task
+frame_tidy() {
+    [ -e /tmp/.webos-entware-root.down ] || return 0
+    if [ -f /tmp/webos-entware-job/name ] && [ ! -f /tmp/webos-entware-job/exit ]; then
+        jp=$(cat /tmp/webos-entware-job/pid 2>/dev/null)
+        [ -n "$jp" ] && kill -0 "$jp" 2>/dev/null && return 0
+    fi
+    grep -s " /tmp/.webos-entware-root[ /]" /proc/mounts | awk '{print $2}' | sort -r | while read -r m; do
+        umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
+    done
+    grep -qs " /tmp/.webos-entware-root " /proc/mounts && return 0
+    rmdir /tmp/.webos-entware-root 2>/dev/null
+    rm -f /tmp/.webos-entware-root.down /tmp/.webos-entware-root.lock
+}
+[ ! -d /opt ] && [ "$(id -u)" = 0 ] && frame_tidy
+# Run in it: on this firmware, every command runs there, where /opt is.
+# Only once there's Entware (or it's being installed): with none, nothing
+# needs it, so the TV app's checks after an uninstall don't set it up again.
+own_root_needed() {
+    [ -x /mnt/lg/user/opt/bin/opkg ] || [ -x /mnt/lg/appstore/entware/bin/opkg ] && return 0
+    grep -qs " /tmp/.webos-entware-root " /proc/mounts && return 0
+    case " $* " in *" install "*) return 0 ;; esac
+    return 1
+}
+if [ ! -d /opt ] && [ ! -L /opt ] && [ -d /mnt/lg/user ] && [ "$(id -u)" = 0 ] && own_root_needed "$@"; then
     [ -f "$SELF" ] || error_exit "This TV has no /opt, so Entware runs in a root of its own, and the installer has to run from a file for that. Download it first: wget -O /tmp/webos-entware-installer.sh $SCRIPT_URL && sh /tmp/webos-entware-installer.sh"
     write_root_helper || error_exit "Couldn't write $ROOT_HELPER."
-    exec sh "$ROOT_HELPER" run sh "$SELF" "$@"
+    sh "$ROOT_HELPER" run sh "$SELF" "$@"
+    rc=$?
+    frame_tidy
+    exit $rc
 fi
 # Read one answer into ANSWER. Uses the terminal even when the script is
 # piped in (wget -O- ... | sh), and fails when there is no terminal at all.
@@ -5163,11 +5191,16 @@ uninstall_entware() {
     # Scratch files in /tmp (a running task's own folder is left for the app)
     rm -f /tmp/webos-entware-boot.log /tmp/webos-entware-app-update.sh
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
-    # A TV with no /opt: the helper for Entware's own root goes too.  The
-    # root's frame is only in RAM, and goes when the TV restarts.
+    # A TV with no /opt: Entware's own root comes apart too, and its helper
+    # goes.  This runs in it, so it's detached in one go (umount -l of its
+    # root takes every mount in it along); what's still running carries on
+    # until it ends, and the empty folder in /tmp is removed.
     rm -rf "${ROOT_HELPER%/*}"
+    if [ -n "${WEBOS_ENTWARE_ROOT:-}" ]; then
+        : > /tmp/.webos-entware-root.down
+        info "Removed the helper for Entware's own root. Its frame in RAM is taken apart as soon as this finishes."
+    fi
     success "Entware removed."
-    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && info "The frame for Entware's own root (empty, in RAM) goes when the TV restarts."
     info "Disconnect and SSH in again to get the stock shell back."
 }
 

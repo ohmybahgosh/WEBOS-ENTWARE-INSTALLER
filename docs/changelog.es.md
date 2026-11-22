@@ -2,6 +2,12 @@
 
 Los cambios de WebOS Entware en español, para la pantalla Novedades de la aplicación.  Los títulos de sección (`### Added`, `### Changed`, `### Fixed`) quedan en inglés para que coincidan con el [CHANGELOG.md](../CHANGELOG.md) original, que tiene todas las versiones: la aplicación los traduce sola.
 
+## [2.17.1] - 2026-11-22
+
+### Fixed
+
+- **Desinstalar también desmonta la raíz propia de Entware** en un televisor sin /opt (webOS 4 a 6), en vez de dejar su marco vacío en la RAM hasta el siguiente reinicio.  Se hace desde fuera del marco cuando ya no hay nada funcionando dentro: justo después de desinstalar por SSH, o en la siguiente comprobación de la aplicación tras una desinstalación lanzada desde ella.  No queda nada en `/tmp` ni en `/var/lib`, y las comprobaciones de la aplicación después de desinstalar no lo vuelven a crear.
+
 ## [2.17.0] - 2026-11-22
 
 ### Added
