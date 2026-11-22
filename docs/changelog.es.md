@@ -2,6 +2,16 @@
 
 Los cambios de WebOS Entware en español, para la pantalla Novedades de la aplicación.  Los títulos de sección (`### Added`, `### Changed`, `### Fixed`) quedan en inglés para que coincidan con el [CHANGELOG.md](../CHANGELOG.md) original, que tiene todas las versiones: la aplicación los traduce sola.
 
+## [2.17.0] - 2026-11-22
+
+### Added
+
+- **Ya funcionan los televisores sin /opt (webOS 4, 5 y 6, modelos de 2018 a 2021).**  Su firmware no tiene `/opt` y el sistema es de solo lectura, así que la instalación se detenía con «This firmware has no /opt folder» ([#5](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5), gracias SiriosDev).  En esos televisores, Entware funciona ahora en una raíz propia: un tmpfs en la memoria con las carpetas del propio televisor montadas dentro, más un `/opt`.  No cambia nada en el sistema del televisor.  El instalador, la aplicación, sus tareas en segundo plano, el script de arranque y los inicios de sesión por SSH entran solos; para un solo comando por SSH está `sh /var/lib/webos-entware/webos-entware-root run COMMAND`.  Los entornos aislados de las aplicaciones no entran, nada montado dentro se ve fuera, y las unidades USB aparecen, también las que se conectan después.  Probado con el firmware webOS 6.5.3 (LM21A) arrancado en un emulador: una instalación, un complemento de Entware, un reinicio, un inicio de sesión por SSH, doctor y una desinstalación.  Pruebas nuevas lo comprueban en cada push.
+
+### Fixed
+
+- **El README decía que webOS 4 y posteriores deberían funcionar,** cuando webOS 4 a 6 no podían hasta ahora.  Ahora los enumera con cómo funcionan.
+
 ## [2.16.1] - 2026-11-21
 
 ### Added

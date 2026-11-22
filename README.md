@@ -27,7 +27,7 @@ Sets up **Entware** on **rooted LG webOS TVs**, so you can install hundreds of L
 >
 > Many of the fixes that mattered came from that real-TV testing: a 2025 install the old version left half-working, `luna-send` answering nothing when called from a script, webOS having no group for `locate`, and helpers that left processes running.  The [changelog](CHANGELOG.md) has the full story.
 >
-> - **Tests on every push:** 440+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, [tests the phone dashboard](tests/web-test.js) on a phone-sized screen, [checks every text is translated](tests/check-i18n.js), lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
+> - **Tests on every push:** 470+ [tests](tests/run_tests.sh) install, repair, reboot, add and remove add-ons and uninstall in a private mount namespace with fake TV paths, under busybox `sh` (the TV's shell) and dash.  CI also runs ShellCheck, lints the app as ES5 for older TVs, builds the IPK and [checks what's in it](tests/check-ipk.sh), [drives the app with the remote's keys](tests/ui-test.js) in a headless browser, [tests the phone dashboard](tests/web-test.js) on a phone-sized screen, [checks every text is translated](tests/check-i18n.js), lints the workflows, and runs CodeQL.  Every action is pinned to a commit.  The CI badge above shows the latest run.
 > - **Hard to break the TV:** a failed install undoes itself, your own shell files are backed up and put back, logins only switch to bash if it runs, and system partitions are never touched.  [SECURITY.md](SECURITY.md) lists everything it does as root.
 >
 > Commits list me as the author and Claude as the committer.  Found a problem?  See [SECURITY.md](SECURITY.md) or open an issue.
@@ -167,8 +167,21 @@ Already installed Entware over SSH?  Open the app and it shows your install as i
 ## Supported TVs
 
 - **webOS 23, 24 and 25** (webOS 8, 9 and 10 internally) are the main targets.
-- **webOS 22 and older** (webOS 4 and up) should work too. The installer tells you when your version is outside the tested range.
+- **webOS 22** (webOS 7 internally) should work too. The installer tells you when your version is outside the tested range.
+- **webOS 4, 5 and 6** (2018 to 2021 models) work through [Entware's own root](#tvs-with-no-opt-webos-4-to-6), since their firmware has no `/opt`.  Tested with webOS 6.5.3 firmware (LM21A) in an emulator.
 - Both **64-bit and 32-bit kernels** are supported. Most recent OLEDs (C2, C3, G4, C4 and up) have a 64-bit kernel. Many budget and older models have a 32-bit one.
+
+### TVs with no /opt (webOS 4 to 6)
+
+Firmware before webOS 22 has no `/opt` folder, and its system is read-only, so there's nowhere to mount Entware (thanks to SiriosDev for [reporting it](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5)).  On those TVs, Entware runs in a root of its own instead: a small tmpfs in RAM with the TV's own folders bound into it, plus an `/opt`.  Nothing in the TV's system changes.  It's set up at boot by the boot script, and goes away at a restart.
+
+- **The installer and the TV app** go in by themselves, so everything works as on any other TV.
+- **SSH logins** go in too, into bash with Entware on the `PATH`.
+- **One command over SSH,** without logging in: `ssh tv sh /var/lib/webos-entware/webos-entware-root run ent install htop`
+- **App sandboxes** aren't brought in (they're hundreds of mounts), and nothing mounted in it shows up outside.  USB drives show up in `/tmp/usb`, including ones plugged in later.
+- The installer has to run from a file there (as in the [quick start](#quick-start)), not piped into `sh`.
+
+It's tested by booting the TV's own webOS 6 system in an emulator ([`tests/webos6-emulator`](tests/webos6-emulator)): a real install with Entware's packages, a restart, an SSH login and an uninstall.  If you have a webOS 4 to 6 TV, a [compatibility report](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new?template=compatibility-report.yml) either way would really help.
 
 Tried it on a TV that isn't listed?  A [compatibility report](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/new?template=compatibility-report.yml) helps others with the same model, whether it worked or not.  The TV app fills one in for you: **Report for GitHub**, then **It works on my TV**.
 
@@ -658,6 +671,7 @@ Entware goes in a new root-only folder at the top of app storage, not `/media/de
 | `/mnt/lg/appstore/entware` | Entware, all packages, and the `ent` and `webos-entware` commands.  `/mnt/lg/user/opt` instead when it's on [user data](#where-entware-lives) |
 | `/opt` | Bind mount of the folder above. On webOS 25 the stock `/opt` only holds LG's factory test programs (`/opt/webos/tests`), which are hidden while Entware is mounted. Nothing on the TV needs them |
 | `/var/lib/webosbrew/init.d/S99entware` | Boot script that remounts `/opt` and starts Entware services |
+| `/var/lib/webos-entware/webos-entware-root` | Only on a TV with no `/opt` (webOS 4 to 6): sets up [Entware's own root](#tvs-with-no-opt-webos-4-to-6) in `/tmp/.webos-entware-root` (in RAM) |
 | `/home/root/.profile` | Switches interactive SSH logins to bash, and remounts `/opt` if the boot script didn't (skipped with `--no-shell`) |
 | `/home/root/.bash_profile` | Loads `.profile` and `.bashrc` in bash |
 | `/home/root/.bashrc` | Loads the aliases and prompt. Add your own settings here: repairing keeps this file |

@@ -19,7 +19,7 @@ W=$(mktemp -d /run/entware-test.XXXXXX)
 cp "$SCRIPT" "$W/installer.sh"
 # Node.js for the phone dashboard, found before /opt is covered
 NODE=$(command -v node || true)
-for d in /mnt /tmp /var/lib/webosbrew /var/lib/opkg /var/cache/opkg /home/root; do
+for d in /mnt /tmp /var/lib/webosbrew /var/lib/webos-entware /var/lib/opkg /var/cache/opkg /home/root; do
     mkdir -p "$d" && mount -t tmpfs tmpfs "$d"
 done
 mkdir -p /mnt/lg/user /var/lib/webosbrew/init.d
@@ -1749,6 +1749,71 @@ ok "a tv that's something else is left alone" 'grep -q "Skipped the tv command" 
 ok "and ent still works" 'grep -q "^Packages" "$W/out"'
 rm -f /opt/bin/tv /tmp/fake-crontab /tmp/luna.log; rm -rf /tmp/bk
 run uninstall -y
+
+echo "== [$SH] 39. a TV with no /opt (webOS 4 to 6): Entware's own root"
+# A root like those TVs': the same folders, but no /opt, and the system
+# read-only.  The test's own /run is bound without what's mounted inside it.
+# An app sandbox, as webOS makes hundreds of under /var/palm/jail
+mkdir -p /tmp/palm/jail/someapp && mount -t tmpfs tmpfs /tmp/palm/jail/someapp
+TR=$W/tvroot
+mkdir -p "$TR" && mount -t tmpfs tmpfs "$TR" && mount --make-private "$TR"
+for p in /*; do
+    n=${p#/}
+    case "$n" in opt|lost+found) continue ;; esac
+    if [ -L "$p" ]; then ln -s "$(readlink "$p")" "$TR/$n"; continue; fi
+    [ -d "$p" ] || continue
+    mkdir "$TR/$n"
+    if [ "$n" = run ]; then mount --bind "$p" "$TR/$n"; else mount --rbind "$p" "$TR/$n"; fi
+    mount --make-rprivate "$TR/$n"
+done
+mount -o remount,bind,ro "$TR/usr" 2>/dev/null
+OR=/tmp/.webos-entware-root
+tvrun() { cp "$W/installer.sh" /tmp/webos-entware-installer.sh; chroot "$TR" /bin/sh -c 'cd /tmp && exec '"$SH"' /tmp/webos-entware-installer.sh "$@"' sh "$@" > "$W/out" 2>&1; }
+in_tv() { chroot "$TR" /bin/sh -c "$1"; }
+ok "the test's TV root has no /opt" '! in_tv "[ -e /opt ]"'
+tvrun install -y
+ok "install works on a TV with no /opt" 'grep -q "Entware installed successfully" "$W/out"'
+grep -q "Entware installed successfully" "$W/out" || { sed 's/\x1b\[[0-9;]*m//g' "$W/out" | tail -n 30; }
+ok "Entware's own root is a tmpfs in /tmp, with Entware on its /opt" 'in_tv "grep -q \" $OR tmpfs \" /proc/mounts && [ -x $OR/opt/bin/opkg ] && [ -x $OR/bin/sh ]"'
+ok "and the TV's own root still has no /opt" '! in_tv "[ -e /opt ]"'
+ok "its helper is root's alone" '[ "$(stat -c "%U %a" /var/lib/webos-entware/webos-entware-root)" = "root 755" ] && [ "$(stat -c "%U %a" /var/lib/webos-entware)" = "root 755" ]'
+ok "app sandboxes aren't brought in, and nothing made in it shows outside" 'in_tv "grep -q \" /tmp/palm/jail/someapp \" /proc/mounts" && ! in_tv "grep -q \"$OR/tmp/palm/jail\" /proc/mounts" && ! grep -qs " /opt/bin " /proc/mounts'
+in_tv "sh /var/lib/webos-entware/webos-entware-root run /opt/bin/opkg --version" > "$W/out" 2>&1
+ok "the helper runs one command in it" 'grep -q "^opkg version" "$W/out"'
+(cd /tmp && chroot "$TR" /bin/sh -c "cd /home/root && sh /var/lib/webos-entware/webos-entware-root run pwd") > "$W/out" 2>&1
+ok "in the folder it was started in" '[ "$(cat "$W/out")" = /home/root ]'
+in_tv "PATH=/usr/bin:/bin sh /var/lib/webos-entware/webos-entware-root run opkg --version" > "$W/out" 2>&1
+ok "and finds Entware's programs without a login" 'grep -q "^opkg version" "$W/out"'
+tvrun status --json
+ok "status --json from outside goes in, and says why" 'python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+assert d[\"installed\"] and d[\"mounted\"] and not d[\"issues\"], d
+assert any(\"no /opt\" in n for n in d[\"notes\"]), d[\"notes\"]
+" "$W/out"'
+echo 'echo "PATH=$PATH"; command -v opkg; exit' | chroot "$TR" /bin/sh -c "cd /home/root; HOME=/home/root timeout 20 $SH -l -i" > "$W/out" 2>&1
+ok "an SSH login goes in, with Entware on its PATH" 'grep -q "^/opt/bin/opkg$" "$W/out"'
+echo 'exit' | chroot "$TR" /bin/sh -c "cd /home/root; HOME=/home/root WEBOS_ENTWARE_ROOT=1 timeout 20 $SH -l -i" > "$W/out" 2>&1
+ok "and doesn't loop" '[ -z "$(grep -i "couldn.t" "$W/out")" ]'
+# A restart: RAM is cleared, then the boot script sets it all up again
+in_tv "sh /var/lib/webos-entware/webos-entware-root down"
+ok "down takes it apart" '! in_tv "grep -q \" $OR\" /proc/mounts" && ! in_tv "[ -e $OR ]"'
+rm -f /tmp/webos-entware-boot.log
+in_tv "sh /var/lib/webosbrew/init.d/S99entware"
+for _ in $(seq 1 50); do grep -qs "started Entware services" /tmp/webos-entware-boot.log && break; sleep 0.2; done
+ok "at boot it's set up again, and Entware is mounted and started in it" 'grep -q "setting up Entware.s own root" /tmp/webos-entware-boot.log && grep -q "mounted /opt" /tmp/webos-entware-boot.log && grep -q "started Entware services" /tmp/webos-entware-boot.log && in_tv "[ -x $OR/opt/bin/opkg ]"'
+tvrun add htop -y
+ok "add-ons install in it" 'grep -q "htop" "$W/out" && in_tv "[ -f $OR/opt/lib/opkg/info/htop.control ]"'
+rm -rf /tmp/webos-entware-job
+tvrun job pkg-add tmux
+for _ in $(seq 1 50); do [ -f /tmp/webos-entware-job/exit ] && break; sleep 0.2; done
+ok "the TV app's background tasks run in it too" 'grep -q "Started: pkg-add tmux" "$W/out" && [ "$(cat /tmp/webos-entware-job/exit)" = 0 ] && in_tv "[ -f $OR/opt/lib/opkg/info/tmux.control ]"'
+tvrun uninstall -y
+ok "uninstall works, and takes the helper with it" 'grep -q "Entware removed" "$W/out" && grep -q "goes when the TV restarts" "$W/out" && [ ! -e /var/lib/webos-entware/webos-entware-root ] && [ ! -e /mnt/lg/appstore/entware/bin/opkg ] && [ ! -e /mnt/lg/user/opt/bin/opkg ]'
+# Clear it all away, innermost first
+grep " ${TR}[ /]" /proc/mounts | awk '{print $2}' | sort -r | while read -r m; do umount "$m" 2>/dev/null || umount -l "$m"; done
+umount -l "$TR" 2>/dev/null
+grep " /tmp/.webos-entware-root" /proc/mounts | awk '{print $2}' | sort -r | while read -r m; do umount -l "$m"; done
+umount /tmp/palm/jail/someapp; rm -rf /tmp/palm
 
 echo "== [$SH] $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

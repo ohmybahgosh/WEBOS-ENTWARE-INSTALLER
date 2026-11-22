@@ -2,6 +2,16 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.17.0] - 2026-11-22
+
+### Added
+
+- **TVs with no /opt (webOS 4, 5 and 6, 2018 to 2021 models) work now.**  Their firmware has no `/opt` and a read-only system, so the install stopped with "This firmware has no /opt folder" ([#5](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5), thanks SiriosDev).  On those TVs, Entware now runs in a root of its own: a tmpfs in RAM with the TV's own folders bound into it, plus an `/opt`.  Nothing in the TV's system changes.  The installer, the TV app, its background tasks, the boot script and SSH logins all go in by themselves; for one command over SSH there's `sh /var/lib/webos-entware/webos-entware-root run COMMAND`.  App sandboxes aren't brought in, nothing mounted in it shows outside, and USB drives show up, including ones plugged in later.  Tested with webOS 6.5.3 firmware (LM21A) booted in an emulator: an install, an add-on from Entware, a restart, an SSH login, doctor and an uninstall.  New tests cover it on every push.
+
+### Fixed
+
+- **The README said webOS 4 and up should work,** when webOS 4 to 6 couldn't until now.  It lists them with how they work.
+
 ## [2.16.1] - 2026-11-21
 
 ### Added

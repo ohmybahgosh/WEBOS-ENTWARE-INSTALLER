@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.16.1"
+VERSION="2.17.0"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -128,6 +128,135 @@ error_exit() { log "$RED" "[ERROR] $1"; exit 1; }
 success() { log "$GREEN" "[SUCCESS] $1"; }
 warn() { log "$YELLOW" "[WARNING] $1"; }
 info() { log "$CYAN" "[INFO] $1"; }
+
+# === Firmware with no /opt (webOS 4 to 6): Entware's own root ===
+# Its system is read-only, so Entware runs in a root of its own (see the
+# helper below).  The installer, the boot script and SSH logins go in
+# through the helper, and then everything works as on any other TV.
+ROOT_HELPER="/var/lib/webos-entware/webos-entware-root"
+write_root_helper() {
+    mkdir -p "${ROOT_HELPER%/*}" && chmod 755 "${ROOT_HELPER%/*}" || return 1
+    cat > "$ROOT_HELPER.new" << 'ROOTHELPER'
+#!/bin/sh
+# Entware's own root (webos-entware-installer)
+#
+# Firmware older than webOS 22 (webOS 4 to 6) has no /opt, and its system is
+# read-only, so there's nowhere to mount Entware.  Entware runs in a root of
+# its own instead: a tmpfs in RAM with the TV's own folders bound into it,
+# plus an /opt.  Nothing in the TV's system changes, and it's gone at the
+# next restart (the boot script sets it up again).
+#
+#   up           set it up, if it isn't yet
+#   run CMD...   run CMD in it, in the current folder
+#   shell        a login shell in it (SSH logins, from ~/.profile)
+#   down         take it apart (it also goes at a restart)
+#
+# App sandboxes (/var/palm/jail, hundreds of mounts) aren't brought in, and
+# the TV's mounts are copied without links back, so nothing done in here
+# shows up outside.  /tmp follows the TV's, so USB drives plugged in later
+# show up in /tmp/usb.
+R=/tmp/.webos-entware-root
+L=/tmp/.webos-entware-root.lock
+# Its own tools from the system; what it runs gets the PATH it was given
+CALLER_PATH=${PATH:-/usr/sbin:/usr/bin:/sbin:/bin}
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+CHROOT=$(command -v chroot)
+umask 022
+
+is_up() { [ -d "$R/opt" ] && [ -x "$R/bin/sh" ] && grep -qs "^[^ ]* $R tmpfs " /proc/mounts; }
+
+# One setup at a time (the boot script and a login can meet)
+lock() {
+    n=0
+    until (set -C; echo $$ > "$L") 2>/dev/null; do
+        p=$(cat "$L" 2>/dev/null)
+        if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then rm -f "$L"; continue; fi
+        [ $n -ge 100 ] && return 1
+        sleep 1; n=$((n + 1))
+    done
+}
+unlock() { [ "$(cat "$L" 2>/dev/null)" = $$ ] && rm -f "$L"; }
+
+down() {
+    # Innermost first, so each one comes off
+    grep -s " ${R}[ /]" /proc/mounts | awk '{print $2}' | sort -r | while read -r m; do
+        umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
+    done
+    umount -l "$R" 2>/dev/null
+    rmdir "$R" 2>/dev/null
+    return 0
+}
+
+up() {
+    [ -d /opt ] && return 0
+    [ "$(id -u)" = 0 ] || { echo "Entware's own root needs root." >&2; return 1; }
+    is_up && return 0
+    lock || { echo "Entware's own root is being set up by another process." >&2; return 1; }
+    if is_up; then unlock; return 0; fi
+    down
+    # Made here, by root: anything else in its place is moved out of the way
+    if [ -e "$R" ] || [ -L "$R" ]; then mv -f "$R" "$R.old.$$" 2>/dev/null && rm -rf "$R.old.$$"; fi
+    if ! mkdir -m 755 "$R" || ! mount -t tmpfs -o mode=755 webos-entware-root "$R"; then
+        rmdir "$R" 2>/dev/null; unlock; echo "Couldn't make Entware's own root in $R." >&2; return 1
+    fi
+    mount --make-private "$R"
+    mounts=$(awk '{print $5}' /proc/self/mountinfo)
+    # The top-level folders and links, but not /opt
+    for p in /* /.[!.]*; do
+        n=${p#/}
+        case "$n" in opt|lost+found|'*'|'.[!.]*') continue ;; esac
+        if [ -L "$p" ]; then
+            ln -s "$(readlink "$p")" "$R/$n"
+        elif [ -d "$p" ]; then
+            mkdir "$R/$n"
+            # Not a mount of its own: a folder of the system itself
+            if ! printf '%s\n' "$mounts" | grep -qx "$p"; then
+                mount --bind "$p" "$R/$n" && mount --make-private "$R/$n"
+            fi
+        fi
+    done
+    # Then every mount, in the order they were made, one by one, except the
+    # app sandboxes and this root itself
+    printf '%s\n' "$mounts" | while read -r m; do
+        case "$m" in /|"$R"|"$R"/*|*/palm/jail|*/palm/jail/*|*\\*|/opt|/opt/*) continue ;; esac
+        [ -e "$R$m" ] || continue
+        mount --bind "$m" "$R$m" 2>/dev/null || continue
+        case "$m" in
+            /tmp) mount --make-slave "$R$m" ;;
+            *) mount --make-private "$R$m" ;;
+        esac
+    done
+    mkdir -m 755 "$R/opt"
+    unlock
+    is_up
+}
+
+# CMD in the root, in the folder it was started in
+enter() {
+    d=$(pwd)
+    WEBOS_ENTWARE_ROOT=1; export WEBOS_ENTWARE_ROOT
+    # with Entware's programs found first, as in a login
+    case ":$CALLER_PATH:" in *:/opt/bin:*) PATH=$CALLER_PATH ;; *) PATH=/opt/bin:/opt/sbin:$CALLER_PATH ;; esac
+    # shellcheck disable=SC2016 # for the shell in the root
+    exec "${CHROOT:-chroot}" "$R" /bin/sh -c 'cd "$1" 2>/dev/null || cd /; shift; exec "$@"' sh "$d" "$@"
+}
+
+case "$1" in
+    up) up ;;
+    down) [ -d /opt ] && { echo "Run this outside Entware's own root." >&2; exit 1; }; lock; down; unlock ;;
+    run) shift; [ $# -gt 0 ] || { echo "Usage: $0 run COMMAND..." >&2; exit 2; }; up || exit 1; enter "$@" ;;
+    shell) up || exit 1; enter "${SHELL:-/bin/sh}" -l ;;
+    *) echo "Usage: $0 up | run COMMAND... | shell | down" >&2; exit 2 ;;
+esac
+ROOTHELPER
+    chmod 755 "$ROOT_HELPER.new" && mv -f "$ROOT_HELPER.new" "$ROOT_HELPER"
+}
+# Run in it: on this firmware, every command runs there, where /opt is
+if [ ! -d /opt ] && [ ! -L /opt ] && [ -d /mnt/lg/user ] && [ "$(id -u)" = 0 ]; then
+    [ -f "$SELF" ] || error_exit "This TV has no /opt, so Entware runs in a root of its own, and the installer has to run from a file for that. Download it first: wget -O /tmp/webos-entware-installer.sh $SCRIPT_URL && sh /tmp/webos-entware-installer.sh"
+    write_root_helper || error_exit "Couldn't write $ROOT_HELPER."
+    exec sh "$ROOT_HELPER" run sh "$SELF" "$@"
+fi
 # Read one answer into ANSWER. Uses the terminal even when the script is
 # piped in (wget -O- ... | sh), and fails when there is no terminal at all.
 read_answer() {
@@ -898,7 +1027,7 @@ print_tv() {
 preflight() {
     [ "$(id -u)" -eq 0 ] || error_exit "Must be run as root. Root the TV first (see webosbrew.org/rooting)."
     [ -d "/mnt/lg/user" ] || error_exit "Not a webOS TV (missing /mnt/lg/user)."
-    [ -d "/opt" ] || error_exit "This firmware has no /opt folder, so Entware can't be mounted."
+    [ -d "/opt" ] || error_exit "This TV has no /opt, and Entware's own root couldn't be set up. Run the installer as root, from a file: sh $ROOT_HELPER up shows why."
     if [ "$BIND_SRC" = "$APP_SRC" ] && ! grep -qs " $APP_PART " /proc/mounts; then
         error_exit "App storage ($APP_PART) isn't mounted on this TV, so Entware can't go there. Install without --location=appstore."
     fi
@@ -907,7 +1036,8 @@ preflight() {
     print_tv
     case "$WEBOS_RELEASE" in
         ''|[0-3].*) warn "Couldn't confirm a supported webOS version. This installer is tested on webOS 23, 24 and 25." ;;
-        [4-7].*) info "$WEBOS_NAME is older than the tested versions (webOS 23 to 25), but it should work." ;;
+        [4-6].*) info "$WEBOS_NAME has no /opt, so Entware runs in a root of its own here, in RAM, with the TV's own folders. It's tested with webOS 6 firmware in an emulator." ;;
+        7.*) info "$WEBOS_NAME is older than the tested versions (webOS 23 to 25), but it should work." ;;
     esac
     [ -n "$KERNEL_BITS" ] || error_exit "Unsupported CPU type: $KERNEL_ARCH. Entware for webOS needs an ARM TV."
 
@@ -1348,6 +1478,20 @@ if [ -z "$WEBOS_ENTWARE_PRE" ] && [ -f "$HOME/.profile.pre-entware" ]; then
     WEBOS_ENTWARE_PRE=1
     export WEBOS_ENTWARE_PRE
     . "$HOME/.profile.pre-entware"
+fi
+# A TV with no /opt (webOS 4 to 6): an interactive login moves into
+# Entware's own root, where /opt is, and this file runs again there.  If that
+# can't be done, this login goes on without Entware.
+if [ ! -d /opt ] && [ "$(id -u)" = 0 ] && [ -z "$WEBOS_ENTWARE_ROOT" ]; then
+    case "$-" in
+        *i*)
+            H=/var/lib/webos-entware/webos-entware-root
+            if [ -f "$H" ] && [ ! -L "$H" ] && [ "$(ls -ldn "$H" | awk '{print substr($1, 6, 1) substr($1, 9, 1) " " $3}')" = "-- 0" ]; then
+                sh "$H" up && exec sh "$H" shell
+                echo "Entware's own root couldn't be set up, so this login doesn't use Entware.  See: sh $H up" >&2
+            fi
+            ;;
+    esac
 fi
 # If the boot script didn't mount Entware at this boot, do it now (issue #2).
 # Where it lives comes first (ENTWARE_SRC above, then the boot script's),
@@ -4674,6 +4818,22 @@ install_boot_script() {
 # Mounts Entware at boot (webos-entware-installer)
 # Notes what happened in $BOOT_LOG, which 'ent doctor' shows.
 # Runs in the background so it never holds up the rest of the boot.
+# A TV with no /opt (webOS 4 to 6): this runs again in Entware's own root,
+# made by $ROOT_HELPER once Entware's folder is there
+if [ ! -d /opt ]; then
+    (
+        SRC=$BIND_SRC H=$ROOT_HELPER
+        n=0
+        while [ ! -x "\$SRC/bin/opkg" ] && [ \$n -lt 30 ]; do sleep 2; n=\$((n + 1)); done
+        if [ -f "\$H" ] && [ ! -L "\$H" ] && [ "\$(ls -ldn "\$H" | awk '{print substr(\$1, 6, 1) substr(\$1, 9, 1) " " \$3}')" = "-- 0" ]; then
+            echo "\$(date '+%H:%M:%S') setting up Entware's own root (this TV has no /opt)" >> $BOOT_LOG
+            sh "\$H" run sh $INIT_SCRIPT
+        else
+            echo "\$(date '+%H:%M:%S') gave up: this TV has no /opt, and \$H is missing or not root's alone" >> $BOOT_LOG
+        fi
+    ) < /dev/null > /dev/null 2>&1 &
+    exit 0
+fi
 (
     SRC=$BIND_SRC
     note() { echo "\$(date '+%H:%M:%S') \$1" >> $BOOT_LOG; }
@@ -5001,7 +5161,11 @@ uninstall_entware() {
     # Scratch files in /tmp (a running task's own folder is left for the app)
     rm -f /tmp/webos-entware-boot.log /tmp/webos-entware-app-update.sh
     [ "$SELF" = /tmp/webos-entware-uninstall.sh ] && rm -f "$SELF"
+    # A TV with no /opt: the helper for Entware's own root goes too.  The
+    # root itself is only in RAM, and goes when the TV restarts.
+    rm -rf "${ROOT_HELPER%/*}"
     success "Entware removed."
+    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && info "Entware's own root is only in the TV's memory, and goes when the TV restarts."
     info "Disconnect and SSH in again to get the stock shell back."
 }
 
@@ -5459,6 +5623,7 @@ show_status() {
     fi
 
     [ "$(id -u)" -eq 0 ] || note "Run as root for a full check."
+    [ -n "${WEBOS_ENTWARE_ROOT:-}" ] && note "This TV has no /opt, so Entware runs in a root of its own, in RAM. SSH logins and the TV app go in by themselves. For one command over SSH: sh $ROOT_HELPER run COMMAND"
     if hbc_present; then :
     elif is_ours "$HOME_DIR/.profile"; then
         note "Homebrew Channel isn't installed, so /opt is mounted when you log in over SSH, not at boot."

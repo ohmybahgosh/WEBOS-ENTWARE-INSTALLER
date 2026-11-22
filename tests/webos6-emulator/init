@@ -1,0 +1,36 @@
+#!/bin/busybox sh
+# Sets up the TV like webOS 6 does, then runs the test stage on the TV's
+# own system.  The data disk holds user data (/mnt/lg/user, also /var and
+# /home) and app storage, the way the TV's partitions are bound.
+/bin/busybox --install -s /bin
+export PATH=/bin
+mount -t proc proc /proc; mount -t sysfs sys /sys; mount -t devtmpfs dev /dev
+for m in $(cat /mods/order); do insmod "/mods/$m" 2>/dev/null; done
+sleep 1
+mount -t squashfs -o ro /dev/vda /newroot || { echo "SIM: no rootfs"; exec sh; }
+N=/newroot
+mount -t ext4 /dev/vdb $N/mnt/lg/user || { echo "SIM: no data disk"; exec sh; }
+U=$N/mnt/lg/user
+if [ ! -e $U/.prepared ]; then
+    # First boot: the TV's /var and /home, owned by root
+    cp -a $N/var $U/var; mkdir -p $U/home/root $U/appstore $U/var/lib/misc $U/var/lib/webosbrew/init.d
+    chown -R 0:0 $U; chmod 755 $U/appstore $U/home/root; touch $U/.prepared
+fi
+mount --bind $U/appstore $N/mnt/lg/appstore
+mount --bind $U/var $N/var
+mount --bind $U/home $N/home
+mount --bind $N/mnt/lg/appstore $N/media
+mount -t tmpfs tmpfs $N/tmp; mkdir -p $N/tmp/var/run/nyx $N/tmp/var/log $N/tmp/var/lib/dbus $N/tmp/usb/sda
+mount -t tmpfs -o mode=755 tmpfs $N/run
+echo '{"webos_release":"6.5.3","core_os_release":"6.5.3","device_name":"LM21A","firmware_version":"03.53.45"}' > $N/tmp/var/run/nyx/os_info.json
+# App sandboxes, as webOS mounts hundreds of
+for a in com.webos.app.one com.webos.app.two; do mkdir -p $N/var/palm/jail/$a; mount -t tmpfs tmpfs $N/var/palm/jail/$a; done
+# A USB drive
+mount -t tmpfs usb $N/tmp/usb/sda; echo hello > $N/tmp/usb/sda/file.txt
+# Network (QEMU's user networking)
+ip link set lo up; ip link set eth0 up; ip addr add 10.0.2.15/24 dev eth0; ip route add default via 10.0.2.2
+echo "nameserver 10.0.2.3" > $U/var/lib/misc/resolv.conf
+# Shared, as systemd makes it
+mount --make-rshared $N
+mount --move /dev $N/dev; mount --move /proc $N/proc; mount --move /sys $N/sys
+exec switch_root $N /bin/sh /mnt/lg/user/sim/stage.sh
