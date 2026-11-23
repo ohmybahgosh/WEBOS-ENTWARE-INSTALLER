@@ -12,6 +12,18 @@ I=$S/webos-entware-installer.sh
 H=/var/lib/webos-entware/webos-entware-root
 R=/tmp/.webos-entware-root
 stage=$(cat $S/stage 2>/dev/null || echo 1)
+# systemd doesn't run here, so a stand-in for the one systemctl call webOS's
+# login profile makes: it answers, unless it's in a chroot (as systemctl
+# does) and SYSTEMD_IGNORE_CHROOT isn't set
+cat > $S/systemctl << 'SYSTEMCTL'
+#!/bin/sh
+[ "$1" = show-environment ] || exit 1
+if [ "$(stat -c %d:%i /)" != "$(stat -c %d:%i /proc/1/root/.)" ] && [ -z "$SYSTEMD_IGNORE_CHROOT" ]; then
+    echo "Running in chroot, ignoring request: show-environment" >&2; exit 0
+fi
+echo "LANG=en_US.UTF-8"
+SYSTEMCTL
+chmod 755 $S/systemctl && mount --bind $S/systemctl /bin/systemctl
 say "stage $stage, $(cat /etc/starfish-release), kernel $(uname -r) $(uname -m)"
 check "this firmware has no /opt" '[ ! -e /opt ]'
 if [ "$stage" = 1 ]; then
@@ -43,6 +55,7 @@ if [ "$stage" = 2 ]; then
     printf 'echo "SHELL=$0 PATH=$PATH"; command -v opkg; htop --version; pwd; exit\n' | sh -l -i > $S/login.log 2>&1
     sed 's/^/  | /' $S/login.log
     check "an SSH login goes in, with bash and Entware on its PATH" 'grep -q "^/opt/bin/opkg" $S/login.log && grep -q "^htop" $S/login.log && grep -q "^/home/root$" $S/login.log'
+    check "and doesn't list every variable (webOS's profile in a chroot)" '! grep -q "^export " $S/login.log'
     sh $I status > $S/status.log 2>&1
     sed 's/\x1b\[[0-9;]*m//g' $S/status.log | sed 's/^/  | /' | tail -n 30
     check "doctor sees no problems, and says why it's in its own root" 'grep -q "Everything looks right\|No problems" $S/status.log; grep -q "no /opt" $S/status.log'

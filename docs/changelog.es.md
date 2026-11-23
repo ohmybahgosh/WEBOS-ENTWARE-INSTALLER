@@ -2,6 +2,12 @@
 
 Los cambios de WebOS Entware en español, para la pantalla Novedades de la aplicación.  Los títulos de sección (`### Added`, `### Changed`, `### Fixed`) quedan en inglés para que coincidan con el [CHANGELOG.md](../CHANGELOG.md) original, que tiene todas las versiones: la aplicación los traduce sola.
 
+## [2.17.2] - 2026-11-23
+
+### Fixed
+
+- **Los inicios de sesión por SSH en un televisor sin /opt ya no listan todas las variables** como líneas `export ...` ([#5](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5), gracias SiriosDev).  El propio perfil de inicio de sesión de webOS exporta lo que imprime `systemctl show-environment`, y en la raíz propia de Entware systemctl veía un chroot y no imprimía nada, así que el perfil ejecutaba un `export` vacío.  Ahora systemctl responde ahí igual que fuera, y solo ahí el perfil se salta una respuesta vacía.  Funciona tras el siguiente reinicio, o al momento tras una instalación nueva.
+
 ## [2.17.1] - 2026-11-22
 
 ### Fixed

@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.17.1"
+VERSION="2.17.2"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -165,6 +165,18 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 CHROOT=$(command -v chroot)
 umask 022
 
+# webOS's login profile exports what "systemctl show-environment" prints.
+# In here systemctl says it's in a chroot and prints nothing, and a bare
+# "export" then lists every variable at each SSH login (issue #5).  In here
+# only, the profile gets a copy that skips an empty one.
+# shellcheck disable=SC2016 # the profile's own text, not expanded here
+profile_fix() {
+    f=etc/profile.d/get-systemd-environments.sh
+    [ -f "/$f" ] && grep -q '^export \$SYSTEMD_ENV$' "/$f" || return 0
+    grep -qs " $R/$f " /proc/mounts && return 0
+    sed 's/^export \$SYSTEMD_ENV$/[ -z "$SYSTEMD_ENV" ] || export $SYSTEMD_ENV/' "/$f" > "$R/.webos-entware-systemd-env.sh" &&
+        mount --bind "$R/.webos-entware-systemd-env.sh" "$R/$f" && mount --make-private "$R/$f"
+}
 is_up() { [ -d "$R/opt" ] && [ -x "$R/bin/sh" ] && grep -qs "^[^ ]* $R tmpfs " /proc/mounts; }
 
 # One setup at a time (the boot script and a login can meet)
@@ -192,7 +204,7 @@ down() {
 up() {
     [ -d /opt ] && return 0
     [ "$(id -u)" = 0 ] || { echo "Entware's own root needs root." >&2; return 1; }
-    is_up && return 0
+    if is_up; then profile_fix; return 0; fi
     lock || { echo "Entware's own root is being set up by another process." >&2; return 1; }
     if is_up; then unlock; return 0; fi
     down
@@ -229,6 +241,7 @@ up() {
         esac
     done
     mkdir -m 755 "$R/opt"
+    profile_fix
     unlock
     is_up
 }
@@ -237,6 +250,8 @@ up() {
 enter() {
     d=$(pwd)
     WEBOS_ENTWARE_ROOT=1; export WEBOS_ENTWARE_ROOT
+    # So systemctl still answers in here, as it does outside
+    SYSTEMD_IGNORE_CHROOT=1; export SYSTEMD_IGNORE_CHROOT
     # with Entware's programs found first, as in a login
     case ":$CALLER_PATH:" in *:/opt/bin:*) PATH=$CALLER_PATH ;; *) PATH=/opt/bin:/opt/sbin:$CALLER_PATH ;; esac
     # shellcheck disable=SC2016 # for the shell in the root

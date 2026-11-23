@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.17.2] - 2026-11-23
+
+### Fixed
+
+- **SSH logins on a TV with no /opt no longer list every variable** as `export ...` lines ([#5](https://github.com/ohmybahgosh/WEBOS-ENTWARE-INSTALLER/issues/5), thanks SiriosDev).  webOS's own login profile exports whatever `systemctl show-environment` prints, and in Entware's own root systemctl saw a chroot and printed nothing, so the profile ran a bare `export`.  systemctl now answers there as it does outside, and in there only, the profile skips an empty answer.  It takes effect at the next restart, or right away after a fresh install.
+
 ## [2.17.1] - 2026-11-22
 
 ### Fixed
