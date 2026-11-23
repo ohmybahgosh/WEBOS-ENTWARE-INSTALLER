@@ -2,6 +2,12 @@
 
 Los cambios de WebOS Entware en español, para la pantalla Novedades de la aplicación.  Los títulos de sección (`### Added`, `### Changed`, `### Fixed`) quedan en inglés para que coincidan con el [CHANGELOG.md](../CHANGELOG.md) original, que tiene todas las versiones: la aplicación los traduce sola.
 
+## [2.17.3] - 2026-11-23
+
+### Fixed
+
+- **Quitar el servidor multimedia (DLNA), Transmission, Samba o File Browser ya no muestra errores de opkg** («Collected errors: file_sha256sum_alloc: Failed to open file /opt/etc/minidlna.conf» y «Not deleting modified conffile»).  El archivo de ajustes que escribió el instalador se borraba antes de que opkg quitara el paquete, y opkg comprueba ese archivo primero.  Ahora se borra justo después del paquete, y no se muestra el aviso de opkg de que lo conserva, ya que desaparece al momento.  Lo mismo vale para `ent remove`.
+
 ## [2.17.2] - 2026-11-23
 
 ### Fixed

@@ -2,6 +2,12 @@
 
 All notable changes to the WebOS Entware installer.  Versions follow [semantic versioning](https://semver.org/).
 
+## [2.17.3] - 2026-11-23
+
+### Fixed
+
+- **Removing Media server (DLNA), Transmission, Samba or File Browser no longer shows opkg errors** ("Collected errors: file_sha256sum_alloc: Failed to open file /opt/etc/minidlna.conf" and "Not deleting modified conffile").  The settings file the installer wrote was deleted before opkg removed the package, and opkg checks that file first.  Now it's removed right after the package, and opkg's note that it kept it isn't shown, since it's gone the next moment.  The same goes for `ent remove`.
+
 ## [2.17.2] - 2026-11-23
 
 ### Fixed

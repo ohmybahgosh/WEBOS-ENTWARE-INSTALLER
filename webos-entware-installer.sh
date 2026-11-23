@@ -9,7 +9,7 @@
 # Usage: sh webos-entware-installer.sh [install|uninstall|status|doctor] [options]
 #        Run with no arguments for the menu, or with --help for options.
 
-VERSION="2.17.2"
+VERSION="2.17.3"
 
 # === Color Codes ===
 RED='\033[0;31m'
@@ -3537,12 +3537,13 @@ addon_remove() {
     # Dependents first (git-http before git): opkg won't remove a package
     # another one still needs. No --autoremove, so shared libraries and
     # ca-bundle, which other packages may rely on, stay.
-    addon_service "$AD_ID" && remove_service "$AD_ID"
+    confs=""
+    addon_service "$AD_ID" && confs=$(service_confs "$AD_ID") && remove_service "$AD_ID"
     [ "$AD_ID" = find ] && [ "$(readlink /opt/bin/fd 2>/dev/null)" = /opt/usr/bin/fd ] && rm -f /opt/bin/fd
     rev=""
     for p in $AD_PKGS; do rev="$p $rev"; done
     # shellcheck disable=SC2086
-    /opt/bin/opkg remove $rev || error_exit "$AD_TITLE didn't uninstall cleanly. See: ent list"
+    remove_pkgs "$confs" $rev || error_exit "$AD_TITLE didn't uninstall cleanly. See: ent list"
     if [ "$AD_ID" = locate ]; then
         rm -f "$LOCATE_CRON" "$UPDATEDB_WRAPPER" "$LOCATE_DB" /opt/etc/updatedb.group
         if grep -qs "^#.*$MARKER" "$UPDATEDB_CONF"; then rm -f "$UPDATEDB_CONF"; fi
@@ -4184,26 +4185,53 @@ remove_service() {
         samba)
             svc_stop wsdd2
             svc_stop samba
-            grep -qs "$MARKER" "$SMB_CONF" && rm -f /opt/etc/samba/smb.conf
             rm -f /opt/etc/samba/smbpasswd /opt/etc/samba/users.map ;;
         filebrowser)
             svc_stop filebrowser
-            grep -qs "$MARKER" "$FB_CONF" && rm -f /opt/etc/filebrowser/filebrowser.conf
             rm -f /opt/etc/filebrowser/filebrowser.db ;;
         minidlna)
             svc_stop minidlna
-            grep -qs "$MARKER" "$DLNA_CONF" && rm -f /opt/etc/minidlna.conf
             rm -rf /opt/var/minidlna ;;
         transmission)
-            svc_stop transmission
-            # It holds the password
-            rm -f /opt/etc/transmission/settings.json ;;
+            svc_stop transmission ;;
         syncthing)
             svc_stop syncthing
             rm -f /opt/etc/init.d/S91webos-syncthing
             rm -rf /opt/etc/syncthing ;;
     esac
     case "$1" in [a-z]*) rm -f "/opt/etc/webos-entware/credentials/$1" ;; esac
+    return 0
+}
+
+# The service's settings files the installer wrote, which the package also
+# ships: removed after the package, so opkg finds them while it removes it
+# (it checks them first) and doesn't keep them as "modified"
+service_confs() {
+    case "$1" in
+        samba) grep -qs "$MARKER" "$SMB_CONF" && echo /opt/etc/samba/smb.conf ;;
+        filebrowser) grep -qs "$MARKER" "$FB_CONF" && echo /opt/etc/filebrowser/filebrowser.conf ;;
+        minidlna) grep -qs "$MARKER" "$DLNA_CONF" && echo /opt/etc/minidlna.conf ;;
+        # It holds the password
+        transmission) echo /opt/etc/transmission/settings.json ;;
+    esac
+    return 0
+}
+
+# opkg remove PACKAGES, then the settings files in $1 (from service_confs).
+# opkg keeps a settings file that isn't the package's own, and says so;
+# those the installer wrote go right after, so that line isn't shown.
+remove_pkgs() {
+    _confs=$1; shift
+    _out=$(opkg_x remove "$@" 2>&1); _rc=$?
+    printf '%s\n' "$_out" | while IFS= read -r l; do
+        case "$l" in "Not deleting modified conffile "*)
+            f=${l#Not deleting modified conffile }; f=${f%.}
+            printf '%s\n' "$_confs" | grep -qxF "$f" && continue ;;
+        esac
+        [ -n "$l" ] && printf '%s\n' "$l"
+    done
+    [ "$_rc" = 0 ] || return 1
+    for f in $_confs; do rm -f "$f"; done
     return 0
 }
 
@@ -4780,8 +4808,9 @@ pkg_remove() {
     confirm "Remove $PKG?" || { info "Kept $PKG."; return 0; }
     # A service stops first, and its setup goes with it
     a=$(pkg_addon "$PKG")
-    [ -n "$a" ] && addon_service "$a" && remove_service "$a"
-    /opt/bin/opkg remove "$PKG" || error_exit "$PKG didn't uninstall cleanly. See: ent list"
+    confs=""
+    [ -n "$a" ] && addon_service "$a" && confs=$(service_confs "$a") && remove_service "$a"
+    remove_pkgs "$confs" "$PKG" || error_exit "$PKG didn't uninstall cleanly. See: ent list"
     pkg_installed "$PKG" && error_exit "$PKG is still installed."
     success "Removed $PKG."
 }

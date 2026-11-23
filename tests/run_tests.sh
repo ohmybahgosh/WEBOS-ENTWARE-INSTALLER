@@ -202,12 +202,18 @@ T
             case "$p" in -*) continue ;; esac
             if [ "$p" = git ] && grep -qx git-http $DB; then echo "Package git is depended upon by git-http"; FAILED=1; continue; fi
             echo "$p" >> /tmp/opkg-removed.log
+            # Like the real opkg: a settings file the package ships is
+            # checked first (an error if it's gone), and kept if it changed
+            case "$p" in minidlna) cf=/opt/etc/minidlna.conf ;; transmission-daemon) cf=/opt/etc/transmission/settings.json ;; *) cf="" ;; esac
+            if [ -n "$cf" ] && [ ! -e "$cf" ]; then echo " * file_sha256sum_alloc: Failed to open file $cf: No such file or directory." >> /tmp/opkg-collected
+            elif [ -n "$cf" ]; then echo "Not deleting modified conffile $cf."; fi
             grep -vx "$p" $DB > $DB.new; mv $DB.new $DB
             rm -f /opt/lib/opkg/info/$p.control
             awk -v p="$p" 'BEGIN { RS = ""; ORS = "\n\n" } $2 != p' /opt/lib/opkg/status > /opt/lib/opkg/status.new && mv /opt/lib/opkg/status.new /opt/lib/opkg/status
             [ "$p" = mlocate ] && rm -f /opt/bin/updatedb /opt/bin/locate
             [ "$p" = ca-bundle ] && rm -f /opt/etc/ssl/certs/ca-certificates.crt
         done
+        if [ -s /tmp/opkg-collected ]; then { echo "Collected errors:"; cat /tmp/opkg-collected; } >&2; rm -f /tmp/opkg-collected; fi
         exit ${FAILED:-0} ;;
     list-installed) sed 's/$/ - 1/' $DB ;;
     search) for l in /opt/lib/opkg/info/*.list; do
@@ -1478,7 +1484,10 @@ run remove samba -y
 ok "remove samba stops it, deletes its settings and password, and keeps your files" '! pidof smbd > /dev/null && ! pidof wsdd2 > /dev/null && [ ! -e /opt/etc/samba/smb.conf ] && [ ! -e /opt/etc/samba/smbpasswd ] && [ ! -e /opt/etc/webos-entware/credentials/samba ] && [ -f /opt/files/Media/movie.mkv ] && grep -q "files in /opt/files are kept" "$W/out"'
 run remove transmission -y
 ok "remove transmission deletes its settings, which hold the password" '! pidof transmission-daemon > /dev/null && [ ! -e /opt/etc/transmission/settings.json ]'
-run remove syncthing -y; run remove minidlna -y; run remove filebrowser -y
+ok "without opkg errors about a missing or kept settings file" '! grep -q "file_sha256sum_alloc\|Collected errors\|Not deleting modified conffile" "$W/out"'
+run remove syncthing -y; run remove minidlna -y
+ok "remove minidlna too" '[ ! -e /opt/etc/minidlna.conf ] && ! grep -q "file_sha256sum_alloc\|Not deleting modified conffile" "$W/out" && grep -q "Removed Media server" "$W/out"'
+run remove filebrowser -y
 ok "remove syncthing, minidlna and filebrowser clean up too" '! pidof syncthing > /dev/null && ! pidof minidlnad > /dev/null && [ ! -e /opt/etc/init.d/S91webos-syncthing ] && [ ! -e /opt/etc/syncthing ] && [ ! -e /opt/etc/filebrowser/filebrowser.db ] && [ -z "$(ls /opt/etc/webos-entware/credentials)" ]'
 
 python3 -c "
