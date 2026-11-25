@@ -194,7 +194,7 @@ Tried it on a TV that isn't listed?  A [compatibility report](https://github.com
 
 ## Requirements
 
-- A **rooted** LG webOS TV with the **Homebrew Channel** installed. See [webosbrew.org/rooting](https://www.webosbrew.org/pages/rooting/) and check your firmware at [cani.rootmy.tv](https://cani.rootmy.tv).
+- A **rooted** LG webOS TV with the **Homebrew Channel** installed. See [webosbrew.org/rooting](https://www.webosbrew.org/pages/rooting/) and check your firmware at [cani.rootmy.tv](https://cani.rootmy.tv).  Works with Homebrew Channel 0.7.x and [0.8.0](https://github.com/webosbrew/webos-homebrew-channel/releases/tag/v0.8.0): the parts Entware uses (its root `exec` service, the boot scripts in `/var/lib/webosbrew/init.d`, and its SSH and telnet settings) are the same in both.
 - **SSH** turned on in Homebrew Channel settings, to install over SSH or use the bash shell.  The TV app doesn't need it.  Keeping **telnet** on too gives you a way back in if SSH ever breaks.
 - An **internet connection** on the TV.
 - About **50 MB** free space.
